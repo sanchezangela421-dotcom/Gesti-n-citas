@@ -15,34 +15,34 @@ import autoTable from "jspdf-autotable";
 import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
 import { AppShell } from "../../components/layout/AppShell";
-import { Btn, StatCard, Avatar, StatusBadge, Modal, inputCls } from "../../components/ui";
+import { Btn, StatCard, Avatar, StatusBadge, Modal, inputCls, EmptyState } from "../../components/ui";
 import { DEPT_CONFIG } from "../../../constants";
 import { PIE_COLORS } from "../../../data/mockData";
 import { useActionModal } from "../../hooks";
-import type { Appointment, Specialist } from "../../../types";
+import { useTheme } from "../../hooks/useTheme";
+import type { Appointment, Specialist, AppEvent, Resource } from "../../../types";
 
-// ─── Download chart via SVG serialisation (no html2canvas, no oklch issues) ───
+// ─── Download chart as styled card image ─────────────────────────────────────
+interface LegendItem { label: string; color: string; percent?: number; }
+
 async function downloadChartAsImage(
     ref: React.RefObject<HTMLDivElement | null>,
-    filename: string
+    filename: string,
+    chartTitle: string,
+    isDark: boolean,
+    legend?: LegendItem[]
 ) {
     if (!ref.current) { toast.error("No hay datos para esta gráfica"); return; }
-
     const svgEl = ref.current.querySelector("svg");
     if (!svgEl) { toast.error("No se encontró la gráfica"); return; }
 
     try {
-        // Clone and inline computed styles so colours render correctly
         const clone = svgEl.cloneNode(true) as SVGElement;
         clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-
-        // Replace any oklch colors with safe hex equivalents inside the clone
-        const allEls = clone.querySelectorAll("*");
-        allEls.forEach(el => {
-            const htmlEl = el as HTMLElement;
+        clone.querySelectorAll("*").forEach(el => {
             ["fill", "stroke", "color"].forEach(attr => {
-                const val = htmlEl.getAttribute(attr);
-                if (val && val.includes("oklch")) htmlEl.setAttribute(attr, "#64748b");
+                const val = (el as HTMLElement).getAttribute(attr);
+                if (val?.includes("oklch")) (el as HTMLElement).setAttribute(attr, "#64748b");
             });
         });
 
@@ -51,19 +51,120 @@ async function downloadChartAsImage(
         const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
         const url = URL.createObjectURL(blob);
 
-        // Draw SVG onto canvas then export PNG
         const img = new Image();
         img.onload = () => {
+            const scale = 2;
+            const pad = 32;
+            const titleH = 52;
+            const footerH = 36;
+            const chartW = svgEl.clientWidth;
+            const chartH = svgEl.clientHeight;
+
+            // Legend panel — measure actual label widths so nothing gets truncated
+            const legendGap = 24;
+            const sans = `-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+            let legendW = 0;
+            if (legend && legend.length > 0) {
+                const tmp = document.createElement("canvas").getContext("2d")!;
+                tmp.font = `500 12px ${sans}`;
+                const maxLabelPx = Math.max(...legend.map(l => tmp.measureText(l.label).width));
+                const percentW = legend.some(l => l.percent !== undefined) ? 52 : 0;
+                legendW = Math.ceil(maxLabelPx) + 20 + 8 + percentW + 8; // swatch+gap+label+gap+percent
+            }
+            const totalW = chartW + pad * 2 + (legendW > 0 ? legendGap + legendW : 0);
+            const totalH = chartH + pad * 2 + titleH + footerH;
+
             const canvas = document.createElement("canvas");
-            const scale = 2; // retina
-            canvas.width = svgEl.clientWidth * scale;
-            canvas.height = svgEl.clientHeight * scale;
+            canvas.width = totalW * scale;
+            canvas.height = totalH * scale;
             const ctx = canvas.getContext("2d")!;
-            ctx.fillStyle = "#ffffff";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.scale(scale, scale);
-            ctx.drawImage(img, 0, 0);
+
+            // ── Helpers ──
+            const bg       = isDark ? "#1e293b" : "#ffffff";
+            const borderC  = isDark ? "#334155" : "#e2e8f0";
+            const titleCol = isDark ? "#f1f5f9" : "#0f172a";
+            const subCol   = isDark ? "#94a3b8" : "#64748b";
+            const divCol   = isDark ? "#334155" : "#f1f5f9";
+            const footCol  = isDark ? "#475569" : "#94a3b8";
+
+            // ── Rounded card background ──
+            const r = 20;
+            ctx.beginPath();
+            ctx.moveTo(r, 0); ctx.lineTo(totalW - r, 0);
+            ctx.quadraticCurveTo(totalW, 0, totalW, r);
+            ctx.lineTo(totalW, totalH - r);
+            ctx.quadraticCurveTo(totalW, totalH, totalW - r, totalH);
+            ctx.lineTo(r, totalH);
+            ctx.quadraticCurveTo(0, totalH, 0, totalH - r);
+            ctx.lineTo(0, r);
+            ctx.quadraticCurveTo(0, 0, r, 0);
+            ctx.closePath();
+            ctx.fillStyle = bg; ctx.fill();
+            ctx.strokeStyle = borderC; ctx.lineWidth = 1; ctx.stroke();
+
+            // ── Title ──
+            ctx.fillStyle = titleCol;
+            ctx.font = `bold 17px ${sans}`;
+            ctx.fillText(chartTitle, pad, pad + 22);
+
+            // ── Divider ──
+            ctx.strokeStyle = divCol; ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(pad, pad + titleH - 8);
+            ctx.lineTo(totalW - pad, pad + titleH - 8);
+            ctx.stroke();
+
+            // ── Chart SVG ──
+            ctx.drawImage(img, pad, pad + titleH);
             URL.revokeObjectURL(url);
+
+            // ── Right-side legend ──
+            if (legend && legend.length > 0) {
+                const lx = pad + chartW + legendGap;
+                const itemH = 28;
+                const totalItemsH = legend.length * itemH;
+                const ly = pad + titleH + (chartH - totalItemsH) / 2;
+
+                // Vertical separator
+                ctx.strokeStyle = divCol; ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(lx - 12, pad + titleH + 8);
+                ctx.lineTo(lx - 12, pad + titleH + chartH - 8);
+                ctx.stroke();
+
+                legend.forEach((item, i) => {
+                    const y = ly + i * itemH;
+                    // Color swatch
+                    ctx.fillStyle = item.color;
+                    ctx.beginPath();
+                    ctx.roundRect(lx, y, 13, 13, 3);
+                    ctx.fill();
+
+                    // Full label (no truncation — canvas was sized to fit)
+                    ctx.font = `500 12px ${sans}`;
+                    ctx.fillStyle = titleCol;
+                    ctx.fillText(item.label, lx + 20, y + 11);
+
+                    // Percentage (right-aligned to legend panel edge)
+                    if (item.percent !== undefined) {
+                        ctx.font = `bold 12px ${sans}`;
+                        ctx.fillStyle = subCol;
+                        ctx.textAlign = "right";
+                        ctx.fillText(`${item.percent.toFixed(1)}%`, lx + legendW, y + 11);
+                        ctx.textAlign = "left";
+                    }
+                });
+            }
+
+            // ── Footer watermark ──
+            ctx.fillStyle = footCol;
+            ctx.font = `500 11px ${sans}`;
+            ctx.fillText("Sistema de Citas TECNL", pad, totalH - 12);
+            const dateStr = new Date().toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" });
+            ctx.textAlign = "right";
+            ctx.fillText(dateStr, totalW - pad, totalH - 12);
+            ctx.textAlign = "left";
 
             const link = document.createElement("a");
             link.download = `${filename.replace(/\s+/g, "_").toLowerCase()}.png`;
@@ -79,13 +180,13 @@ async function downloadChartAsImage(
 }
 
 // ─── PDF report (pure jsPDF + autoTable, no canvas capture) ──────────────────
-function generatePDFReport(deptReport: string, allAppts: Appointment[]) {
+function generatePDFReport(deptReport: string, allAppts: Appointment[], users: { id: string; carrera?: string; genero?: string; semestre?: number }[]) {
     const doc = new jsPDF();
     const today = new Date().toLocaleDateString("es-MX");
 
     const drawHeader = (title: string) => {
         doc.setFontSize(22); doc.setTextColor(30, 41, 59);
-        doc.text("Sistema de Gestión de Citas", 105, 15, { align: "center" });
+        doc.text("Synkros", 105, 15, { align: "center" });
         doc.setFontSize(14);
         doc.text(title, 105, 23, { align: "center" });
         doc.setFontSize(10); doc.setTextColor(100, 116, 139);
@@ -97,10 +198,20 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[]) {
     const getDeptStats = (list: Appointment[]) => {
         const motivosMap: Record<string, number> = {};
         const modalidadMap: Record<string, number> = { Presencial: 0, Virtual: 0 };
+        const carreraMap: Record<string, number> = {};
+        const generoMap: Record<string, number> = {};
+        const semestreMap: Record<string, number> = {};
         list.forEach(a => {
             const m = a.motivo || "Consulta General";
             motivosMap[m] = (motivosMap[m] || 0) + 1;
             if (a.modality === "Virtual") modalidadMap.Virtual++; else modalidadMap.Presencial++;
+            const student = users.find(u => u.id === a.studentId);
+            const c = student?.carrera || "No especificada";
+            carreraMap[c] = (carreraMap[c] || 0) + 1;
+            const g = student?.genero || "No especificado";
+            generoMap[g] = (generoMap[g] || 0) + 1;
+            const s = student?.semestre ? `Sem. ${student.semestre}` : "No esp.";
+            semestreMap[s] = (semestreMap[s] || 0) + 1;
         });
         return {
             total: list.length,
@@ -110,6 +221,13 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[]) {
             canceladas: list.filter(a => a.status === "Cancelada").length,
             topMotivos: Object.entries(motivosMap).sort(([, a], [, b]) => b - a).slice(0, 5),
             modalidad: Object.entries(modalidadMap),
+            topCarreras: Object.entries(carreraMap).sort(([, a], [, b]) => b - a).slice(0, 6),
+            genero: Object.entries(generoMap).sort(([, a], [, b]) => b - a),
+            semestre: Object.entries(semestreMap).sort(([a], [b]) => {
+                const na = parseInt(a.replace("Sem. ", "")) || 99;
+                const nb = parseInt(b.replace("Sem. ", "")) || 99;
+                return na - nb;
+            }),
         };
     };
 
@@ -153,6 +271,37 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[]) {
             theme: "striped",
             headStyles: { fillColor: [71, 85, 105] },
             margin: { left: 110, right: 20 },
+        });
+
+        const demoY = (doc as any).lastAutoTable.finalY + 15;
+        doc.setFontSize(12); doc.setTextColor(30, 41, 59);
+        doc.text("Perfil Demográfico de Alumnos Atendidos", 20, demoY);
+
+        autoTable(doc, {
+            startY: demoY + 5,
+            head: [["Carrera", "Citas"]],
+            body: stats.topCarreras,
+            theme: "striped",
+            headStyles: { fillColor: [109, 40, 217] },
+            margin: { left: 20, right: 105 },
+        });
+        autoTable(doc, {
+            startY: demoY + 5,
+            head: [["Género", "Citas"]],
+            body: stats.genero,
+            theme: "striped",
+            headStyles: { fillColor: [109, 40, 217] },
+            margin: { left: 110, right: 20 },
+        });
+
+        const semY = (doc as any).lastAutoTable.finalY + 10;
+        autoTable(doc, {
+            startY: semY,
+            head: [["Semestre", "Citas"]],
+            body: stats.semestre,
+            theme: "striped",
+            headStyles: { fillColor: [109, 40, 217] },
+            margin: { left: 20, right: 105 },
         });
 
         doc.setFontSize(10); doc.setTextColor(100, 116, 139);
@@ -200,9 +349,8 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[]) {
     const finalList = deptReport === "Reporte Global" ? allAppts : allAppts.filter(a => a.department === deptReport);
     autoTable(doc, {
         startY: 20,
-        head: [["Alumno", "Departamento", "Especialista", "Fecha", "Hora", "Estado", "Motivo", "Modalidad"]],
+        head: [["Departamento", "Especialista", "Fecha", "Hora", "Estado", "Motivo", "Modalidad"]],
         body: finalList.slice(0, 100).map(a => [
-            a.studentName,
             a.department,
             a.specialistName,
             new Date(a.date + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" }),
@@ -211,13 +359,12 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[]) {
             a.motivo || "—",
             a.modality || "—",
         ]),
-        styles: { fontSize: 7 },
-        headStyles: { fillColor: [30, 41, 59], fontSize: 7 },
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [30, 41, 59], fontSize: 8 },
         margin: { left: 10, right: 10 },
         columnStyles: {
-            0: { cellWidth: 30 },
-            2: { cellWidth: 30 },
-            6: { cellWidth: 35 },
+            1: { cellWidth: 35 },
+            5: { cellWidth: 45 },
         },
     });
     if (finalList.length > 100) {
@@ -231,11 +378,17 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[]) {
 
 // ─── Component ───────────────────────────────────────────
 export function AdminDashboard() {
+    const { dark } = useTheme();
+    const tooltipStyle = dark
+        ? { borderRadius: "12px", border: "1px solid #334155", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.4)", backgroundColor: "#1e293b", color: "#f1f5f9" }
+        : { borderRadius: "12px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" };
+    const cursorStyle = dark ? { fill: "rgba(255,255,255,0.04)" } : { fill: "#f8fafc" };
+
     const { user } = useAuth();
     const {
         getAppointments, updateAppointmentStatus, getStats,
         specialists, addSpecialist, updateSpecialist, removeSpecialist,
-        events, addEvent, deleteEvent, resources, addResource, deleteResource, users, deleteUser,
+        events, addEvent, updateEvent, deleteEvent, resources, addResource, updateResource, deleteResource, users, deleteUser,
     } = useStore();
 
     const [activeTab, setActiveTab] = useState("citas");
@@ -280,11 +433,69 @@ export function AdminDashboard() {
     const [cdept, setCdept] = useState("Psicología");
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
+    // Edit event modal
+    const [editingEvent, setEditingEvent] = useState<AppEvent | null>(null);
+    const [editEvTitle, setEditEvTitle] = useState("");
+    const [editEvDesc, setEditEvDesc] = useState("");
+    const [editEvDate, setEditEvDate] = useState("");
+    const [editEvTime, setEditEvTime] = useState("");
+    const [editEvType, setEditEvType] = useState("");
+    const [editEvDept, setEditEvDept] = useState("");
+    const [editEvRegUrl, setEditEvRegUrl] = useState("");
+    const [editEvImg, setEditEvImg] = useState<File | null>(null);
+
+    const openEditEvent = (ev: AppEvent) => {
+        setEditingEvent(ev);
+        setEditEvTitle(ev.title);
+        setEditEvDesc(ev.description);
+        setEditEvDate(ev.date);
+        setEditEvTime(ev.time);
+        setEditEvType(ev.type);
+        setEditEvDept(ev.department);
+        setEditEvRegUrl(ev.registrationUrl || "");
+        setEditEvImg(null);
+    };
+
+    const handleSaveEvent = async () => {
+        if (!editingEvent || !editEvTitle || !editEvDate) { toast.error("Título y fecha son obligatorios"); return; }
+        await updateEvent(editingEvent.id, {
+            title: editEvTitle, description: editEvDesc, department: editEvDept,
+            date: editEvDate, time: editEvTime, type: editEvType,
+            registrationUrl: editEvType === "taller" ? editEvRegUrl : undefined,
+        }, editEvImg || undefined);
+        toast.success("Evento actualizado");
+        setEditingEvent(null);
+    };
+
+    // Edit resource modal
+    const [editingResource, setEditingResource] = useState<Resource | null>(null);
+    const [editRTitle, setEditRTitle] = useState("");
+    const [editRDesc, setEditRDesc] = useState("");
+    const [editRUrl, setEditRUrl] = useState("");
+    const [editRFile, setEditRFile] = useState<File | null>(null);
+
+    const openEditResource = (r: Resource) => {
+        setEditingResource(r);
+        setEditRTitle(r.title);
+        setEditRDesc(r.description);
+        setEditRUrl(r.url === "#" ? "" : r.url);
+        setEditRFile(null);
+    };
+
+    const handleSaveResource = async () => {
+        if (!editingResource || !editRTitle) { toast.error("El título es obligatorio"); return; }
+        await updateResource(editingResource.id, {
+            title: editRTitle, description: editRDesc, url: editRUrl || "#",
+        }, editRFile || undefined);
+        toast.success("Recurso actualizado");
+        setEditingResource(null);
+    };
+
     // Chart refs (used for downloadChartAsImage)
-    const chartGlobal = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null) };
-    const chartPsicologia = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null) };
-    const chartTutorias = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null) };
-    const chartNutricion = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null) };
+    const chartGlobal = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null), genero: useRef<HTMLDivElement>(null), semestre: useRef<HTMLDivElement>(null) };
+    const chartPsicologia = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null), genero: useRef<HTMLDivElement>(null), semestre: useRef<HTMLDivElement>(null) };
+    const chartTutorias = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null), genero: useRef<HTMLDivElement>(null), semestre: useRef<HTMLDivElement>(null) };
+    const chartNutricion = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null), genero: useRef<HTMLDivElement>(null), semestre: useRef<HTMLDivElement>(null) };
 
     const deptRefs: Record<string, typeof chartGlobal> = {
         Global: chartGlobal,
@@ -319,6 +530,8 @@ export function AdminDashboard() {
             const motMap: Record<string, number> = {};
             const modMap: Record<string, number> = { Presencial: 0, Virtual: 0 };
             const carMap: Record<string, number> = {};
+            const genMap: Record<string, number> = {};
+            const semMap: Record<string, number> = {};
             dAppts.forEach(a => {
                 const m = a.motivo || "Consulta General";
                 motMap[m] = (motMap[m] || 0) + 1;
@@ -326,15 +539,46 @@ export function AdminDashboard() {
                 const student = users.find((u: any) => u.id === a.studentId);
                 const c = student?.carrera || "No especificada";
                 carMap[c] = (carMap[c] || 0) + 1;
+                const g = student?.genero || "No especificado";
+                genMap[g] = (genMap[g] || 0) + 1;
+                const s = student?.semestre ? `Sem. ${student.semestre}` : "No esp.";
+                semMap[s] = (semMap[s] || 0) + 1;
             });
             result[d] = {
                 monthly: Object.values(monMap),
                 motivos: Object.entries(motMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8),
                 modalidad: Object.entries(modMap).map(([name, value]) => ({ name, value })),
                 carrera: Object.entries(carMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8),
+                genero: Object.entries(genMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
+                semestre: Object.entries(semMap).map(([name, value]) => ({ name, value })).sort((a, b) => {
+                    const na = parseInt(a.name.replace("Sem. ", "")) || 99;
+                    const nb = parseInt(b.name.replace("Sem. ", "")) || 99;
+                    return na - nb;
+                }),
             };
         });
         return result;
+    }, [allAppts, users]);
+
+    // Demographic data for Global view (computed client-side)
+    const globalDemoData = useMemo(() => {
+        const genMap: Record<string, number> = {};
+        const semMap: Record<string, number> = {};
+        allAppts.forEach(a => {
+            const student = users.find((u: any) => u.id === a.studentId);
+            const g = student?.genero || "No especificado";
+            genMap[g] = (genMap[g] || 0) + 1;
+            const s = student?.semestre ? `Sem. ${student.semestre}` : "No esp.";
+            semMap[s] = (semMap[s] || 0) + 1;
+        });
+        return {
+            genero: Object.entries(genMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
+            semestre: Object.entries(semMap).map(([name, value]) => ({ name, value })).sort((a, b) => {
+                const na = parseInt(a.name.replace("Sem. ", "")) || 99;
+                const nb = parseInt(b.name.replace("Sem. ", "")) || 99;
+                return na - nb;
+            }),
+        };
     }, [allAppts, users]);
 
     const filteredAppts = allAppts.filter(a => {
@@ -430,7 +674,7 @@ export function AdminDashboard() {
                 {/* Dept cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     {Object.entries(DEPT_CONFIG).map(([name, cfg]) => (
-                        <div key={name} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex items-center justify-between hover:shadow-md hover:border-blue-200 transition-all">
+                        <div key={name} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm flex items-center justify-between hover:shadow-md hover:border-blue-200 dark:hover:border-blue-600 transition-all">
                             <div className="flex items-center gap-4">
                                 <div className={`w-12 h-12 ${cfg.bg} rounded-xl flex items-center justify-center`}>
                                     <cfg.icon className="w-5 h-5" style={{ color: cfg.color }} />
@@ -447,12 +691,12 @@ export function AdminDashboard() {
                     ))}
                 </div>
 
-                <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden min-h-[500px]">
+                <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden min-h-[500px]">
 
                     {/* ─── Citas Tab ─── */}
                     {activeTab === "citas" && (
                         <div className="flex flex-col h-full">
-                            <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+                            <div className="p-6 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-700/30 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
                                 <div>
                                     <h3 className="text-xl font-bold text-slate-900">Registro Global de Citas</h3>
                                     <p className="text-slate-500 font-medium text-sm mt-1">Busca y filtra citas de todos los departamentos</p>
@@ -462,13 +706,13 @@ export function AdminDashboard() {
                                         <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                                         <input type="text" placeholder="Buscar alumno o especialista..." value={searchTerm}
                                             onChange={e => setSearchTerm(e.target.value)}
-                                            className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600" />
+                                            className="w-full pl-9 pr-4 py-2 bg-white dark:bg-slate-700 dark:text-white dark:border-slate-600 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600" />
                                     </div>
                                     <div className="flex gap-2">
-                                        <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-600/20">
+                                        <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-sm font-medium text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600/20">
                                             <option>Todos</option><option>Psicología</option><option>Tutorías</option><option>Nutrición</option>
                                         </select>
-                                        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-600/20">
+                                        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-sm font-medium text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600/20">
                                             <option>Todos</option><option>Pendiente</option><option>Confirmada</option><option>Completada</option><option>Cancelada</option><option>Sin cerrar</option>
                                         </select>
                                     </div>
@@ -478,22 +722,22 @@ export function AdminDashboard() {
                             <div className="overflow-x-auto min-h-[300px]">
                                 <table className="w-full text-left border-collapse">
                                     <thead>
-                                        <tr className="border-b border-slate-200 bg-slate-50/50">
+                                        <tr className="border-b border-slate-200 bg-slate-50/50 dark:bg-slate-800/50 dark:border-slate-700">
                                             {["Alumno", "Departamento", "Especialista", "Fecha", "Hora", "Modalidad", "Estado"].map(h => (
                                                 <th key={h} className="px-6 py-4 text-slate-500 font-bold tracking-wider uppercase text-[0.65rem]">{h}</th>
                                             ))}
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-slate-100 bg-white">
+                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700 bg-white dark:bg-slate-900">
                                         {filteredAppts.map(cita => {
                                             const citaDate = new Date(cita.date + "T12:00:00");
                                             const isSinCerrar = (cita.status === "Pendiente" || cita.status === "Confirmada") && citaDate < todayMidnightAdmin;
                                             const isSesionTardia = cita.status === "Completada" && cita.updatedAt && cita.updatedAt.split("T")[0] > cita.date;
                                             return (
-                                            <tr key={cita.id} className={`hover:bg-slate-50/80 transition-colors ${isSinCerrar ? "bg-amber-50/40" : ""}`}>
+                                            <tr key={cita.id} className={`hover:bg-slate-50/80 dark:hover:bg-slate-700/40 transition-colors ${isSinCerrar ? "bg-amber-50/40 dark:bg-amber-900/20" : ""}`}>
                                                 <td className="px-6 py-4"><p className="text-slate-900 font-bold text-sm">{cita.studentName}</p></td>
                                                 <td className="px-6 py-4">
-                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 text-xs font-bold">{cita.department}</span>
+                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold">{cita.department}</span>
                                                 </td>
                                                 <td className="px-6 py-4"><p className="text-slate-700 font-medium text-sm">{cita.specialistName}</p></td>
                                                 <td className="px-6 py-4"><p className="text-slate-900 font-bold text-sm">{citaDate.toLocaleDateString("es-MX", { day: "numeric", month: "short" })}</p></td>
@@ -502,16 +746,8 @@ export function AdminDashboard() {
                                                 <td className="px-6 py-4">
                                                     <div className="flex items-center gap-1.5 flex-wrap">
                                                         <StatusBadge status={cita.status} />
-                                                        {isSinCerrar && (
-                                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.6rem] font-bold bg-amber-100 text-amber-700 border border-amber-200">
-                                                                Sin cerrar
-                                                            </span>
-                                                        )}
-                                                        {isSesionTardia && (
-                                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.6rem] font-bold bg-amber-100 text-amber-700 border border-amber-200">
-                                                                Sesión tardía
-                                                            </span>
-                                                        )}
+                                                        {isSinCerrar && <StatusBadge status="Sin cerrar" />}
+                                                        {isSesionTardia && <StatusBadge status="Sesión tardía" />}
                                                     </div>
                                                 </td>
                                             </tr>
@@ -520,11 +756,7 @@ export function AdminDashboard() {
                                     </tbody>
                                 </table>
                                 {filteredAppts.length === 0 && (
-                                    <div className="flex flex-col items-center justify-center py-16 text-center">
-                                        <CalendarCheck className="w-12 h-12 text-slate-300 mb-4" />
-                                        <h4 className="text-slate-900 font-bold mb-1">Sin resultados</h4>
-                                        <p className="text-slate-500 font-medium text-sm">No hay citas que coincidan con los filtros seleccionados.</p>
-                                    </div>
+                                    <EmptyState icon={CalendarCheck} title="Sin resultados" subtitle="No hay citas que coincidan con los filtros seleccionados." />
                                 )}
                             </div>
                         </div>
@@ -546,8 +778,8 @@ export function AdminDashboard() {
                                     {specialists.map((esp: Specialist) => {
                                         const conf = DEPT_CONFIG[esp.department];
                                         return (
-                                            <div key={esp.id} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm hover:shadow-md transition-shadow flex items-center gap-4 group">
-                                                <Avatar name={esp.name} />
+                                            <div key={esp.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow flex items-center gap-4 group">
+                                                <Avatar name={esp.name} avatarUrl={esp.avatarUrl} />
                                                 <div className="flex-1 min-w-0">
                                                     <p className="text-slate-900 font-bold truncate tracking-tight">{esp.name}</p>
                                                     <div className="flex flex-wrap items-center gap-2 mt-1">
@@ -583,28 +815,28 @@ export function AdminDashboard() {
                                     </h4>
                                     <div className="bg-slate-50 rounded-3xl border border-slate-200 p-6 shadow-sm space-y-5">
                                         <div>
-                                            <label className="block mb-2 text-slate-900 font-bold text-sm">Nombre completo <span className="text-rose-500">*</span></label>
+                                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Nombre completo <span className="text-rose-500">*</span></label>
                                             <input type="text" value={newName} onChange={e => setNewName(e.target.value)} placeholder="Ej. Dra. Ana López" className={inputCls} />
                                         </div>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                             <div>
-                                                <label className="block mb-2 text-slate-900 font-bold text-sm">Departamento</label>
+                                                <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Departamento</label>
                                                 <select value={newDept} onChange={e => setNewDept(e.target.value)} className={inputCls}>
                                                     <option>Psicología</option><option>Tutorías</option><option>Nutrición</option>
                                                 </select>
                                             </div>
                                             <div>
-                                                <label className="block mb-2 text-slate-900 font-bold text-sm">Correo institucional <span className="text-rose-500">*</span></label>
+                                                <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Correo institucional <span className="text-rose-500">*</span></label>
                                                 <input type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="correo@instituto.edu.mx" className={inputCls} />
                                             </div>
                                         </div>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                             <div>
-                                                <label className="block mb-2 text-slate-900 font-bold text-sm">Contraseña temporal</label>
+                                                <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Contraseña temporal</label>
                                                 <input type="text" value={newPass} onChange={e => setNewPass(e.target.value)} placeholder="Contraseña inicial" className={inputCls} />
                                             </div>
                                             <div>
-                                                <label className="block mb-2 text-slate-900 font-bold text-sm">Turno de Atención</label>
+                                                <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Turno de Atención</label>
                                                 <select value={newShift} onChange={e => setNewShift(e.target.value)} className={inputCls}>
                                                     <option value="Matutino">Turno Matutino</option>
                                                     <option value="Vespertino">Turno Vespertino</option>
@@ -612,7 +844,7 @@ export function AdminDashboard() {
                                             </div>
                                         </div>
                                         <div>
-                                            <label className="block mb-2 text-slate-900 font-bold text-sm">Horarios presenciales (opcional)</label>
+                                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Horarios presenciales (opcional)</label>
                                             <input type="text" value={newSched} onChange={e => setNewSched(e.target.value)} placeholder="Ej. Lun-Vie 09:00-14:00" className={inputCls} />
                                         </div>
                                         <Btn onClick={handleAddSpec} size="lg" className="w-full"><Plus className="w-5 h-5 mr-2" /> Registrar Especialista</Btn>
@@ -626,18 +858,18 @@ export function AdminDashboard() {
                     {activeTab === "estudiantes" && (
                         <div className="p-8">
                             <h3 className="text-2xl font-bold text-slate-900 mb-6">Alumnos Registrados</h3>
-                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden overflow-x-auto">
+                            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden overflow-x-auto">
                                 <table className="w-full min-w-[640px]">
                                     <thead>
-                                        <tr className="border-b border-slate-100 bg-slate-50/50">
+                                        <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-700/30">
                                             {["Alumno", "Carrera", "Semestre", "Matrícula", "Correo", "Acción"].map(h => (
                                                 <th key={h} className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">{h}</th>
                                             ))}
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-slate-50">
+                                    <tbody className="divide-y divide-slate-50 dark:divide-slate-700">
                                         {users.filter((u: any) => u.role === "alumno").map((u: any) => (
-                                            <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
+                                            <tr key={u.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/40 transition-colors">
                                                 <td className="px-6 py-4">
                                                     <div className="flex items-center gap-3">
                                                         <Avatar name={u.name} size="sm" />
@@ -664,16 +896,16 @@ export function AdminDashboard() {
 
                     {/* ─── Estadísticas Tab ─── */}
                     {activeTab === "estadisticas" && (
-                        <div className="p-8 bg-slate-50/50 min-h-full">
+                        <div className="p-8 bg-slate-50/50 dark:bg-slate-900/30 min-h-full">
                             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                                 <div>
-                                    <h3 className="text-2xl font-bold text-slate-900 tracking-tight">Análisis de Datos e Impacto</h3>
+                                    <h3 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Análisis de Datos e Impacto</h3>
                                     <p className="text-slate-500 font-medium">Visualiza y exporta las métricas de atención institucional</p>
                                 </div>
-                                <div className="flex bg-white rounded-xl p-1 border border-slate-200 shadow-sm">
+                                <div className="flex bg-white dark:bg-slate-800 rounded-xl p-1 border border-slate-200 dark:border-slate-700 shadow-sm">
                                     {["Global", "Psicología", "Tutorías", "Nutrición"].map(v => (
                                         <button key={v} onClick={() => setStatsView(v)}
-                                            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer ${statsView === v ? "bg-blue-600 text-white shadow-md shadow-blue-600/20" : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"}`}>
+                                            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer ${statsView === v ? "bg-blue-600 text-white shadow-md shadow-blue-600/20" : "text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-700"}`}>
                                             {v}
                                         </button>
                                     ))}
@@ -683,7 +915,7 @@ export function AdminDashboard() {
                             <div className="space-y-6">
                                 {(() => {
                                     const isGlobal = statsView === "Global";
-                                    const data = isGlobal ? charts : deptChartData[statsView];
+                                    const data = isGlobal ? { ...charts, ...globalDemoData } : deptChartData[statsView];
                                     const refs = deptRefs[statsView];
                                     if (!data || !refs) return null;
 
@@ -691,11 +923,11 @@ export function AdminDashboard() {
                                         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                                 {/* Monthly */}
-                                                <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                                                <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
                                                     <div className="flex items-center justify-between mb-6">
-                                                        <h4 className="text-slate-900 font-bold text-lg">Citas por Mes{isGlobal ? " y Departamento" : ""}</h4>
-                                                        <button onClick={() => downloadChartAsImage(refs.monthly, `Tendencias_${statsView}`)}
-                                                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all cursor-pointer" title="Descargar como imagen">
+                                                        <h4 className="text-slate-900 dark:text-white font-bold text-lg">Citas por Mes{isGlobal ? " y Departamento" : ""}</h4>
+                                                        <button onClick={() => downloadChartAsImage(refs.monthly, `Tendencias_${statsView}`, isGlobal ? "Citas por Mes y Departamento" : `Citas por Mes — ${statsView}`, dark, isGlobal ? [{ label: "Psicología", color: "#2563EB" }, { label: "Tutorías", color: "#16A34A" }, { label: "Nutrición", color: "#EA580C" }] : undefined)}
+                                                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all cursor-pointer" title="Descargar como imagen">
                                                             <Download className="w-5 h-5" />
                                                         </button>
                                                     </div>
@@ -705,7 +937,7 @@ export function AdminDashboard() {
                                                                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                                                                 <XAxis dataKey="month" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} dy={10} />
                                                                 <YAxis tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
-                                                                <Tooltip cursor={{ fill: "#f8fafc" }} contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} />
+                                                                <Tooltip cursor={cursorStyle} contentStyle={tooltipStyle} />
                                                                 {isGlobal ? (
                                                                     <>
                                                                         <Bar dataKey="Psicología" fill="#2563EB" radius={[4, 4, 0, 0]} maxBarSize={40} />
@@ -721,22 +953,21 @@ export function AdminDashboard() {
                                                 </div>
 
                                                 {/* Motivos */}
-                                                <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                                                <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
                                                     <div className="flex items-center justify-between mb-6">
-                                                        <h4 className="text-slate-900 font-bold text-lg">Motivos Frecuentes</h4>
-                                                        <button onClick={() => downloadChartAsImage(refs.motivos, `Motivos_${statsView}`)}
-                                                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all cursor-pointer" title="Descargar como imagen">
+                                                        <h4 className="text-slate-900 dark:text-white font-bold text-lg">Motivos Frecuentes</h4>
+                                                        <button onClick={() => { const tot = data.motivos.reduce((s: number, d: any) => s + d.value, 0); downloadChartAsImage(refs.motivos, `Motivos_${statsView}`, "Motivos Frecuentes", dark, data.motivos.map((d: any, i: number) => ({ label: d.name, color: PIE_COLORS[i % PIE_COLORS.length], percent: tot > 0 ? (d.value / tot) * 100 : 0 }))); }}
+                                                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all cursor-pointer" title="Descargar como imagen">
                                                             <Download className="w-5 h-5" />
                                                         </button>
                                                     </div>
                                                     <div ref={refs.motivos}>
                                                         <ResponsiveContainer width="100%" height={300}>
                                                             <PieChart>
-                                                                <Pie data={data.motivos} cx="50%" cy="50%" outerRadius={100} innerRadius={60} dataKey="value" stroke="none"
-                                                                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={{ stroke: "#cbd5e1" }}>
+                                                                <Pie data={data.motivos} cx="50%" cy="50%" outerRadius={100} innerRadius={60} dataKey="value" stroke="none">
                                                                     {data.motivos.map((_: any, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                                                                 </Pie>
-                                                                <Tooltip contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} />
+                                                                <Tooltip contentStyle={tooltipStyle} />
                                                             </PieChart>
                                                         </ResponsiveContainer>
                                                     </div>
@@ -745,33 +976,32 @@ export function AdminDashboard() {
 
                                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                                 {/* Modalidad */}
-                                                <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                                                <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
                                                     <div className="flex items-center justify-between mb-6">
-                                                        <h4 className="text-slate-900 font-bold text-lg">Modalidad de Atención</h4>
-                                                        <button onClick={() => downloadChartAsImage(refs.modalidad, `Modalidad_${statsView}`)}
-                                                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all cursor-pointer" title="Descargar como imagen">
+                                                        <h4 className="text-slate-900 dark:text-white font-bold text-lg">Modalidad de Atención</h4>
+                                                        <button onClick={() => { const tot = data.modalidad.reduce((s: number, d: any) => s + d.value, 0); downloadChartAsImage(refs.modalidad, `Modalidad_${statsView}`, "Modalidad de Atención", dark, data.modalidad.map((d: any, i: number) => ({ label: d.name, color: i === 0 ? "#3b82f6" : "#10b981", percent: tot > 0 ? (d.value / tot) * 100 : 0 }))); }}
+                                                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all cursor-pointer" title="Descargar como imagen">
                                                             <Download className="w-5 h-5" />
                                                         </button>
                                                     </div>
                                                     <div ref={refs.modalidad}>
                                                         <ResponsiveContainer width="100%" height={260}>
                                                             <PieChart>
-                                                                <Pie data={data.modalidad} cx="50%" cy="50%" innerRadius={70} outerRadius={100} dataKey="value" stroke="none"
-                                                                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
+                                                                <Pie data={data.modalidad} cx="50%" cy="50%" innerRadius={70} outerRadius={100} dataKey="value" stroke="none">
                                                                     <Cell fill="#3b82f6" /><Cell fill="#10b981" />
                                                                 </Pie>
-                                                                <Tooltip contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} />
+                                                                <Tooltip contentStyle={tooltipStyle} />
                                                             </PieChart>
                                                         </ResponsiveContainer>
                                                     </div>
                                                 </div>
 
                                                 {/* Por Carrera */}
-                                                <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                                                <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
                                                     <div className="flex items-center justify-between mb-6">
-                                                        <h4 className="text-slate-900 font-bold text-lg">Distribución por Carrera</h4>
-                                                        <button onClick={() => downloadChartAsImage(refs.carrera, `Carreras_${statsView}`)}
-                                                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all cursor-pointer" title="Descargar como imagen">
+                                                        <h4 className="text-slate-900 dark:text-white font-bold text-lg">Distribución por Carrera</h4>
+                                                        <button onClick={() => downloadChartAsImage(refs.carrera, `Carreras_${statsView}`, "Distribución por Carrera", dark)}
+                                                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all cursor-pointer" title="Descargar como imagen">
                                                             <Download className="w-5 h-5" />
                                                         </button>
                                                     </div>
@@ -781,8 +1011,53 @@ export function AdminDashboard() {
                                                                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
                                                                 <XAxis type="number" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
                                                                 <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: "#475569", fontWeight: 500 }} axisLine={false} tickLine={false} width={100} interval={0} />
-                                                                <Tooltip cursor={{ fill: "#f8fafc" }} contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }} />
+                                                                <Tooltip cursor={cursorStyle} contentStyle={tooltipStyle} />
                                                                 <Bar dataKey="value" fill="#8b5cf6" radius={[0, 4, 4, 0]} maxBarSize={24} />
+                                                            </BarChart>
+                                                        </ResponsiveContainer>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                                {/* Por Género */}
+                                                <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+                                                    <div className="flex items-center justify-between mb-6">
+                                                        <h4 className="text-slate-900 dark:text-white font-bold text-lg">Distribución por Género</h4>
+                                                        <button onClick={() => { const gd = data.genero ?? []; const tot = gd.reduce((s: number, d: any) => s + d.value, 0); downloadChartAsImage(refs.genero, `Genero_${statsView}`, "Distribución por Género", dark, gd.map((d: any, i: number) => ({ label: d.name, color: PIE_COLORS[i % PIE_COLORS.length], percent: tot > 0 ? (d.value / tot) * 100 : 0 }))); }}
+                                                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all cursor-pointer" title="Descargar como imagen">
+                                                            <Download className="w-5 h-5" />
+                                                        </button>
+                                                    </div>
+                                                    <div ref={refs.genero}>
+                                                        <ResponsiveContainer width="100%" height={260}>
+                                                            <PieChart>
+                                                                <Pie data={data.genero ?? []} cx="50%" cy="50%" innerRadius={70} outerRadius={100} dataKey="value" stroke="none">
+                                                                    {(data.genero ?? []).map((_: any, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                                                                </Pie>
+                                                                <Tooltip contentStyle={tooltipStyle} />
+                                                            </PieChart>
+                                                        </ResponsiveContainer>
+                                                    </div>
+                                                </div>
+
+                                                {/* Por Semestre */}
+                                                <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+                                                    <div className="flex items-center justify-between mb-6">
+                                                        <h4 className="text-slate-900 dark:text-white font-bold text-lg">Distribución por Semestre</h4>
+                                                        <button onClick={() => downloadChartAsImage(refs.semestre, `Semestre_${statsView}`, "Distribución por Semestre", dark)}
+                                                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all cursor-pointer" title="Descargar como imagen">
+                                                            <Download className="w-5 h-5" />
+                                                        </button>
+                                                    </div>
+                                                    <div ref={refs.semestre}>
+                                                        <ResponsiveContainer width="100%" height={260}>
+                                                            <BarChart data={data.semestre ?? []} margin={{ top: 10, right: 10, left: -20, bottom: 10 }}>
+                                                                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                                                                <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                                                                <YAxis tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                                                                <Tooltip cursor={cursorStyle} contentStyle={tooltipStyle} />
+                                                                <Bar dataKey="value" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={40} />
                                                             </BarChart>
                                                         </ResponsiveContainer>
                                                     </div>
@@ -802,7 +1077,7 @@ export function AdminDashboard() {
                                 <div className="w-16 h-16 bg-violet-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
                                     <FileText className="w-8 h-8 text-violet-600" />
                                 </div>
-                                <h3 className="text-3xl font-bold text-slate-900 mb-3 tracking-tight">Generación de Reportes</h3>
+                                <h3 className="text-3xl font-bold text-slate-900 dark:text-white mb-3 tracking-tight">Generación de Reportes</h3>
                                 <p className="text-slate-500 text-lg">Exporta los datos en formato PDF segmentados por departamento o genera un reporte global.</p>
                             </div>
 
@@ -813,13 +1088,13 @@ export function AdminDashboard() {
                                     { label: "Nutrición", icon: Apple, color: "rose", gradient: "from-rose-500 to-orange-500" },
                                     { label: "Reporte Global", icon: FileText, color: "violet", gradient: "from-violet-600 to-purple-700" },
                                 ].map(r => (
-                                    <div key={r.label} className="bg-white border border-slate-200 rounded-3xl p-6 text-center hover:shadow-xl transition-all flex flex-col h-full">
+                                    <div key={r.label} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 text-center hover:shadow-xl transition-all flex flex-col h-full">
                                         <div className={`w-16 h-16 bg-gradient-to-br ${r.gradient} rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg`}>
                                             <r.icon className="w-8 h-8 text-white" />
                                         </div>
-                                        <h4 className="text-slate-900 font-bold text-lg mb-2">{r.label}</h4>
+                                        <h4 className="text-slate-900 dark:text-white font-bold text-lg mb-2">{r.label}</h4>
                                         <p className="text-slate-500 text-xs font-medium mb-6 flex-1">Datos consolidados, demografía y efectividad.</p>
-                                        <Btn onClick={() => generatePDFReport(r.label, allAppts)} variant="outline" className="w-full">
+                                        <Btn onClick={() => generatePDFReport(r.label, allAppts, users)} variant="outline" className="w-full">
                                             <Download className="w-4 h-4 mr-2" /> PDF Export
                                         </Btn>
                                     </div>
@@ -834,18 +1109,18 @@ export function AdminDashboard() {
                             <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
                             {/* ── Form ── */}
                             <div>
-                            <h3 className="text-2xl font-bold text-slate-900 mb-2">Publicar Material Educativo</h3>
+                            <h3 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Publicar Material Educativo</h3>
                             <p className="text-slate-500 font-medium mb-6">Como administrador, puedes publicar recursos para cualquier departamento.</p>
-                            <div className="space-y-5 bg-slate-50 border border-slate-200 rounded-3xl p-6 shadow-sm">
+                            <div className="space-y-5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 shadow-sm">
 
                                 {/* Title + dept */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">Título del material <span className="text-rose-500">*</span></label>
+                                        <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Título del material <span className="text-rose-500">*</span></label>
                                         <input type="text" value={ctitle} onChange={e => setCtitle(e.target.value)} placeholder="Ej. Guía para el manejo de ansiedad" className={inputCls} />
                                     </div>
                                     <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">Departamento</label>
+                                        <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Departamento</label>
                                         <select value={cdept} onChange={e => setCdept(e.target.value)} className={inputCls}>
                                             <option>Psicología</option><option>Tutorías</option><option>Nutrición</option>
                                         </select>
@@ -853,13 +1128,13 @@ export function AdminDashboard() {
                                 </div>
 
                                 <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Descripción breve</label>
+                                    <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Descripción breve</label>
                                     <textarea value={cdesc} onChange={e => setCdesc(e.target.value)} placeholder="Explica brevemente de qué trata..." className={`${inputCls} resize-none`} rows={2} />
                                 </div>
 
                                 {/* Type selector */}
                                 <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Tipo de recurso</label>
+                                    <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Tipo de recurso</label>
                                     <div className="grid grid-cols-3 gap-3">
                                         {[
                                             { key: "video", label: "Video", icon: Video, color: "rose" },
@@ -867,7 +1142,7 @@ export function AdminDashboard() {
                                             { key: "link", label: "Enlace", icon: ExternalLink, color: "blue" },
                                         ].map(t => (
                                             <button key={t.key} onClick={() => { setCtype(t.key); setCurl(""); setSelectedFile(null); }}
-                                                className={`flex flex-col items-center gap-2 p-4 border-2 rounded-2xl cursor-pointer transition-all ${ctype === t.key ? `border-${t.color}-500 bg-${t.color}-50 shadow-sm` : "border-slate-200 bg-white hover:border-slate-300"}`}>
+                                                className={`flex flex-col items-center gap-2 p-4 border-2 rounded-2xl cursor-pointer transition-all ${ctype === t.key ? `border-${t.color}-500 bg-${t.color}-50 shadow-sm` : "border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700/50 hover:border-slate-300"}`}>
                                                 <t.icon className={`w-6 h-6 ${ctype === t.key ? `text-${t.color}-600` : "text-slate-400"}`} />
                                                 <span className={`text-xs font-bold ${ctype === t.key ? `text-${t.color}-700` : "text-slate-500"}`}>{t.label}</span>
                                             </button>
@@ -878,10 +1153,10 @@ export function AdminDashboard() {
                                 {/* Image: file upload */}
                                 {ctype === "image" && (
                                     <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">
+                                        <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">
                                             Imagen / Infografía <span className="text-rose-500">*</span>
                                         </label>
-                                        <div className="relative flex items-center gap-4 p-4 bg-white border-2 border-dashed border-emerald-200 rounded-2xl hover:border-emerald-400 transition-colors cursor-pointer">
+                                        <div className="relative flex items-center gap-4 p-4 bg-white dark:bg-slate-700/30 border-2 border-dashed border-emerald-200 dark:border-emerald-800 rounded-2xl hover:border-emerald-400 transition-colors cursor-pointer">
                                             <input type="file" accept="image/*" onChange={e => setSelectedFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
                                             {selectedFile ? (
                                                 <>
@@ -910,15 +1185,15 @@ export function AdminDashboard() {
                                 {ctype === "video" && (
                                     <div className="space-y-4">
                                         <div>
-                                            <label className="block mb-2 text-slate-900 font-bold text-sm">
+                                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">
                                                 URL del video <span className="text-rose-500">*</span>
                                                 <span className="text-slate-400 font-normal ml-2 text-xs">(YouTube, Vimeo, etc.)</span>
                                             </label>
                                             <input type="url" value={curl} onChange={e => setCurl(e.target.value)} placeholder="https://youtube.com/watch?v=..." className={inputCls} />
                                         </div>
                                         <div>
-                                            <label className="block mb-2 text-slate-900 font-bold text-sm">Archivo adjunto (opcional)</label>
-                                            <div className="relative flex items-center gap-3 p-4 bg-white border border-slate-200 rounded-xl hover:border-rose-300 transition-colors cursor-pointer">
+                                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Archivo adjunto (opcional)</label>
+                                            <div className="relative flex items-center gap-3 p-4 bg-white dark:bg-slate-700/30 border border-slate-200 dark:border-slate-600 rounded-xl hover:border-rose-300 transition-colors cursor-pointer">
                                                 <input type="file" onChange={e => setSelectedFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
                                                 <Plus className="w-5 h-5 text-slate-400" />
                                                 <div>
@@ -933,7 +1208,7 @@ export function AdminDashboard() {
                                 {/* Link: URL only */}
                                 {ctype === "link" && (
                                     <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">
+                                        <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">
                                             URL del enlace <span className="text-rose-500">*</span>
                                         </label>
                                         <input type="url" value={curl} onChange={e => setCurl(e.target.value)} placeholder="https://..." className={inputCls} />
@@ -946,25 +1221,25 @@ export function AdminDashboard() {
 
                             {/* ── Resource list by dept ── */}
                             <div>
-                                <h3 className="text-xl font-bold text-slate-900 mb-4">Material publicado</h3>
+                                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-4">Material publicado</h3>
                                 {/* Dept tabs */}
                                 <div className="flex gap-2 mb-4 flex-wrap">
                                     {["Psicología", "Tutorías", "Nutrición"].map(d => (
                                         <button key={d} onClick={() => setContentDeptTab(d)}
-                                            className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-all cursor-pointer ${contentDeptTab === d ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:border-blue-400"}`}>
+                                            className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-all cursor-pointer ${contentDeptTab === d ? "bg-blue-600 text-white border-blue-600" : "bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:border-blue-400"}`}>
                                             {d}
                                         </button>
                                     ))}
                                 </div>
                                 <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
                                     {resources.filter(r => r.department === contentDeptTab).length === 0 ? (
-                                        <div className="text-center py-12 text-slate-400 border-2 border-dashed border-slate-100 rounded-2xl">
+                                        <div className="text-center py-12 text-slate-400 border-2 border-dashed border-slate-100 dark:border-slate-700 rounded-2xl">
                                             <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
                                             <p className="text-sm font-medium">Sin material publicado en {contentDeptTab}</p>
                                         </div>
                                     ) : (
                                         resources.filter(r => r.department === contentDeptTab).map(r => (
-                                            <div key={r.id} className="flex items-start gap-3 p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow group">
+                                            <div key={r.id} className="flex items-start gap-3 p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm hover:shadow-md transition-shadow group">
                                                 <div className={`p-2 rounded-lg shrink-0 ${r.type === "video" ? "bg-rose-50" : r.type === "link" ? "bg-blue-50" : "bg-emerald-50"}`}>
                                                     {r.type === "video" && <Video className="w-4 h-4 text-rose-500" />}
                                                     {r.type === "link" && <ExternalLink className="w-4 h-4 text-blue-500" />}
@@ -975,10 +1250,16 @@ export function AdminDashboard() {
                                                     {r.description && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{r.description}</p>}
                                                     <span className="text-[0.65rem] uppercase tracking-wider font-bold text-slate-400">{r.type}</span>
                                                 </div>
-                                                <button onClick={() => deleteResource(r.id)} title="Eliminar"
-                                                    className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all cursor-pointer shrink-0">
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
+                                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 shrink-0 transition-all">
+                                                    <button onClick={() => openEditResource(r)} title="Editar"
+                                                        className="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all cursor-pointer">
+                                                        <Pencil className="w-4 h-4" />
+                                                    </button>
+                                                    <button onClick={() => deleteResource(r.id)} title="Eliminar"
+                                                        className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all cursor-pointer">
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
                                             </div>
                                         ))
                                     )}
@@ -994,47 +1275,47 @@ export function AdminDashboard() {
                         <div className="p-8">
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                 <div>
-                                    <h3 className="text-2xl font-bold text-slate-900 mb-2">Difusión Institucional</h3>
+                                    <h3 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Difusión Institucional</h3>
                                     <p className="text-slate-500 font-medium mb-8">Publica eventos, conferencias y talleres. Aparecerán en el carrusel principal de todos los estudiantes.</p>
-                                    <div className="bg-slate-50 border border-slate-200 rounded-3xl p-6 shadow-sm space-y-5">
+                                    <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 shadow-sm space-y-5">
                                         <div>
-                                            <label className="block mb-2 text-slate-900 font-bold text-sm">Formato del evento</label>
+                                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Formato del evento</label>
                                             <div className="grid grid-cols-2 gap-3">
                                                 {["taller", "conferencia"].map(t => (
                                                     <button key={t} onClick={() => setEvType(t)}
-                                                        className={`py-3 rounded-xl border-2 cursor-pointer capitalize font-bold text-sm transition-all ${evType === t ? "border-violet-600 bg-violet-50 text-violet-700 shadow-sm" : "border-slate-200 bg-white text-slate-500"}`}>
+                                                        className={`py-3 rounded-xl border-2 cursor-pointer capitalize font-bold text-sm transition-all ${evType === t ? "border-violet-600 bg-violet-50 text-violet-700 shadow-sm" : "border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700/50 text-slate-500 dark:text-slate-400"}`}>
                                                         {t}
                                                     </button>
                                                 ))}
                                             </div>
                                         </div>
                                         <div>
-                                            <label className="block mb-2 text-slate-900 font-bold text-sm">Título del evento <span className="text-rose-500">*</span></label>
+                                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Título del evento <span className="text-rose-500">*</span></label>
                                             <input type="text" value={evTitle} onChange={e => setEvTitle(e.target.value)} placeholder="Ej. Taller de Organización de Tiempo" className={inputCls} />
                                         </div>
                                         <div>
-                                            <label className="block mb-2 text-slate-900 font-bold text-sm">Descripción global</label>
+                                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Descripción global</label>
                                             <textarea value={evDesc} onChange={e => setEvDesc(e.target.value)} placeholder="¿De qué trata este evento?..." className={`${inputCls} resize-none`} rows={3} />
                                         </div>
                                         <div>
-                                            <label className="block mb-2 text-slate-900 font-bold text-sm">Departamento organizador</label>
+                                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Departamento organizador</label>
                                             <select value={evDept} onChange={e => setEvDept(e.target.value)} className={inputCls}>
                                                 <option>Psicología</option><option>Tutorías</option><option>Nutrición</option><option value="General">General (Todas las áreas)</option>
                                             </select>
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
-                                                <label className="block mb-2 text-slate-900 font-bold text-sm">Fecha programada <span className="text-rose-500">*</span></label>
+                                                <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Fecha programada <span className="text-rose-500">*</span></label>
                                                 <input type="date" value={evDate} onChange={e => setEvDate(e.target.value)} className={inputCls} />
                                             </div>
                                             <div>
-                                                <label className="block mb-2 text-slate-900 font-bold text-sm">Hora de inicio</label>
+                                                <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Hora de inicio</label>
                                                 <input type="time" value={evTime} onChange={e => setEvTime(e.target.value)} className={inputCls} />
                                             </div>
                                         </div>
                                         <div>
-                                            <label className="block mb-2 text-slate-900 font-bold text-sm">Imagen de Portada <span className="text-rose-500">*</span></label>
-                                            <div className="relative flex items-center gap-4 p-5 bg-white border border-slate-200 rounded-2xl hover:border-violet-400 transition-colors cursor-pointer">
+                                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Imagen de Portada <span className="text-rose-500">*</span></label>
+                                            <div className="relative flex items-center gap-4 p-5 bg-white dark:bg-slate-700/30 border border-slate-200 dark:border-slate-600 rounded-2xl hover:border-violet-400 transition-colors cursor-pointer">
                                                 <input type="file" accept="image/*" onChange={e => setSelectedEventImg(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
                                                 <div className="w-20 h-20 rounded-xl bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-100">
                                                     {selectedEventImg
@@ -1050,7 +1331,7 @@ export function AdminDashboard() {
                                         </div>
                                         {evType === "taller" && (
                                             <div>
-                                                <label className="block mb-2 text-slate-900 font-bold text-sm">Enlace de Registro (Google Forms) <span className="text-rose-500">*</span></label>
+                                                <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Enlace de Registro (Google Forms) <span className="text-rose-500">*</span></label>
                                                 <input type="url" value={evRegUrl} onChange={e => setEvRegUrl(e.target.value)} placeholder="https://forms.gle/..." className={inputCls} />
                                             </div>
                                         )}
@@ -1062,7 +1343,7 @@ export function AdminDashboard() {
 
                                 {/* Active events list */}
                                 <div>
-                                    <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
+                                    <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                                         <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center"><CheckCircle2 className="w-4 h-4 text-emerald-600" /></div>
                                         Eventos Activos ({events.length})
                                     </h3>
@@ -1070,14 +1351,14 @@ export function AdminDashboard() {
                                     <div className="flex gap-2 mb-4 flex-wrap">
                                         {["Todos", "Psicología", "Tutorías", "Nutrición", "General"].map(d => (
                                             <button key={d} onClick={() => setEventsDeptTab(d)}
-                                                className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all cursor-pointer ${eventsDeptTab === d ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-400"}`}>
+                                                className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all cursor-pointer ${eventsDeptTab === d ? "bg-violet-600 text-white border-violet-600" : "bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:border-violet-400"}`}>
                                                 {d}
                                             </button>
                                         ))}
                                     </div>
                                     <div className="space-y-4 max-h-[620px] overflow-y-auto pr-2">
                                         {events.filter(ev => eventsDeptTab === "Todos" || ev.department === eventsDeptTab).map((ev: any) => (
-                                            <div key={ev.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group">
+                                            <div key={ev.id} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group">
                                                 {ev.imageUrl && (
                                                     <div className="h-32 bg-slate-100 overflow-hidden relative">
                                                         <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent z-10" />
@@ -1089,16 +1370,22 @@ export function AdminDashboard() {
                                                             </span>
                                                             <span className="px-2 py-0.5 rounded-md font-bold text-[0.65rem] uppercase tracking-wider bg-black/40 text-white backdrop-blur-md">{ev.department}</span>
                                                         </div>
-                                                        {/* Delete button overlaid on image */}
-                                                        <button onClick={() => deleteEvent(ev.id)} title="Eliminar evento"
-                                                            className="absolute top-2 right-2 z-30 opacity-0 group-hover:opacity-100 p-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-all cursor-pointer shadow">
-                                                            <Trash2 className="w-3.5 h-3.5" />
-                                                        </button>
+                                                        {/* Edit/Delete buttons overlaid on image */}
+                                                        <div className="absolute top-2 right-2 z-30 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                                            <button onClick={() => openEditEvent(ev)} title="Editar evento"
+                                                                className="p-1.5 bg-white/90 hover:bg-white text-blue-600 rounded-lg cursor-pointer shadow">
+                                                                <Pencil className="w-3.5 h-3.5" />
+                                                            </button>
+                                                            <button onClick={() => deleteEvent(ev.id)} title="Eliminar evento"
+                                                                className="p-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg cursor-pointer shadow">
+                                                                <Trash2 className="w-3.5 h-3.5" />
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 )}
                                                 <div className="p-4 flex items-start justify-between gap-2">
                                                     <div>
-                                                        <p className="text-slate-900 font-bold text-base leading-tight">{ev.title}</p>
+                                                        <p className="text-slate-900 dark:text-white font-bold text-base leading-tight">{ev.title}</p>
                                                         <p className="text-slate-500 text-xs mt-2 font-medium flex items-center gap-1">
                                                             <CalendarDays className="w-3.5 h-3.5" />
                                                             {new Date(ev.date + "T12:00:00").toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" })}
@@ -1106,10 +1393,16 @@ export function AdminDashboard() {
                                                         </p>
                                                     </div>
                                                     {!ev.imageUrl && (
-                                                        <button onClick={() => deleteEvent(ev.id)} title="Eliminar evento"
-                                                            className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all cursor-pointer shrink-0">
-                                                            <Trash2 className="w-4 h-4" />
-                                                        </button>
+                                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 shrink-0 transition-all">
+                                                            <button onClick={() => openEditEvent(ev)} title="Editar evento"
+                                                                className="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all cursor-pointer">
+                                                                <Pencil className="w-4 h-4" />
+                                                            </button>
+                                                            <button onClick={() => deleteEvent(ev.id)} title="Eliminar evento"
+                                                                className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all cursor-pointer">
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </button>
+                                                        </div>
                                                     )}
                                                 </div>
                                             </div>
@@ -1129,10 +1422,10 @@ export function AdminDashboard() {
                     maxWidth="max-w-md">
                     <div className="space-y-5">
                         <div>
-                            <label className="block mb-2 text-slate-900 font-bold text-sm">Observaciones (opcional)</label>
+                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Observaciones (opcional)</label>
                             <textarea value={action.notes} onChange={e => action.setNotes(e.target.value)}
                                 placeholder="Agregar comentario..." rows={3}
-                                className="w-full px-4 py-3 rounded-xl border border-slate-200 resize-none focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600 transition-colors text-slate-700 bg-slate-50/50 text-sm" />
+                                className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 resize-none focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600 transition-colors text-slate-700 dark:text-slate-200 bg-slate-50/50 dark:bg-slate-700/50 text-sm" />
                         </div>
                         <div className="flex gap-3">
                             <Btn variant="outline" onClick={action.close} className="flex-1">Cancelar Operación</Btn>
@@ -1188,6 +1481,92 @@ export function AdminDashboard() {
                         <div className="pt-4 flex gap-3">
                             <Btn variant="ghost" onClick={() => setEditingSpec(null)} className="flex-1">Cancelar</Btn>
                             <Btn onClick={handleUpdateSpec} className="flex-1 bg-blue-600 shadow-blue-600/20">Guardar Cambios</Btn>
+                        </div>
+                    </div>
+                </Modal>
+
+                {/* ─── Edit Event Modal ─── */}
+                <Modal open={!!editingEvent} onClose={() => setEditingEvent(null)} title="Editar Evento" subtitle={editingEvent?.title} maxWidth="max-w-lg">
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-3">
+                            {["taller", "conferencia"].map(t => (
+                                <button key={t} onClick={() => setEditEvType(t)}
+                                    className={`py-2.5 rounded-xl border-2 cursor-pointer capitalize font-bold text-sm transition-all ${editEvType === t ? "border-violet-600 bg-violet-50 text-violet-700" : "border-slate-200 bg-white text-slate-500"}`}>
+                                    {t}
+                                </button>
+                            ))}
+                        </div>
+                        <div>
+                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Título <span className="text-rose-500">*</span></label>
+                            <input type="text" value={editEvTitle} onChange={e => setEditEvTitle(e.target.value)} className={inputCls} />
+                        </div>
+                        <div>
+                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Descripción</label>
+                            <textarea value={editEvDesc} onChange={e => setEditEvDesc(e.target.value)} rows={3} className={`${inputCls} resize-none`} />
+                        </div>
+                        <div>
+                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Departamento</label>
+                            <select value={editEvDept} onChange={e => setEditEvDept(e.target.value)} className={inputCls}>
+                                <option>Psicología</option><option>Tutorías</option><option>Nutrición</option><option value="General">General</option>
+                            </select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Fecha <span className="text-rose-500">*</span></label>
+                                <input type="date" value={editEvDate} onChange={e => setEditEvDate(e.target.value)} className={inputCls} />
+                            </div>
+                            <div>
+                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Hora</label>
+                                <input type="time" value={editEvTime} onChange={e => setEditEvTime(e.target.value)} className={inputCls} />
+                            </div>
+                        </div>
+                        {editEvType === "taller" && (
+                            <div>
+                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Enlace de Registro</label>
+                                <input type="url" value={editEvRegUrl} onChange={e => setEditEvRegUrl(e.target.value)} placeholder="https://forms.gle/..." className={inputCls} />
+                            </div>
+                        )}
+                        <div>
+                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Cambiar imagen (opcional)</label>
+                            <input type="file" accept="image/*" onChange={e => setEditEvImg(e.target.files?.[0] || null)}
+                                className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 cursor-pointer" />
+                            {editEvImg && <p className="text-xs text-slate-400 mt-1">{editEvImg.name}</p>}
+                        </div>
+                        <div className="flex gap-3 pt-2">
+                            <Btn variant="ghost" onClick={() => setEditingEvent(null)} className="flex-1">Cancelar</Btn>
+                            <Btn onClick={handleSaveEvent} className="flex-1 bg-violet-600 hover:bg-violet-700 text-white shadow-violet-600/20">Guardar Cambios</Btn>
+                        </div>
+                    </div>
+                </Modal>
+
+                {/* ─── Edit Resource Modal ─── */}
+                <Modal open={!!editingResource} onClose={() => setEditingResource(null)} title="Editar Recurso" subtitle={editingResource?.title} maxWidth="max-w-md">
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Título <span className="text-rose-500">*</span></label>
+                            <input type="text" value={editRTitle} onChange={e => setEditRTitle(e.target.value)} className={inputCls} />
+                        </div>
+                        <div>
+                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Descripción</label>
+                            <textarea value={editRDesc} onChange={e => setEditRDesc(e.target.value)} rows={3} className={`${inputCls} resize-none`} />
+                        </div>
+                        {editingResource?.type !== "image" && (
+                            <div>
+                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Enlace</label>
+                                <input type="url" value={editRUrl} onChange={e => setEditRUrl(e.target.value)} placeholder="https://..." className={inputCls} />
+                            </div>
+                        )}
+                        {editingResource?.type !== "link" && (
+                            <div>
+                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Cambiar archivo (opcional)</label>
+                                <input type="file" onChange={e => setEditRFile(e.target.files?.[0] || null)}
+                                    className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer" />
+                                {editRFile && <p className="text-xs text-slate-400 mt-1">{editRFile.name}</p>}
+                            </div>
+                        )}
+                        <div className="flex gap-3 pt-2">
+                            <Btn variant="ghost" onClick={() => setEditingResource(null)} className="flex-1">Cancelar</Btn>
+                            <Btn onClick={handleSaveResource} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20">Guardar Cambios</Btn>
                         </div>
                     </div>
                 </Modal>

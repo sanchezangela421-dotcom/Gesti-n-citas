@@ -45,6 +45,7 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
     studentId: string; studentName?: string; specialistId: string;
     department: string; motivo: string; modality: string;
     preferredDate: string; preferredTime: string;
+    isFollowUp?: boolean; parentId?: string;
   }): Appointment => {
     const spec = specialists.find(s => s.id === req.specialistId);
     const student = users.find(u => u.id === req.studentId);
@@ -58,6 +59,8 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
       time: req.preferredTime,
       modality: req.modality,
       motivo: req.motivo,
+      isFollowUp: req.isFollowUp ?? false,
+      parentId: req.parentId ?? null,
     };
     const tempId = `temp-${Date.now()}`;
     const tempAppt = { ...payload, id: tempId, status: "Pendiente", createdAt: new Date().toISOString() } as Appointment;
@@ -69,28 +72,76 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     })
-      .then(res => {
-        if (!res.ok) throw new Error("Error al crear la cita");
+      .then(async res => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || "Error al crear la cita");
+        }
         return res.json();
       })
-      .then(newAppt => setAppointments(p => [newAppt, ...p.filter(a => a.id !== tempId)]))
+      .then(newAppt => {
+        setAppointments(p => [newAppt, ...p.filter(a => a.id !== tempId)]);
+        toast.success("Cita creada exitosamente");
+      })
       .catch(err => {
         console.error("Error creating appointment:", err);
         setAppointments(p => p.filter(a => a.id !== tempId));
-        toast.error("No se pudo crear la cita. Intenta de nuevo.");
+        toast.error(err.message || "No se pudo crear la cita. Intenta de nuevo.");
       });
 
     return tempAppt;
   }, [specialists, users]);
 
   const updateAppointmentStatus = useCallback((id: string, status: string, notes?: string, byStudent?: boolean) => {
+    let originalStatus: string | null = null;
+    let capturedAppt: Appointment | null = null;
+
+    // Optimistic update — only state, NO notifications yet
     setAppointments(p => {
       const appt = p.find(a => a.id === id);
-      if (appt && status === "Cancelada") {
+      if (appt) {
+        originalStatus = appt.status;
+        capturedAppt = appt;
+      }
+      return p.map(a => a.id === id ? { ...a, status, ...(notes ? { notes } : {}) } : a);
+    });
+
+    fetch(`${API}/appointments/${id}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ status, notes }),
+    }).then(async res => {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Error al actualizar la cita");
+      }
+      // Notify ONLY after server confirms the change
+      if (!capturedAppt) return;
+      const appt = capturedAppt;
+      if (status === "Confirmada") {
+        const spec = specialists.find(s => s.id === appt.specialistId);
+        const virtualInfo = appt.modality === "Virtual"
+          ? spec?.meetingUrl
+            ? ` Enlace de videollamada: ${spec.meetingUrl}`
+            : " Tu especialista compartirá el enlace de videollamada."
+          : "";
+        addNotification(appt.studentId, {
+          title: "Cita Confirmada",
+          message: `Tu cita con ${appt.specialistName} de ${appt.department} el ${new Date(appt.date + "T12:00:00").toLocaleDateString()} a las ${appt.time} ha sido confirmada.${virtualInfo}`,
+          type: "confirmed",
+        });
+      } else if (status === "Completada") {
+        addNotification(appt.studentId, {
+          title: "Cita Completada",
+          message: `Tu cita con ${appt.specialistName} del ${new Date(appt.date + "T12:00:00").toLocaleDateString()} a las ${appt.time} fue marcada como completada.`,
+          type: "completed",
+        });
+      } else if (status === "Cancelada") {
         if (!byStudent) {
+          const motivoInfo = notes ? ` Motivo: ${notes}` : "";
           addNotification(appt.studentId, {
             title: "Cita Cancelada",
-            message: `El especialista ${appt.specialistName} canceló la cita de ${appt.department} del ${new Date(appt.date + "T12:00:00").toLocaleDateString()} a las ${appt.time}.`,
+            message: `El especialista ${appt.specialistName} canceló la cita de ${appt.department} del ${new Date(appt.date + "T12:00:00").toLocaleDateString()} a las ${appt.time}.${motivoInfo}`,
             type: "cancelled",
           });
         } else {
@@ -101,26 +152,27 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
           });
         }
       }
-      return p.map(a => a.id === id ? { ...a, status, ...(notes ? { notes } : {}) } : a);
-    });
-
-    fetch(`${API}/appointments/${id}/status`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ status, notes }),
     }).catch(err => {
       console.error("Error updating appointment status:", err);
-      toast.error("No se pudo actualizar el estado de la cita.");
+      toast.error(err.message || "No se pudo actualizar el estado de la cita.");
+      // Revert optimistic update on failure
+      if (originalStatus) {
+        setAppointments(p => p.map(a => a.id === id ? { ...a, status: originalStatus! } : a));
+      }
     });
-  }, [addNotification]);
+  }, [addNotification, specialists]);
 
   const rescheduleAppointment = useCallback((
     id: string, newDate: string, newTime: string,
     byRole?: "specialist" | "student", modality?: string
   ) => {
+    // Capture original values before optimistic update for rollback
+    let original: { date: string; time: string; modality: string; status: string } | null = null;
+
     setAppointments(p => {
       const appt = p.find(a => a.id === id);
       if (appt) {
+        original = { date: appt.date, time: appt.time, modality: appt.modality, status: appt.status };
         const newModality = modality ?? appt.modality;
         const modalityChanged = modality && modality !== appt.modality;
         if (byRole === "specialist") {
@@ -137,16 +189,24 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
           });
         }
       }
-      return p.map(a => a.id === id ? { ...a, date: newDate, time: newTime, status: "Pendiente", ...(modality && { modality }) } : a);
+      return p.map(a => a.id === id ? { ...a, date: newDate, time: newTime, ...(byRole === "student" && { status: "Pendiente" }), ...(modality && { modality }) } : a);
     });
 
     fetch(`${API}/appointments/${id}/reschedule`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ date: newDate, time: newTime, modality }),
+      body: JSON.stringify({ date: newDate, time: newTime, modality, byRole }),
+    }).then(async res => {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Error al reagendar la cita");
+      }
     }).catch(err => {
       console.error("Error rescheduling appointment:", err);
-      toast.error("No se pudo reagendar la cita.");
+      toast.error(err.message || "No se pudo reagendar la cita.");
+      if (original) {
+        setAppointments(p => p.map(a => a.id === id ? { ...a, ...original! } : a));
+      }
     });
   }, [addNotification]);
 

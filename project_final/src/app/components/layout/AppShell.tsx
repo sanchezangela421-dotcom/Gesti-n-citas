@@ -1,9 +1,11 @@
-import { useState } from "react";
-import { CalendarCheck, Bell, LogOut, X, Menu, Trash2, Moon, Sun } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Bell, LogOut, X, Menu, Trash2, Moon, Sun, KeyRound, Eye, EyeOff, RefreshCw, ChevronDown, Camera, WifiOff } from "lucide-react";
+import { toast } from "sonner";
 import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
 import { useTheme } from "../../hooks/useTheme";
 import { Avatar, NotifIcon } from "../ui";
+import { API_BASE } from "../../../lib/api";
 
 interface SidebarTab {
     key: string;
@@ -30,12 +32,34 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export function AppShell({ children, sidebar }: AppShellProps) {
-    const { user, logout } = useAuth();
-    const { notifications, markNotificationsRead, deleteNotification, clearAllNotifications } = useStore();
+    const { user, logout, refreshUser } = useAuth();
+    const { notifications, markNotificationsRead, deleteNotification, clearAllNotifications, isOnline } = useStore();
 
     const [showNotif, setShowNotif] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const { dark, toggle: toggleDark } = useTheme();
+
+    // Change password modal
+    const [showPwModal, setShowPwModal] = useState(false);
+    const [showUserMenu, setShowUserMenu] = useState(false);
+    const [currentPw, setCurrentPw] = useState("");
+    const [newPw, setNewPw] = useState("");
+    const [confirmPw, setConfirmPw] = useState("");
+    const [showCurrent, setShowCurrent] = useState(false);
+    const [showNew, setShowNew] = useState(false);
+    const [pwLoading, setPwLoading] = useState(false);
+    const userMenuRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!showUserMenu) return;
+        const handler = (e: MouseEvent) => {
+            if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+                setShowUserMenu(false);
+            }
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, [showUserMenu]);
 
     if (!user) return null;
 
@@ -48,20 +72,153 @@ export function AppShell({ children, sidebar }: AppShellProps) {
         setShowNotif(v => !v);
     };
 
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const openPwModal = () => { setShowUserMenu(false); setShowPwModal(true); };
+    const closePwModal = () => { setShowPwModal(false); setCurrentPw(""); setNewPw(""); setConfirmPw(""); };
+
+    const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const formData = new FormData();
+        formData.append("avatar", file);
+        const token = localStorage.getItem("token");
+        try {
+            const res = await fetch(`${API_BASE}/api/auth/avatar`, {
+                method: "PATCH",
+                headers: { Authorization: `Bearer ${token}` },
+                body: formData,
+            });
+            if (res.ok) {
+                await refreshUser();
+                toast.success("Foto actualizada.");
+            } else {
+                toast.error("No se pudo actualizar la foto.");
+            }
+        } catch {
+            toast.error("Error de conexión.");
+        }
+        e.target.value = "";
+    };
+
+    const handleChangePassword = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (newPw !== confirmPw) { toast.error("Las contraseñas nuevas no coinciden."); return; }
+        if (newPw.length < 6) { toast.error("La contraseña debe tener al menos 6 caracteres."); return; }
+        setPwLoading(true);
+        try {
+            const token = localStorage.getItem("token");
+            const res = await fetch(`${API_BASE}/api/auth/change-password`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ currentPassword: currentPw, newPassword: newPw }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                toast.error(data.error || "No se pudo cambiar la contraseña.");
+            } else {
+                toast.success("Contraseña actualizada correctamente.");
+                closePwModal();
+            }
+        } catch {
+            toast.error("Error de conexión. Intenta más tarde.");
+        }
+        setPwLoading(false);
+    };
+
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex font-sans transition-colors duration-300">
+
+            {/* ── Change password modal ── */}
+            {showPwModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+                    <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-md p-8 relative">
+                        <button onClick={closePwModal} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer">
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/30 rounded-xl flex items-center justify-center">
+                                <KeyRound className="w-5 h-5 text-blue-600" />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Cambiar contraseña</h3>
+                                <p className="text-xs text-slate-500 dark:text-slate-400">Actualiza tu contraseña de acceso</p>
+                            </div>
+                        </div>
+
+                        <form onSubmit={handleChangePassword} className="space-y-4">
+                            {/* Current password */}
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Contraseña actual</label>
+                                <div className="relative rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 focus-within:border-blue-600">
+                                    <input
+                                        type={showCurrent ? "text" : "password"} value={currentPw} required
+                                        onChange={e => setCurrentPw(e.target.value)}
+                                        placeholder="••••••••"
+                                        className="w-full pl-4 pr-11 py-3 bg-transparent text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none text-sm"
+                                    />
+                                    <button type="button" onClick={() => setShowCurrent(v => !v)} className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer">
+                                        {showCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* New password */}
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Nueva contraseña</label>
+                                <div className="relative rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 focus-within:border-blue-600">
+                                    <input
+                                        type={showNew ? "text" : "password"} value={newPw} required minLength={6}
+                                        onChange={e => setNewPw(e.target.value)}
+                                        placeholder="Mínimo 6 caracteres"
+                                        className="w-full pl-4 pr-11 py-3 bg-transparent text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none text-sm"
+                                    />
+                                    <button type="button" onClick={() => setShowNew(v => !v)} className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer">
+                                        {showNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Confirm password */}
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Confirmar nueva contraseña</label>
+                                <div className={`relative rounded-xl border-2 bg-slate-50 dark:bg-slate-700 focus-within:border-blue-600 ${confirmPw && newPw !== confirmPw ? "border-red-400" : "border-slate-200 dark:border-slate-600"}`}>
+                                    <input
+                                        type="password" value={confirmPw} required minLength={6}
+                                        onChange={e => setConfirmPw(e.target.value)}
+                                        placeholder="Repite la nueva contraseña"
+                                        className="w-full pl-4 pr-4 py-3 bg-transparent text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none text-sm"
+                                    />
+                                </div>
+                                {confirmPw && newPw !== confirmPw && (
+                                    <p className="text-red-500 text-xs ml-1">Las contraseñas no coinciden</p>
+                                )}
+                            </div>
+
+                            <div className="flex gap-3 pt-2">
+                                <button type="button" onClick={closePwModal}
+                                    className="flex-1 py-3 rounded-xl border-2 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-semibold text-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition-all cursor-pointer">
+                                    Cancelar
+                                </button>
+                                <button type="submit" disabled={pwLoading}
+                                    className="flex-1 py-3 rounded-xl bg-gradient-to-r from-blue-700 to-teal-600 text-white font-semibold text-sm shadow-md hover:-translate-y-0.5 transition-all disabled:opacity-70 cursor-pointer flex justify-center items-center">
+                                    {pwLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Guardar"}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             {/* ── Sidebar desktop ── */}
             {sidebar && (
                 <aside className="hidden md:flex w-64 bg-slate-900 dark:bg-slate-950 flex-col shrink-0 sticky top-0 h-screen">
-                    <div className="h-16 flex items-center gap-3 px-5 border-b border-white/10">
-                        <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center shadow-md">
-                            <CalendarCheck className="w-4 h-4 text-white" />
-                        </div>
-                        <div>
-                            <p className="text-white font-bold text-sm tracking-tight leading-none">Sistema de Citas</p>
-                            <p className="text-slate-400 text-[0.6rem] font-medium uppercase tracking-wider mt-0.5">Institucional</p>
-                        </div>
+                    <div className="h-24 border-b border-white/10 flex items-center justify-center ">
+                        <img
+                            src="/logo-dark.png"
+                            className="w-[60%] max-w-none object-cover object-center"
+                        />
                     </div>
                     <nav className="p-4 space-y-1.5 overflow-y-auto flex-1">
                         {sidebar.tabs.map(t => {
@@ -89,13 +246,8 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                 <>
                     <div className="fixed inset-0 bg-slate-900/50 z-40 md:hidden" onClick={() => setSidebarOpen(false)} />
                     <aside className="fixed left-0 top-0 bottom-0 w-72 bg-slate-900 z-50 flex flex-col md:hidden">
-                        <div className="h-16 flex items-center justify-between px-5 border-b border-white/10">
-                            <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center">
-                                    <CalendarCheck className="w-4 h-4 text-white" />
-                                </div>
-                                <p className="text-white font-bold text-sm">Sistema de Citas</p>
-                            </div>
+                        <div className="h-26 relative overflow-hidden border-b border-white/10 flex items-center justify-end px-5">
+                            <img src="/logo-dark.png" alt="" style={{ width: '68%', marginLeft: '-11px', marginTop: '-7px', maxWidth: 'none' }} />
                             <button onClick={() => setSidebarOpen(false)} className="text-slate-400 hover:text-white p-2 cursor-pointer">
                                 <X className="w-5 h-5" />
                             </button>
@@ -136,14 +288,9 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                                 <Menu className="w-6 h-6" />
                             </button>
                         ) : (
-                            <div className="flex items-center gap-2 sm:gap-3">
-                                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center shadow-md shadow-blue-600/20 shrink-0">
-                                    <CalendarCheck className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-                                </div>
-                                <div className="hidden xs:block">
-                                    <p className="text-slate-900 font-bold text-xs sm:text-sm tracking-tight leading-none">Sistema de Citas</p>
-                                    <p className="text-slate-500 text-[0.6rem] sm:text-xs font-medium uppercase tracking-wider mt-0.5">Institucional</p>
-                                </div>
+                            <div className="relative overflow-hidden" style={{ width: '191px', height: '40px' }}>
+                                <img src="/logo-light.png" alt="Synkros" className="dark:hidden" style={{ width: '168%', marginLeft: '-11px', marginTop: '-7px', maxWidth: 'none' }} />
+                                <img src="/logo-dark.png" alt="Synkros" className="hidden dark:block" style={{ width: '168%', marginLeft: '-11px', marginTop: '-7px', maxWidth: 'none' }} />
                             </div>
                         )}
                     </div>
@@ -162,7 +309,7 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                         {/* ── Bell ── */}
                         <div className="relative">
                             <button onClick={handleToggleNotif}
-                                className="relative p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer">
+                                className="relative p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer">
                                 <Bell className="w-5 h-5" />
                                 {unread > 0 && (
                                     <span className="absolute top-1.5 right-1.5 min-w-[1rem] h-4 px-1 bg-rose-500 border-2 border-white text-white rounded-full flex items-center justify-center text-[0.55rem] font-black animate-pulse">
@@ -175,13 +322,13 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                             {showNotif && (
                                 <>
                                     <div className="fixed inset-0 z-40" onClick={() => setShowNotif(false)} />
-                                    <div className="absolute right-0 top-full mt-3 w-[min(24rem,calc(100vw-1rem))] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-xl shadow-slate-200/50 z-50 overflow-hidden animate-in fade-in slide-in-from-top-4 duration-200">
+                                    <div className="absolute right-0 top-full mt-3 w-[min(24rem,calc(100vw-1rem))] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-xl shadow-slate-200/50 dark:shadow-slate-950/80 z-50 overflow-hidden animate-in fade-in slide-in-from-top-4 duration-200">
 
                                         {/* Panel header */}
-                                        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50/50">
+                                        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800">
                                             <div>
-                                                <h4 className="text-slate-900 font-semibold text-sm">Notificaciones</h4>
-                                                <p className="text-slate-500 text-xs font-medium">
+                                                <h4 className="text-slate-900 dark:text-white font-semibold text-sm">Notificaciones</h4>
+                                                <p className="text-slate-500 dark:text-slate-400 text-xs font-medium">
                                                     {notifs.length === 0
                                                         ? "Sin notificaciones"
                                                         : unread > 0 ? `${unread} sin leer` : "Todo al día"}
@@ -218,14 +365,14 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                                             ) : (
                                                 notifs.map(n => (
                                                     <div key={n.id}
-                                                        className={`group px-5 py-4 border-b border-slate-50 hover:bg-slate-50/80 transition-colors ${!n.read ? "bg-blue-50/40" : ""}`}>
+                                                        className={`group px-5 py-4 border-b border-slate-50 dark:border-slate-700/50 hover:bg-slate-50/80 dark:hover:bg-slate-700/50 transition-colors ${!n.read ? "bg-blue-50/40 dark:bg-blue-900/20" : ""}`}>
                                                         <div className="flex items-start gap-3">
                                                             <div className="mt-0.5 shrink-0">
                                                                 <NotifIcon type={n.type} />
                                                             </div>
                                                             <div className="min-w-0 flex-1">
                                                                 <div className="flex items-center justify-between gap-2 mb-1">
-                                                                    <p className={`text-sm truncate ${!n.read ? "font-semibold text-slate-900" : "font-medium text-slate-700"}`}>
+                                                                    <p className={`text-sm truncate ${!n.read ? "font-semibold text-slate-900 dark:text-white" : "font-medium text-slate-700 dark:text-slate-200"}`}>
                                                                         {n.title}
                                                                     </p>
                                                                     <div className="flex items-center gap-1.5 shrink-0">
@@ -241,8 +388,8 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                                                                         </button>
                                                                     </div>
                                                                 </div>
-                                                                <p className="text-slate-500 text-xs leading-relaxed">{n.message}</p>
-                                                                <p className="text-slate-400 text-[0.65rem] font-medium mt-1.5 uppercase tracking-wider">{n.time}</p>
+                                                                <p className="text-slate-500 dark:text-slate-300 text-xs leading-relaxed">{n.message}</p>
+                                                                <p className="text-slate-400 dark:text-slate-500 text-[0.65rem] font-medium mt-1.5 uppercase tracking-wider">{n.time}</p>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -264,15 +411,64 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                                     {roleLabel}{user.department ? ` - ${user.department}` : ""}
                                 </p>
                             </div>
-                            <Avatar name={user.name} size="md" />
-                            <button onClick={logout}
-                                className="text-slate-400 hover:text-rose-600 p-2 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer ml-1"
-                                title="Cerrar sesión">
-                                <LogOut className="w-5 h-5" />
-                            </button>
+
+                            {/* Avatar with dropdown */}
+                            <div className="relative" ref={userMenuRef}>
+                                {/* Hidden file input for avatar */}
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp"
+                                    className="hidden"
+                                    onChange={handleAvatarChange}
+                                />
+
+                                <button
+                                    onClick={() => setShowUserMenu(v => !v)}
+                                    className="flex items-center gap-1.5 cursor-pointer rounded-full focus:outline-none"
+                                >
+                                    <Avatar name={user.name} size="md" avatarUrl={user.avatarUrl} />
+                                    <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${showUserMenu ? "rotate-180" : ""}`} />
+                                </button>
+
+                                {showUserMenu && (
+                                    <div className="absolute right-0 top-12 w-52 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-100 dark:border-slate-700 py-1.5 z-50">
+                                        <button
+                                            onClick={() => { setShowUserMenu(false); fileInputRef.current?.click(); }}
+                                            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                                        >
+                                            <Camera className="w-4 h-4 text-slate-400" />
+                                            Cambiar foto
+                                        </button>
+                                        <button
+                                            onClick={openPwModal}
+                                            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                                        >
+                                            <KeyRound className="w-4 h-4 text-slate-400" />
+                                            Cambiar contraseña
+                                        </button>
+                                        <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
+                                        <button
+                                            onClick={logout}
+                                            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors cursor-pointer"
+                                        >
+                                            <LogOut className="w-4 h-4" />
+                                            Cerrar sesión
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </header>
+
+                {/* Offline banner */}
+                {!isOnline && (
+                    <div className="flex items-center justify-center gap-2 bg-amber-500 text-white text-sm font-semibold px-4 py-2">
+                        <WifiOff className="w-4 h-4 shrink-0" />
+                        Sin conexión — los datos mostrados pueden estar desactualizados
+                    </div>
+                )}
 
                 {/* Page content */}
                 <main className="flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-950 p-4 sm:p-6 lg:p-8">

@@ -42,40 +42,42 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.145 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
+  --background: #0f172a;
+  --foreground: #f1f5f9;
+  --card: #1e293b;
+  --card-foreground: #f1f5f9;
+  --popover: #1e293b;
+  --popover-foreground: #f1f5f9;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #22c55e;
+  --secondary-foreground: #ffffff;
+  --muted: #334155;
+  --muted-foreground: #94a3b8;
+  --accent: #f97316;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #334155;
+  --input: #334155;
+  --input-background: #1e293b;
+  --switch-background: #475569;
+  --ring: #3b82f6;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
-  --sidebar-ring: oklch(0.439 0 0);
+  --chart-1: #60a5fa;
+  --chart-2: #4ade80;
+  --chart-3: #fb923c;
+  --chart-4: #a78bfa;
+  --chart-5: #f472b6;
+  --sidebar: #020617;
+  --sidebar-foreground: #e2e8f0;
+  --sidebar-primary: #3b82f6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1e293b;
+  --sidebar-accent-foreground: #e2e8f0;
+  --sidebar-border: #1e293b;
+  --sidebar-ring: #3b82f6;
 }
 
 @theme inline {
@@ -193,8 +195,8 @@
   .dark .text-slate-800    { color: #e2e8f0; }
   .dark .text-slate-700    { color: #cbd5e1; }
   .dark .text-slate-600    { color: #94a3b8; }
-  .dark .text-slate-500    { color: #64748b; }
-  .dark .text-slate-400    { color: #475569; }
+  .dark .text-slate-500    { color: #94a3b8; }
+  .dark .text-slate-400    { color: #cbd5e1; }
 
   /* Borders */
   .dark .border-slate-100  { border-color: #1e293b; }
@@ -202,9 +204,15 @@
   .dark .border-slate-300  { border-color: #475569; }
 
   /* Hover overrides (for interactive elements) */
-  .dark .hover\:bg-slate-50:hover   { background-color: #1e293b; }
-  .dark .hover\:bg-slate-100:hover  { background-color: #334155; }
-  .dark .hover\:bg-slate-200\/50:hover { background-color: rgba(51,65,85,0.5); }
+  .dark .hover\:bg-slate-50:hover        { background-color: #1e293b; }
+  .dark .hover\:bg-slate-100:hover       { background-color: #334155; }
+  .dark .hover\:bg-slate-200\/50:hover   { background-color: rgba(51,65,85,0.5); }
+
+  /* Opacity-variant overrides (escape the base override above) */
+  .dark .bg-slate-50\/50   { background-color: rgba(15, 23, 42, 0.5); }
+  .dark .bg-slate-50\/80   { background-color: rgba(15, 23, 42, 0.8); }
+  .dark .bg-slate-100\/50  { background-color: rgba(30, 41, 59, 0.5); }
+  .dark .hover\:bg-slate-50\/80:hover  { background-color: rgba(51, 65, 85, 0.4); }
 
   /* TabNav, tag pills and similar inline-flex items */
   .dark .bg-slate-100.p-1  { background-color: #1e293b; }
@@ -229,4 +237,78 @@
   /* Dividers */
   .dark .divide-slate-100 > * + * { border-color: #1e293b; }
   .dark .divide-slate-200 > * + * { border-color: #334155; }
+
+  /* ── Colored -100 backgrounds (badge/pill components) ──────
+     StatusBadge and similar pill elements use -100 backgrounds.
+  ────────────────────────────────────────────────────────────── */
+  .dark .bg-rose-100     { background-color: rgba(136, 19,  55, 0.28); }
+  .dark .bg-blue-100     { background-color: rgba( 30, 58, 138, 0.28); }
+  .dark .bg-amber-100    { background-color: rgba(120, 53,  15, 0.28); }
+  .dark .bg-emerald-100  { background-color: rgba(  6, 78,  59, 0.28); }
+  .dark .bg-indigo-100   { background-color: rgba( 49, 46, 129, 0.28); }
+  .dark .bg-violet-100   { background-color: rgba( 76, 29, 149, 0.28); }
+  .dark .bg-teal-100     { background-color: rgba( 17, 94,  89, 0.28); }
+  .dark .bg-green-100    { background-color: rgba( 20, 83,  45, 0.28); }
+
+  /* border-{color}-200 */
+  .dark .border-blue-200    { border-color: #1e40af; }
+  .dark .border-emerald-200 { border-color: #065f46; }
+  .dark .border-rose-200    { border-color: #9f1239; }
+  .dark .border-indigo-200  { border-color: #3730a3; }
+  .dark .border-violet-200  { border-color: #5b21b6; }
+  .dark .border-teal-200    { border-color: #115e59; }
+  .dark .border-green-200   { border-color: #14532d; }
+
+  /* ── Colored -50 backgrounds (info/alert sections) ─────────
+     Any bg-{color}-50 used as a tinted info/alert panel gets
+     remapped to a dark overlay of the same hue so all dashboards
+     look consistent without touching individual components.
+  ────────────────────────────────────────────────────────────── */
+  .dark .bg-rose-50       { background-color: rgba(136, 19,  55, 0.18); }
+  .dark .bg-blue-50       { background-color: rgba( 30, 58, 138, 0.18); }
+  .dark .bg-amber-50      { background-color: rgba(120, 53,  15, 0.18); }
+  .dark .bg-emerald-50    { background-color: rgba(  6, 78,  59, 0.18); }
+  .dark .bg-indigo-50     { background-color: rgba( 49, 46, 129, 0.18); }
+  .dark .bg-violet-50     { background-color: rgba( 76, 29, 149, 0.18); }
+  .dark .bg-teal-50       { background-color: rgba( 17, 94,  89, 0.18); }
+  .dark .bg-green-50      { background-color: rgba( 20,  83,  45, 0.18); }
+  .dark .bg-sky-50        { background-color: rgba(  7, 89, 133, 0.18); }
+  .dark .bg-orange-50     { background-color: rgba(154, 52,  18, 0.18); }
+
+  /* Opacity-variant versions (e.g. bg-rose-50/30, bg-blue-50/50) */
+  .dark .bg-rose-50\/30    { background-color: rgba(136, 19,  55, 0.12); }
+  .dark .bg-rose-50\/60    { background-color: rgba(136, 19,  55, 0.22); }
+  .dark .bg-blue-50\/50    { background-color: rgba( 30, 58, 138, 0.15); }
+  .dark .bg-emerald-50\/50 { background-color: rgba(  6, 78,  59, 0.15); }
+  .dark .bg-indigo-50\/60  { background-color: rgba( 49, 46, 129, 0.20); }
+  .dark .bg-violet-50\/50  { background-color: rgba( 76, 29, 149, 0.15); }
+
+  /* ── Colored -100 borders ─────────────────────────────────── */
+  .dark .border-rose-100    { border-color: #9f1239; }
+  .dark .border-blue-100    { border-color: #1e40af; }
+  .dark .border-amber-100   { border-color: #92400e; }
+  .dark .border-amber-200   { border-color: #92400e; }
+  .dark .border-emerald-100 { border-color: #065f46; }
+  .dark .border-indigo-100  { border-color: #3730a3; }
+  .dark .border-violet-100  { border-color: #5b21b6; }
+  .dark .border-teal-100    { border-color: #115e59; }
+  .dark .border-green-100   { border-color: #14532d; }
+  .dark .border-sky-100     { border-color: #075985; }
+
+  /* ── Colored text: darken on light bg becomes lighter on dark bg */
+  .dark .text-rose-800    { color: #fda4af; }
+  .dark .text-blue-800    { color: #93c5fd; }
+  .dark .text-amber-800   { color: #fcd34d; }
+  .dark .text-emerald-800 { color: #6ee7b7; }
+  .dark .text-indigo-800  { color: #a5b4fc; }
+  .dark .text-violet-800  { color: #c4b5fd; }
+  .dark .text-rose-700    { color: #fda4af; }
+  .dark .text-blue-700    { color: #93c5fd; }
+  .dark .text-amber-700   { color: #fcd34d; }
+  .dark .text-emerald-700 { color: #6ee7b7; }
+  .dark .text-indigo-700  { color: #a5b4fc; }
+  .dark .text-violet-700  { color: #c4b5fd; }
+  .dark .text-emerald-600 { color: #34d399; }
+  .dark .text-indigo-600  { color: #818cf8; }
+  .dark .text-blue-600    { color: #60a5fa; }
 }

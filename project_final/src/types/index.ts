@@ -1,3 +1,8 @@
+export interface AvailableSlot {
+  start: string;
+  end: string;
+}
+
 export interface ScheduleSlot {
   id: string;
   dayOfWeek: number;
@@ -20,6 +25,7 @@ export interface User {
   edad?: number;
   genero?: string;
   department?: string;
+  avatarUrl?: string | null;
 }
 
 export interface Specialist {
@@ -30,7 +36,9 @@ export interface Specialist {
   email: string;
   active: boolean;
   shift?: string;
+  meetingUrl?: string | null;
   schedule: ScheduleSlot[];
+  avatarUrl?: string | null;
 }
 
 export interface Appointment {
@@ -46,6 +54,8 @@ export interface Appointment {
   modality: string;
   motivo: string;
   notes?: string;
+  isFollowUp?: boolean;
+  parentId?: string | null;
   createdAt: string;
   updatedAt?: string;
 }
@@ -81,6 +91,7 @@ export interface SpecialistInput {
   email: string;
   active?: boolean;
   shift?: string;
+  meetingUrl?: string | null;
   // Campos del usuario asociado (solo en creación)
   password?: string;
   role?: string;
@@ -114,18 +125,21 @@ export interface StoreContextType {
   removeSpecialist: (id: string) => Promise<void>;
   appointments: Appointment[];
   getAppointments: (filters?: AppointmentFilters) => Appointment[];
-  createAppointment: (req: { studentId: string; studentName?: string; specialistId: string; department: string; motivo: string; modality: string; preferredDate: string; preferredTime: string }) => Appointment;
+  createAppointment: (req: { studentId: string; studentName?: string; specialistId: string; department: string; motivo: string; modality: string; preferredDate: string; preferredTime: string; isFollowUp?: boolean; parentId?: string }) => Appointment;
   updateAppointmentStatus: (id: string, status: string, notes?: string, byStudent?: boolean) => void;
   rescheduleAppointment: (id: string, newDate: string, newTime: string, byRole?: 'specialist' | 'student', modality?: string) => void;
-  getAvailableSlots: (specialistId: string, dateStr: string) => Promise<string[]>;
+  getAvailableSlots: (specialistId: string, dateStr: string) => Promise<AvailableSlot[]>;
   getAvailableDays: (specialistId: string, year: number, month: number) => Promise<Date[]>;
   addScheduleSlot: (specialistId: string, slot: Omit<ScheduleSlot, "id">) => void;
   removeScheduleSlot: (specialistId: string, slotId: string) => void;
+  updateMeetingUrl: (specialistId: string, meetingUrl: string | null) => Promise<void>;
   events: AppEvent[];
   addEvent: (ev: Omit<AppEvent, "id">, file?: File) => Promise<void>;
+  updateEvent: (id: string, data: Partial<Omit<AppEvent, "id">>, file?: File) => Promise<void>;
   deleteEvent: (id: string) => Promise<void>;
   resources: Resource[];
   addResource: (r: Omit<Resource, "id">, file?: File) => Promise<void>;
+  updateResource: (id: string, data: Partial<Omit<Resource, "id">>, file?: File) => Promise<void>;
   deleteResource: (id: string) => Promise<void>;
   getStats: () => {
     summary: { total: number; pendientes: number; confirmadas: number; completadas: number; canceladas: number; byDept: Record<string, number> };
@@ -143,13 +157,15 @@ export interface StoreContextType {
   clearAllNotifications: (userId: string) => void;
   deleteUser: (id: string) => Promise<void>;
   fetchAll: () => Promise<void>;
+  isOnline: boolean;
 }
 
 export interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   loading: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
-  register: (data: Partial<User>) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<{ ok: boolean; unverified?: boolean; error?: string }>;
+  register: (data: Partial<User>) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
 }

@@ -4,12 +4,12 @@ import {
     Clock, CalendarCheck, CheckCircle2, Users, FileText, Megaphone,
     CalendarDays, Info, RefreshCw, Pencil, Trash2, Calendar,
     Video, Plus, ExternalLink, Image as ImageIcon,
-    ClipboardList, ArrowRight, Lock, History,
+    ClipboardList, ArrowRight, Lock, History, XCircle,
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
 import { AppShell } from "../../components/layout/AppShell";
-import { Btn, StatCard, Modal, MiniCalendar, StatusBadge, inputCls } from "../../components/ui";
+import { Btn, StatCard, Modal, MiniCalendar, StatusBadge, inputCls, EmptyState } from "../../components/ui";
 import { DAYS_FULL } from "../../../constants";
 import { useReschedule, useActionModal } from "../../hooks";
 import { localISODate } from "../../../utils/date";
@@ -142,12 +142,15 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
 // ─── Component ───────────────────────────────────────────
 export function SpecialistDashboard() {
     const { user } = useAuth();
-    const { specialists, specialistsLoaded, getAppointments, addScheduleSlot, addEvent, deleteEvent, addResource, deleteResource, resources, events, getAvailableDays, getAvailableSlots, createAppointment, addNotification } = useStore();
+    const { specialists, specialistsLoaded, getAppointments, addScheduleSlot, addEvent, updateEvent, deleteEvent, addResource, updateResource, deleteResource, resources, events, getAvailableDays, getAvailableSlots, createAppointment, addNotification, updateMeetingUrl } = useStore();
 
     const spec = specialists.find(s => s.userId === user?.id);
     const dept = user?.department || "Psicología";
 
     const [activeTab, setActiveTab] = useState("calendar");
+    const [meetingUrlInput, setMeetingUrlInput] = useState(spec?.meetingUrl ?? "");
+    const [virtualConfirmAppt, setVirtualConfirmAppt] = useState<Appointment | null>(null);
+    const [virtualConfirmUrl, setVirtualConfirmUrl] = useState("");
 
     const allAppts = spec ? getAppointments({ specialistId: spec.id }) : [];
     const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
@@ -182,8 +185,28 @@ export function SpecialistDashboard() {
     // ── Direct confirm (no modal) ───────────────────────────────
     const { updateAppointmentStatus } = useStore();
     const handleConfirmDirect = (appt: Appointment) => {
-        updateAppointmentStatus(appt.id, "Confirmada", undefined);
-        toast.success("Cita confirmada");
+        if (appt.modality === "Virtual") {
+            setVirtualConfirmAppt(appt);
+            setVirtualConfirmUrl(spec?.meetingUrl ?? "");
+        } else {
+            updateAppointmentStatus(appt.id, "Confirmada", undefined);
+            toast.success("Cita confirmada");
+        }
+    };
+
+    const handleConfirmVirtual = async () => {
+        if (!virtualConfirmAppt || !spec) return;
+        if (!virtualConfirmUrl.trim()) {
+            toast.error("Agrega el enlace de videollamada antes de confirmar.");
+            return;
+        }
+        if (virtualConfirmUrl.trim() !== spec.meetingUrl) {
+            await updateMeetingUrl(spec.id, virtualConfirmUrl.trim());
+        }
+        updateAppointmentStatus(virtualConfirmAppt.id, "Confirmada", undefined);
+        toast.success("Cita virtual confirmada");
+        setVirtualConfirmAppt(null);
+        setVirtualConfirmUrl("");
     };
 
     // ── Seguimiento (new follow-up appointment) ───────────────
@@ -191,7 +214,7 @@ export function SpecialistDashboard() {
     const [seguimientoDate, setSeguimientoDate] = useState<Date | null>(null);
     const [seguimientoSlot, setSeguimientoSlot] = useState<string | null>(null);
     const [seguimientoAvailDates, setSeguimientoAvailDates] = useState<Date[]>([]);
-    const [seguimientoSlots, setSeguimientoSlots] = useState<string[]>([]);
+    const [seguimientoSlots, setSeguimientoSlots] = useState<{ start: string; end: string }[]>([]);
 
     useEffect(() => {
         if (!seguimientoAppt || !spec) { setSeguimientoAvailDates([]); return; }
@@ -212,15 +235,19 @@ export function SpecialistDashboard() {
 
     const confirmSeguimiento = () => {
         if (!seguimientoAppt || !seguimientoDate || !seguimientoSlot || !user) return;
+        // Strip any previous "Seguimiento:" prefix to avoid nesting prefixes
+        const baseMotivo = seguimientoAppt.motivo.replace(/^Seguimiento:\s*/i, "");
         createAppointment({
             studentId: seguimientoAppt.studentId,
             studentName: seguimientoAppt.studentName,
             specialistId: seguimientoAppt.specialistId,
             department: seguimientoAppt.department,
-            motivo: `Seguimiento: ${seguimientoAppt.motivo}`,
+            motivo: baseMotivo,
             modality: seguimientoAppt.modality,
             preferredDate: localISODate(seguimientoDate),
             preferredTime: seguimientoSlot,
+            isFollowUp: true,
+            parentId: seguimientoAppt.parentId ?? seguimientoAppt.id,
         });
         // Notify the student about the follow-up appointment
         addNotification(seguimientoAppt.studentId, {
@@ -241,6 +268,62 @@ export function SpecialistDashboard() {
     const [curl, setCurl] = useState("");
     const [cimgUrl, setCimgUrl] = useState("");
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+    // Edit resource modal
+    const [editingResource, setEditingResource] = useState<any | null>(null);
+    const [editRTitle, setEditRTitle] = useState("");
+    const [editRDesc, setEditRDesc] = useState("");
+    const [editRUrl, setEditRUrl] = useState("");
+    const [editRFile, setEditRFile] = useState<File | null>(null);
+
+    const openEditResource = (r: any) => {
+        setEditingResource(r);
+        setEditRTitle(r.title);
+        setEditRDesc(r.description);
+        setEditRUrl(r.url === "#" ? "" : r.url);
+        setEditRFile(null);
+    };
+
+    const handleSaveResource = async () => {
+        if (!editingResource || !editRTitle) { toast.error("El título es obligatorio"); return; }
+        await updateResource(editingResource.id, {
+            title: editRTitle, description: editRDesc, url: editRUrl || "#",
+        }, editRFile || undefined);
+        toast.success("Recurso actualizado");
+        setEditingResource(null);
+    };
+
+    // Edit event modal
+    const [editingEvent, setEditingEvent] = useState<any | null>(null);
+    const [editEvTitle, setEditEvTitle] = useState("");
+    const [editEvDesc, setEditEvDesc] = useState("");
+    const [editEvDate, setEditEvDate] = useState("");
+    const [editEvTime, setEditEvTime] = useState("");
+    const [editEvType, setEditEvType] = useState("");
+    const [editEvRegUrl, setEditEvRegUrl] = useState("");
+    const [editEvImg, setEditEvImg] = useState<File | null>(null);
+
+    const openEditEvent = (ev: any) => {
+        setEditingEvent(ev);
+        setEditEvTitle(ev.title);
+        setEditEvDesc(ev.description);
+        setEditEvDate(ev.date);
+        setEditEvTime(ev.time);
+        setEditEvType(ev.type);
+        setEditEvRegUrl(ev.registrationUrl || "");
+        setEditEvImg(null);
+    };
+
+    const handleSaveEvent = async () => {
+        if (!editingEvent || !editEvTitle || !editEvDate) { toast.error("Título y fecha son obligatorios"); return; }
+        await updateEvent(editingEvent.id, {
+            title: editEvTitle, description: editEvDesc,
+            date: editEvDate, time: editEvTime, type: editEvType,
+            registrationUrl: editEvType === "taller" ? editEvRegUrl : undefined,
+        }, editEvImg || undefined);
+        toast.success("Evento actualizado");
+        setEditingEvent(null);
+    };
 
     const handlePublishContent = () => {
         if (!ctitle) { toast.error("El título es obligatorio"); return; }
@@ -306,9 +389,19 @@ export function SpecialistDashboard() {
         { label: "Pacientes", value: totalPatients, icon: Users, gradient: "from-violet-500 to-violet-600" },
     ];
 
+    // Root appointments in history (Completada or Cancelada, no parentId)
     const historialAppts = allAppts
-        .filter(a => a.status === "Completada" || a.status === "Cancelada")
+        .filter(a => (a.status === "Completada" || a.status === "Cancelada") && !a.parentId)
         .sort((a, b) => b.date.localeCompare(a.date));
+
+    // Map parentId → follow-up appointments (any status, not cancelled)
+    const followUpsByParent = allAppts.reduce((acc, a) => {
+        if (a.parentId) {
+            if (!acc[a.parentId]) acc[a.parentId] = [];
+            acc[a.parentId].push(a);
+        }
+        return acc;
+    }, {} as Record<string, typeof allAppts>);
 
     const sidebarTabs = [
         { key: "calendar", label: "Mi Calendario", icon: CalendarDays },
@@ -331,7 +424,7 @@ export function SpecialistDashboard() {
                 {/* Header */}
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Panel de {dept}</h1>
-                    <p className="text-slate-500 mt-1 font-medium">{spec.name} — Gestión de citas y agenda</p>
+                    <p className="text-slate-500 dark:text-slate-400 mt-1 font-medium">{spec.name} — Gestión de citas y agenda</p>
                 </div>
 
                 {/* Stats */}
@@ -341,57 +434,70 @@ export function SpecialistDashboard() {
 
                 {/* Calendar Tab */}
                 {activeTab === "calendar" && (
-                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-                        <div className="xl:col-span-1">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        <div className="lg:col-span-1">
                             <MiniCalendar selectedDate={selDate} onSelect={setSelDate} highlightedDates={apptDates} />
                         </div>
-                        <div className="xl:col-span-2 space-y-4">
-                            <h3 className="font-bold text-slate-900 text-lg">
+                        <div className="lg:col-span-2 space-y-5">
+                            <h3 className="font-bold text-slate-900 dark:text-white text-lg">
                                 Citas — {selDate.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" })}
                             </h3>
 
                             {/* Citas pasadas sin cerrar */}
                             {sinCerrar.length > 0 && (
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <span className="flex h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
-                                        <p className="text-xs font-bold text-rose-600 uppercase tracking-wider">
-                                            Requieren cierre ({sinCerrar.length})
+                                <div className="rounded-2xl border border-rose-200 dark:border-rose-900/50 overflow-hidden">
+                                    <div className="flex items-center gap-2 px-4 py-3 bg-rose-50 dark:bg-rose-950/40 border-b border-rose-200 dark:border-rose-900/50">
+                                        <span className="flex h-2 w-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+                                        <p className="text-xs font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider">
+                                            Requieren cierre — {sinCerrar.length} {sinCerrar.length === 1 ? "cita" : "citas"}
                                         </p>
                                     </div>
-                                    <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl mb-2 text-xs text-rose-700 font-medium">
+                                    <div className="p-3 bg-rose-50/60 dark:bg-rose-950/20 text-xs text-rose-700 dark:text-rose-400 font-medium border-b border-rose-100 dark:border-rose-900/30">
                                         Estas citas ya pasaron su fecha pero no fueron finalizadas. Por favor complétalas o cancélalas.
                                     </div>
-                                    {sinCerrar.map(appt => (
-                                        <AppointmentCard key={appt.id} appt={appt} onAction={action.open} onReschedule={() => resch.open(appt.id)} onSeguimiento={openSeguimiento} onConfirmDirect={handleConfirmDirect} />
-                                    ))}
+                                    <div className="p-3 space-y-2 bg-white dark:bg-slate-900">
+                                        {sinCerrar.map(appt => (
+                                            <AppointmentCard key={appt.id} appt={appt} onAction={action.open} onReschedule={() => resch.open(appt.id)} onSeguimiento={openSeguimiento} onConfirmDirect={handleConfirmDirect} />
+                                        ))}
+                                    </div>
                                 </div>
                             )}
 
                             {/* Pending list — solo citas futuras */}
                             {pendientes.length > 0 && (
-                                <div className="space-y-2">
-                                    <p className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-2">Pendientes de confirmación</p>
-                                    {pendientes.map(appt => (
-                                        <AppointmentCard key={appt.id} appt={appt} onAction={action.open} onReschedule={() => resch.open(appt.id)} onSeguimiento={openSeguimiento} onConfirmDirect={handleConfirmDirect} />
-                                    ))}
+                                <div className="rounded-2xl border border-amber-200 dark:border-amber-900/50 overflow-hidden">
+                                    <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900/50">
+                                        <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                                        <p className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+                                            Pendientes de confirmación — {pendientes.length} {pendientes.length === 1 ? "cita" : "citas"}
+                                        </p>
+                                    </div>
+                                    <div className="p-3 space-y-2 bg-white dark:bg-slate-900">
+                                        {pendientes.map(appt => (
+                                            <AppointmentCard key={appt.id} appt={appt} onAction={action.open} onReschedule={() => resch.open(appt.id)} onSeguimiento={openSeguimiento} onConfirmDirect={handleConfirmDirect} />
+                                        ))}
+                                    </div>
                                 </div>
                             )}
 
                             {/* Day appointments */}
-                            {dayAppts.length > 0 ? (
-                                <div className="space-y-2">
-                                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Agenda del día</p>
-                                    {dayAppts.map(appt => (
-                                        <AppointmentCard key={appt.id} appt={appt} onAction={action.open} onReschedule={() => resch.open(appt.id)} onSeguimiento={openSeguimiento} onConfirmDirect={handleConfirmDirect} />
-                                    ))}
+                            <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                                <div className="flex items-center gap-2 px-4 py-3 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
+                                    <CalendarCheck className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                                    <p className="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">
+                                        Agenda del día — {dayAppts.length > 0 ? `${dayAppts.length} ${dayAppts.length === 1 ? "cita" : "citas"}` : "Sin citas"}
+                                    </p>
                                 </div>
-                            ) : (
-                                <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center">
-                                    <CalendarCheck className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-                                    <p className="text-slate-500 font-medium text-sm">Sin citas para este día</p>
-                                </div>
-                            )}
+                                {dayAppts.length > 0 ? (
+                                    <div className="p-3 space-y-2 bg-white dark:bg-slate-900">
+                                        {dayAppts.map(appt => (
+                                            <AppointmentCard key={appt.id} appt={appt} onAction={action.open} onReschedule={() => resch.open(appt.id)} onSeguimiento={openSeguimiento} onConfirmDirect={handleConfirmDirect} />
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <EmptyState icon={CalendarCheck} title="Sin citas para este día" />
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}
@@ -401,64 +507,116 @@ export function SpecialistDashboard() {
                     <div>
                         <div className="flex items-center justify-between mb-6">
                             <div>
-                                <h3 className="text-2xl font-bold text-slate-900">Historial de Citas</h3>
-                                <p className="text-slate-500 font-medium mt-1">
+                                <h3 className="text-2xl font-bold text-slate-900 dark:text-white">Historial de Citas</h3>
+                                <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">
                                     {completadas.length} completadas · {allAppts.filter(a => a.status === "Cancelada").length} canceladas
                                 </p>
                             </div>
                         </div>
 
                         {historialAppts.length === 0 ? (
-                            <div className="bg-white rounded-3xl border border-dashed border-slate-200 p-12 text-center">
-                                <History className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-                                <p className="text-slate-500 font-medium">Sin historial de citas aún</p>
+                            <div className="bg-white dark:bg-slate-800 rounded-3xl border border-dashed border-slate-200 dark:border-slate-700 p-12 text-center">
+                                <History className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
+                                <p className="text-slate-500 dark:text-slate-400 font-medium">Sin historial de citas aún</p>
                             </div>
                         ) : (
-                            <div className="space-y-3">
+                            <div className="space-y-4">
                                 {historialAppts.map(appt => {
                                     const isLate = appt.status === "Completada" &&
                                         appt.updatedAt &&
                                         appt.updatedAt.split("T")[0] > appt.date;
-                                    const isFollowUp = appt.motivo?.startsWith("Seguimiento:");
+                                    const apptFollowUps = followUpsByParent[appt.id] ?? [];
+                                    const hasActiveFollowUp = apptFollowUps.some(f => f.status !== "Cancelada");
                                     return (
-                                        <div key={appt.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col sm:flex-row sm:items-start gap-3 opacity-90 hover:opacity-100 hover:shadow-md transition-all">
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                                    <p className="font-bold text-slate-900 text-sm">{appt.studentName}</p>
-                                                    <StatusBadge status={appt.status} />
-                                                    {isLate && (
-                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[0.65rem] font-bold border border-amber-200">
-                                                            Sesión tardía
-                                                        </span>
+                                        <div key={appt.id} className="space-y-2">
+                                            {/* Root appointment */}
+                                            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 flex flex-col sm:flex-row sm:items-start gap-3 opacity-90 hover:opacity-100 hover:shadow-md transition-all">
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                        <p className="font-bold text-slate-900 dark:text-white text-sm">{appt.studentName}</p>
+                                                        <StatusBadge status={appt.status} />
+                                                        {isLate && (
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-[0.65rem] font-bold border border-amber-200 dark:border-amber-800">
+                                                                Sesión tardía
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-slate-500 dark:text-slate-400 text-xs">
+                                                        {new Date(appt.date + "T12:00:00").toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} — {appt.time}
+                                                    </p>
+                                                    <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">{appt.modality} · {appt.motivo}</p>
+                                                    {appt.status === "Completada" && appt.notes && (
+                                                        <div className="mt-2 flex items-start gap-2 p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl border border-indigo-100 dark:border-indigo-800">
+                                                            <ClipboardList className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
+                                                            <div>
+                                                                <p className="text-[0.65rem] font-bold text-indigo-400 uppercase tracking-wider mb-0.5">Notas clínicas</p>
+                                                                <p className="text-slate-600 dark:text-slate-300 text-xs leading-relaxed whitespace-pre-wrap">{appt.notes}</p>
+                                                            </div>
+                                                        </div>
                                                     )}
-                                                    {isFollowUp && (
-                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[0.65rem] font-bold border border-indigo-200">
-                                                            <ArrowRight className="w-2.5 h-2.5" /> Seguimiento
-                                                        </span>
+                                                    {appt.status === "Cancelada" && appt.notes && (
+                                                        <div className="mt-2 flex items-start gap-2 p-3 bg-rose-50 dark:bg-rose-900/20 rounded-xl border border-rose-100 dark:border-rose-800">
+                                                            <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                                                            <div>
+                                                                <p className="text-[0.65rem] font-bold text-rose-400 uppercase tracking-wider mb-0.5">Motivo de cancelación</p>
+                                                                <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed">{appt.notes}</p>
+                                                            </div>
+                                                        </div>
                                                     )}
                                                 </div>
-                                                <p className="text-slate-400 text-xs">
-                                                    {new Date(appt.date + "T12:00:00").toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} — {appt.time}
-                                                </p>
-                                                <p className="text-slate-400 text-xs mt-0.5">{appt.modality} · {isFollowUp ? appt.motivo.replace("Seguimiento: ", "") : appt.motivo}</p>
-                                                {appt.status === "Completada" && appt.notes && (
-                                                    <div className="mt-2 flex items-start gap-2 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
-                                                        <ClipboardList className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
-                                                        <div>
-                                                            <p className="text-[0.65rem] font-bold text-indigo-400 uppercase tracking-wider mb-0.5">Notas clínicas</p>
-                                                            <p className="text-slate-600 text-xs leading-relaxed whitespace-pre-wrap">{appt.notes}</p>
-                                                        </div>
-                                                    </div>
+                                                {appt.status === "Completada" && (
+                                                    hasActiveFollowUp ? (
+                                                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-400 border border-slate-200 dark:border-slate-600 shrink-0 self-start">
+                                                            <ArrowRight className="w-3.5 h-3.5" /> Seguimiento activo
+                                                        </span>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => openSeguimiento(appt)}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:opacity-80 cursor-pointer shrink-0 self-start bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700"
+                                                        >
+                                                            <ArrowRight className="w-3.5 h-3.5" /> Seguimiento
+                                                        </button>
+                                                    )
                                                 )}
                                             </div>
-                                            {appt.status === "Completada" && (
-                                                <button
-                                                    onClick={() => openSeguimiento(appt)}
-                                                    style={{ background: "#eef2ff", color: "#4338ca", border: "1px solid #c7d2fe" }}
-                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:opacity-80 cursor-pointer shrink-0 self-start"
-                                                >
-                                                    <ArrowRight className="w-3.5 h-3.5" /> Seguimiento
-                                                </button>
+
+                                            {/* Follow-up appointments nested below */}
+                                            {apptFollowUps.length > 0 && (
+                                                <div className="ml-6 space-y-2 border-l-2 border-indigo-200 dark:border-indigo-700 pl-4">
+                                                    {apptFollowUps
+                                                        .sort((a, b) => a.date.localeCompare(b.date))
+                                                        .map(fu => (
+                                                            <div key={fu.id} className="bg-indigo-50/60 dark:bg-indigo-900/10 rounded-xl border border-indigo-100 dark:border-indigo-800 p-3 flex flex-col sm:flex-row sm:items-start gap-3">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-[0.65rem] font-bold border border-indigo-200 dark:border-indigo-700">
+                                                                            <ArrowRight className="w-2.5 h-2.5" /> Seguimiento
+                                                                        </span>
+                                                                        <StatusBadge status={fu.status} />
+                                                                    </div>
+                                                                    <p className="text-slate-500 dark:text-slate-400 text-xs">
+                                                                        {new Date(fu.date + "T12:00:00").toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} — {fu.time}
+                                                                    </p>
+                                                                    <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">{fu.modality} · {fu.motivo}</p>
+                                                                    {fu.status === "Completada" && fu.notes && (
+                                                                        <div className="mt-2 flex items-start gap-2 p-2 bg-white dark:bg-slate-800 rounded-lg border border-indigo-100 dark:border-indigo-800">
+                                                                            <ClipboardList className="w-3 h-3 text-indigo-400 shrink-0 mt-0.5" />
+                                                                            <p className="text-slate-600 dark:text-slate-300 text-xs leading-relaxed whitespace-pre-wrap">{fu.notes}</p>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                                {fu.status === "Completada" && !followUpsByParent[fu.id]?.some(f => f.status !== "Cancelada") && (
+                                                                    <button
+                                                                        onClick={() => openSeguimiento(fu)}
+                                                                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-bold transition-all hover:opacity-80 cursor-pointer shrink-0 self-start bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700"
+                                                                    >
+                                                                        <ArrowRight className="w-3 h-3" /> Seguimiento
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        ))
+                                                    }
+                                                </div>
                                             )}
                                         </div>
                                     );
@@ -471,9 +629,30 @@ export function SpecialistDashboard() {
                 {/* Schedules Tab */}
                 {activeTab === "schedules" && (
                     <div>
+                        {/* Meeting URL config */}
+                        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-6 shadow-sm">
+                            <div className="flex items-center gap-2 mb-3">
+                                <Video className="w-4 h-4 text-blue-600" />
+                                <h4 className="font-bold text-slate-900 dark:text-white text-sm">Enlace de Videoconferencia (Citas Virtuales)</h4>
+                            </div>
+                            <p className="text-slate-500 text-xs mb-3">Este enlace se mostrará a los alumnos al agendar una cita virtual contigo.</p>
+                            <div className="flex gap-2">
+                                <input
+                                    type="url"
+                                    value={meetingUrlInput}
+                                    onChange={e => setMeetingUrlInput(e.target.value)}
+                                    placeholder="https://meet.google.com/xxx-xxxx-xxx"
+                                    className="flex-1 px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                                <Btn size="sm" onClick={() => spec && updateMeetingUrl(spec.id, meetingUrlInput || null)}>
+                                    Guardar
+                                </Btn>
+                            </div>
+                        </div>
+
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
                             <div>
-                                <h3 className="text-2xl font-bold text-slate-900">Mis Horarios de Atención</h3>
+                                <h3 className="text-2xl font-bold text-slate-900 dark:text-white">Mis Horarios de Atención</h3>
                                 <p className="text-slate-500 font-medium mt-1">
                                     Hoy es <span className="text-blue-600 font-bold">
                                         {new Date().toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
@@ -647,13 +826,13 @@ export function SpecialistDashboard() {
                                                 type="button"
                                                 onClick={() => slots.setNewWeek(opt.value)}
                                                 className={`flex items-start gap-3 p-3.5 rounded-xl border-2 text-left transition-all cursor-pointer ${slots.newWeek === opt.value
-                                                        ? `border-${opt.color}-500 bg-${opt.color}-50`
-                                                        : "border-slate-200 bg-white hover:border-slate-300"
+                                                    ? `border-${opt.color}-500 bg-${opt.color}-50`
+                                                    : "border-slate-200 bg-white hover:border-slate-300"
                                                     }`}
                                             >
                                                 <div className={`w-4 h-4 rounded-full border-2 mt-0.5 shrink-0 flex items-center justify-center transition-all ${slots.newWeek === opt.value
-                                                        ? `border-${opt.color}-500 bg-${opt.color}-500`
-                                                        : "border-slate-300"
+                                                    ? `border-${opt.color}-500 bg-${opt.color}-500`
+                                                    : "border-slate-300"
                                                     }`}>
                                                     {slots.newWeek === opt.value && (
                                                         <div className="w-1.5 h-1.5 rounded-full bg-white" />
@@ -795,10 +974,16 @@ export function SpecialistDashboard() {
                                                 {r.description && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{r.description}</p>}
                                                 <span className="text-[0.65rem] uppercase tracking-wider font-bold text-slate-400">{r.type}</span>
                                             </div>
-                                            <button onClick={() => deleteResource(r.id)} title="Eliminar"
-                                                className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all cursor-pointer shrink-0">
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
+                                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 shrink-0 transition-all">
+                                                <button onClick={() => openEditResource(r)} title="Editar"
+                                                    className="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all cursor-pointer">
+                                                    <Pencil className="w-4 h-4" />
+                                                </button>
+                                                <button onClick={() => deleteResource(r.id)} title="Eliminar"
+                                                    className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all cursor-pointer">
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
                                         </div>
                                     ))
                                 )}
@@ -892,10 +1077,16 @@ export function SpecialistDashboard() {
                                                     <span className={`absolute bottom-2 left-2 z-20 px-2 py-0.5 rounded-md font-bold text-[0.6rem] uppercase ${ev.type === "conferencia" ? "bg-violet-500 text-white" : "bg-blue-500 text-white"}`}>
                                                         {ev.type === "conferencia" ? "Conferencia" : "Taller"}
                                                     </span>
-                                                    <button onClick={() => deleteEvent(ev.id)} title="Eliminar"
-                                                        className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 p-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-all cursor-pointer shadow">
-                                                        <Trash2 className="w-3.5 h-3.5" />
-                                                    </button>
+                                                    <div className="absolute top-2 right-2 z-20 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                                        <button onClick={() => openEditEvent(ev)} title="Editar"
+                                                            className="p-1.5 bg-white/90 hover:bg-white text-blue-600 rounded-lg cursor-pointer shadow">
+                                                            <Pencil className="w-3.5 h-3.5" />
+                                                        </button>
+                                                        <button onClick={() => deleteEvent(ev.id)} title="Eliminar"
+                                                            className="p-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg cursor-pointer shadow">
+                                                            <Trash2 className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             )}
                                             <div className="p-3 flex items-start justify-between gap-2">
@@ -908,10 +1099,16 @@ export function SpecialistDashboard() {
                                                     </p>
                                                 </div>
                                                 {!ev.imageUrl && (
-                                                    <button onClick={() => deleteEvent(ev.id)} title="Eliminar"
-                                                        className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all cursor-pointer shrink-0">
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
+                                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 shrink-0 transition-all">
+                                                        <button onClick={() => openEditEvent(ev)} title="Editar"
+                                                            className="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all cursor-pointer">
+                                                            <Pencil className="w-4 h-4" />
+                                                        </button>
+                                                        <button onClick={() => deleteEvent(ev.id)} title="Eliminar"
+                                                            className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all cursor-pointer">
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
                                                 )}
                                             </div>
                                         </div>
@@ -921,6 +1118,39 @@ export function SpecialistDashboard() {
                         </div>
                     </div>
                 )}
+
+                {/* Virtual Confirm Modal */}
+                <Modal
+                    open={!!virtualConfirmAppt}
+                    onClose={() => setVirtualConfirmAppt(null)}
+                    title="Confirmar cita virtual"
+                    subtitle={virtualConfirmAppt ? `${virtualConfirmAppt.studentName} — ${virtualConfirmAppt.date} a las ${virtualConfirmAppt.time}` : ""}
+                    maxWidth="max-w-md"
+                >
+                    <div className="space-y-4">
+                        <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl flex items-start gap-2">
+                            <Video className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                            <p className="text-blue-800 text-sm">Esta es una cita virtual. El alumno recibirá el enlace de videollamada junto con la confirmación.</p>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-900 mb-2">Enlace de videollamada</label>
+                            <input
+                                type="url"
+                                value={virtualConfirmUrl}
+                                onChange={e => setVirtualConfirmUrl(e.target.value)}
+                                placeholder="https://meet.google.com/xxx-xxxx-xxx"
+                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <p className="text-slate-400 text-xs mt-1">Si lo cambias, se actualizará tu enlace general para citas virtuales.</p>
+                        </div>
+                        <div className="flex gap-3">
+                            <Btn variant="ghost" onClick={() => setVirtualConfirmAppt(null)} className="flex-1">Cancelar</Btn>
+                            <Btn onClick={handleConfirmVirtual} className="flex-1">
+                                <CheckCircle2 className="w-4 h-4" /> Confirmar cita
+                            </Btn>
+                        </div>
+                    </div>
+                </Modal>
 
                 {/* Action Modal — only shown for Completar and Cancelar, Confirmar is direct */}
                 <Modal
@@ -988,7 +1218,7 @@ export function SpecialistDashboard() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
                                 <label className="block text-slate-700 font-bold text-sm mb-3">Nueva Fecha</label>
-                                <MiniCalendar selectedDate={resch.date} onSelect={resch.setDate} availableDates={resch.availDates} />
+                                <MiniCalendar selectedDate={resch.date} onSelect={resch.setDate} availableDates={resch.availDates} onMonthChange={resch.handleMonthChange} />
                             </div>
                             <div>
                                 <label className="block text-slate-700 font-bold text-sm mb-3">Horarios</label>
@@ -1005,9 +1235,9 @@ export function SpecialistDashboard() {
                                 ) : (
                                     <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
                                         {resch.slots.map(t => (
-                                            <button key={t} onClick={() => resch.setSlot(t)}
-                                                className={`py-3 rounded-xl border-2 font-bold text-sm transition-all cursor-pointer ${resch.slot === t ? "border-blue-600 bg-blue-600 text-white" : "border-slate-100 bg-white text-slate-600 hover:border-blue-200"}`}>
-                                                {t}
+                                            <button key={t.start} onClick={() => resch.setSlot(t.start)}
+                                                className={`py-3 rounded-xl border-2 font-bold text-sm transition-all cursor-pointer ${resch.slot === t.start ? "border-blue-600 bg-blue-600 text-white" : "border-slate-100 bg-white text-slate-600 hover:border-blue-200"}`}>
+                                                {t.start}–{t.end}
                                             </button>
                                         ))}
                                     </div>
@@ -1062,9 +1292,9 @@ export function SpecialistDashboard() {
                                 ) : (
                                     <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto pr-1">
                                         {seguimientoSlots.map(t => (
-                                            <button key={t} onClick={() => setSeguimientoSlot(t)}
-                                                className={`py-3 rounded-xl border-2 font-bold text-sm transition-all cursor-pointer ${seguimientoSlot === t ? "border-indigo-600 bg-indigo-600 text-white shadow-md" : "border-slate-100 bg-white text-slate-600 hover:border-indigo-200"}`}>
-                                                {t}
+                                            <button key={t.start} onClick={() => setSeguimientoSlot(t.start)}
+                                                className={`py-3 rounded-xl border-2 font-bold text-sm transition-all cursor-pointer ${seguimientoSlot === t.start ? "border-indigo-600 bg-indigo-600 text-white shadow-md" : "border-slate-100 bg-white text-slate-600 hover:border-indigo-200"}`}>
+                                                {t.start}–{t.end}
                                             </button>
                                         ))}
                                     </div>
@@ -1081,6 +1311,86 @@ export function SpecialistDashboard() {
                             >
                                 <ArrowRight className="w-4 h-4" /> Confirmar Seguimiento
                             </Btn>
+                        </div>
+                    </div>
+                </Modal>
+
+                {/* ─── Edit Event Modal ─── */}
+                <Modal open={!!editingEvent} onClose={() => setEditingEvent(null)} title="Editar Evento" subtitle={editingEvent?.title} maxWidth="max-w-lg">
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-3">
+                            {["taller", "conferencia"].map(t => (
+                                <button key={t} onClick={() => setEditEvType(t)}
+                                    className={`py-2.5 rounded-xl border-2 cursor-pointer capitalize font-bold text-sm transition-all ${editEvType === t ? "border-violet-600 bg-violet-50 text-violet-700" : "border-slate-200 bg-white text-slate-500"}`}>
+                                    {t}
+                                </button>
+                            ))}
+                        </div>
+                        <div>
+                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Título <span className="text-rose-500">*</span></label>
+                            <input type="text" value={editEvTitle} onChange={e => setEditEvTitle(e.target.value)} className={inputCls} />
+                        </div>
+                        <div>
+                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Descripción</label>
+                            <textarea value={editEvDesc} onChange={e => setEditEvDesc(e.target.value)} rows={3} className={`${inputCls} resize-none`} />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Fecha <span className="text-rose-500">*</span></label>
+                                <input type="date" value={editEvDate} onChange={e => setEditEvDate(e.target.value)} className={inputCls} />
+                            </div>
+                            <div>
+                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Hora</label>
+                                <input type="time" value={editEvTime} onChange={e => setEditEvTime(e.target.value)} className={inputCls} />
+                            </div>
+                        </div>
+                        {editEvType === "taller" && (
+                            <div>
+                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Enlace de Registro</label>
+                                <input type="url" value={editEvRegUrl} onChange={e => setEditEvRegUrl(e.target.value)} placeholder="https://forms.gle/..." className={inputCls} />
+                            </div>
+                        )}
+                        <div>
+                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Cambiar imagen (opcional)</label>
+                            <input type="file" accept="image/*" onChange={e => setEditEvImg(e.target.files?.[0] || null)}
+                                className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 cursor-pointer" />
+                            {editEvImg && <p className="text-xs text-slate-400 mt-1">{editEvImg.name}</p>}
+                        </div>
+                        <div className="flex gap-3 pt-2">
+                            <Btn variant="ghost" onClick={() => setEditingEvent(null)} className="flex-1">Cancelar</Btn>
+                            <Btn onClick={handleSaveEvent} className="flex-1 bg-violet-600 hover:bg-violet-700 text-white shadow-violet-600/20">Guardar Cambios</Btn>
+                        </div>
+                    </div>
+                </Modal>
+
+                {/* ─── Edit Resource Modal ─── */}
+                <Modal open={!!editingResource} onClose={() => setEditingResource(null)} title="Editar Recurso" subtitle={editingResource?.title} maxWidth="max-w-md">
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Título <span className="text-rose-500">*</span></label>
+                            <input type="text" value={editRTitle} onChange={e => setEditRTitle(e.target.value)} className={inputCls} />
+                        </div>
+                        <div>
+                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Descripción</label>
+                            <textarea value={editRDesc} onChange={e => setEditRDesc(e.target.value)} rows={3} className={`${inputCls} resize-none`} />
+                        </div>
+                        {editingResource?.type !== "image" && (
+                            <div>
+                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Enlace</label>
+                                <input type="url" value={editRUrl} onChange={e => setEditRUrl(e.target.value)} placeholder="https://..." className={inputCls} />
+                            </div>
+                        )}
+                        {editingResource?.type !== "link" && (
+                            <div>
+                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Cambiar archivo (opcional)</label>
+                                <input type="file" onChange={e => setEditRFile(e.target.files?.[0] || null)}
+                                    className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer" />
+                                {editRFile && <p className="text-xs text-slate-400 mt-1">{editRFile.name}</p>}
+                            </div>
+                        )}
+                        <div className="flex gap-3 pt-2">
+                            <Btn variant="ghost" onClick={() => setEditingResource(null)} className="flex-1">Cancelar</Btn>
+                            <Btn onClick={handleSaveResource} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20">Guardar Cambios</Btn>
                         </div>
                     </div>
                 </Modal>
@@ -1111,41 +1421,47 @@ function AppointmentCard({
     const isApptPast = apptDateMidnight < todayM;
     const hoursUntilAppt = (apptDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
     const isWithin24h = hoursUntilAppt >= 0 && hoursUntilAppt < 24;
-    const isFollowUp = appt.motivo?.startsWith("Seguimiento:");
+    const isFollowUp = appt.isFollowUp || appt.motivo?.startsWith("Seguimiento:");
 
     return (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col sm:flex-row sm:items-center gap-3 hover:shadow-md transition-shadow">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 flex flex-col sm:flex-row sm:items-center gap-3 hover:shadow-md transition-shadow">
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <p className="font-bold text-slate-900 text-sm">{appt.studentName}</p>
+                    <p className="font-bold text-slate-900 dark:text-white text-sm">{appt.studentName}</p>
                     <StatusBadge status={appt.status} />
-                    {/* Seguimiento tag */}
                     {isFollowUp && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[0.65rem] font-bold border border-indigo-200">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-[0.65rem] font-bold border border-indigo-200 dark:border-indigo-700">
                             <ArrowRight className="w-2.5 h-2.5" /> Seguimiento
                         </span>
                     )}
                 </div>
-                <p className="text-slate-500 text-xs">{appt.date} — {appt.time} • {appt.modality}</p>
+                <p className="text-slate-500 dark:text-slate-300 text-xs">{appt.date} — {appt.time} • {appt.modality}</p>
                 {appt.motivo && (
-                    <p className="text-slate-400 text-xs mt-0.5">
-                        Motivo: {isFollowUp ? appt.motivo.replace("Seguimiento: ", "") : appt.motivo}
+                    <p className="text-slate-400 dark:text-slate-300 text-xs mt-0.5">
+                        Motivo: {appt.motivo.replace(/^Seguimiento:\s*/i, "")}
                     </p>
                 )}
-                {/* Clinical notes — visible only to specialist */}
                 {appt.status === "Completada" && appt.notes && (
-                    <div className="mt-2 flex items-start gap-2 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+                    <div className="mt-2 flex items-start gap-2 p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl border border-indigo-100 dark:border-indigo-800">
                         <ClipboardList className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
                         <div>
                             <p className="text-[0.65rem] font-bold text-indigo-400 uppercase tracking-wider mb-0.5">Notas clínicas</p>
-                            <p className="text-slate-600 text-xs leading-relaxed whitespace-pre-wrap">{appt.notes}</p>
+                            <p className="text-slate-600 dark:text-slate-300 text-xs leading-relaxed whitespace-pre-wrap">{appt.notes}</p>
+                        </div>
+                    </div>
+                )}
+                {appt.status === "Cancelada" && appt.notes && (
+                    <div className="mt-2 flex items-start gap-2 p-3 bg-rose-50 dark:bg-rose-900/20 rounded-xl border border-rose-100 dark:border-rose-800">
+                        <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                        <div>
+                            <p className="text-[0.65rem] font-bold text-rose-400 uppercase tracking-wider mb-0.5">Motivo de cancelación</p>
+                            <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed">{appt.notes}</p>
                         </div>
                     </div>
                 )}
             </div>
 
             <div className="flex items-center gap-2 flex-wrap justify-end">
-                {/* Pendiente: confirm directly + reschedule (solo si no es pasada) + cancel */}
                 {appt.status === "Pendiente" && (
                     <>
                         <Btn size="sm" variant="emerald" onClick={() => onConfirmDirect(appt)}>
@@ -1157,7 +1473,7 @@ function AppointmentCard({
                             </Btn>
                         )}
                         {isWithin24h ? (
-                            <span className="text-xs text-amber-600 font-medium px-2 py-1 bg-amber-50 rounded-lg border border-amber-200 flex items-center gap-1">
+                            <span className="text-xs text-amber-600 dark:text-amber-400 font-medium px-2 py-1 bg-amber-50 dark:bg-amber-900/30 rounded-lg border border-amber-200 dark:border-amber-800 flex items-center gap-1">
                                 <Lock className="w-3 h-3" /> &lt;24h
                             </span>
                         ) : (
@@ -1166,7 +1482,6 @@ function AppointmentCard({
                     </>
                 )}
 
-                {/* Confirmada: complete + reschedule (solo si no es pasada) + cancel */}
                 {appt.status === "Confirmada" && (
                     <>
                         <Btn size="sm" onClick={() => onAction(appt, "Completada")}
@@ -1179,7 +1494,7 @@ function AppointmentCard({
                             </Btn>
                         )}
                         {isWithin24h ? (
-                            <span className="text-xs text-amber-600 font-medium px-2 py-1 bg-amber-50 rounded-lg border border-amber-200 flex items-center gap-1">
+                            <span className="text-xs text-amber-600 dark:text-amber-400 font-medium px-2 py-1 bg-amber-50 dark:bg-amber-900/30 rounded-lg border border-amber-200 dark:border-amber-800 flex items-center gap-1">
                                 <Lock className="w-3 h-3" /> &lt;24h
                             </span>
                         ) : (
@@ -1188,12 +1503,10 @@ function AppointmentCard({
                     </>
                 )}
 
-                {/* Completada: only seguimiento — styled explicitly to avoid Tailwind purge */}
                 {appt.status === "Completada" && (
                     <button
                         onClick={() => onSeguimiento(appt)}
-                        style={{ background: "#eef2ff", color: "#4338ca", border: "1px solid #c7d2fe" }}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:opacity-80 cursor-pointer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all hover:opacity-80 cursor-pointer bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700"
                     >
                         <ArrowRight className="w-3.5 h-3.5" /> Seguimiento
                     </button>

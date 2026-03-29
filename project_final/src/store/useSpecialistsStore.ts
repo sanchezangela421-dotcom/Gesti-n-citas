@@ -39,7 +39,11 @@ export function useSpecialistsStore(setUsers: Dispatch<SetStateAction<User[]>>) 
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body.error || "No se pudo crear el especialista.");
+        return;
+      }
       const newSpec = await res.json();
       setSpecialists(p => [...p, { ...newSpec, schedule: newSpec.schedules ?? [] }]);
       refreshUsers();
@@ -99,6 +103,23 @@ export function useSpecialistsStore(setUsers: Dispatch<SetStateAction<User[]>>) 
       });
   }, []);
 
+  const updateMeetingUrl = useCallback(async (specialistId: string, meetingUrl: string | null) => {
+    try {
+      const res = await fetch(`${API}/specialists/${specialistId}/meeting-url`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ meetingUrl }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const updated = await res.json();
+      setSpecialists(p => p.map(s => s.id === specialistId ? { ...updated, schedule: updated.schedules ?? [] } : s));
+      toast.success("Enlace de videoconferencia actualizado");
+    } catch (err) {
+      console.error("Error updating meeting URL:", err);
+      toast.error("No se pudo actualizar el enlace.");
+    }
+  }, []);
+
   const removeScheduleSlot = useCallback((specialistId: string, slotId: string) => {
     // Optimistic update
     setSpecialists(p =>
@@ -125,5 +146,6 @@ export function useSpecialistsStore(setUsers: Dispatch<SetStateAction<User[]>>) 
     removeSpecialist,
     addScheduleSlot,
     removeScheduleSlot,
+    updateMeetingUrl,
   };
 }

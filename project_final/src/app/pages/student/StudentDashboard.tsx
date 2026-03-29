@@ -9,7 +9,7 @@ import {
 import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
 import { AppShell } from "../../components/layout/AppShell";
-import { Btn, StatCard, TabNav, Modal, MiniCalendar, StatusBadge, inputCls } from "../../components/ui";
+import { Btn, StatCard, TabNav, Modal, MiniCalendar, StatusBadge, inputCls, Avatar, EmptyState } from "../../components/ui";
 import { DEPT_CONFIG, DEPT_REASONS } from "../../../constants";
 import { useAppointmentWizard, useReschedule, useCancelAppointment } from "../../hooks";
 import type { AppEvent } from "../../../types";
@@ -35,6 +35,25 @@ function getVideoEmbedUrl(url: string): string | null {
     }
 }
 
+// ── Carousel static slides ────────────────────────────────
+interface CarouselSlide extends AppEvent { gradient?: string; _static?: boolean; }
+
+const WELCOME_SLIDE: CarouselSlide = {
+    id: "__welcome__", _static: true,
+    type: "bienvenida", department: "TECNL", date: "", time: "",
+    title: "Sistema de Citas TECNL",
+    description: "Agenda citas con Psicología, Tutorías y Nutrición. Tu bienestar académico es nuestra prioridad.",
+    gradient: "from-blue-950 via-slate-900 to-teal-900",
+};
+
+const PLACEHOLDER_SLIDE: CarouselSlide = {
+    id: "__placeholder__", _static: true,
+    type: "placeholder", department: "Institucional", date: "", time: "",
+    title: "Próximamente Eventos",
+    description: "El equipo está preparando talleres, conferencias y actividades para ti. ¡Mantente pendiente!",
+    gradient: "from-slate-900 via-indigo-950 to-slate-900",
+};
+
 // Dept data for wizard step 1
 const DEPARTMENTS = [
     { key: "Psicología", icon: Brain, color: "from-blue-500 to-blue-700" },
@@ -44,7 +63,7 @@ const DEPARTMENTS = [
 
 export function StudentDashboard() {
     const { user } = useAuth();
-    const { getAppointments, updateAppointmentStatus, events, resources, getStats } = useStore();
+    const { getAppointments, updateAppointmentStatus, events, resources, getStats, specialists } = useStore();
 
     // ── UI state ──────────────────────────────────────────
     const [activeApptTab, setActiveApptTab] = useState("proximas");
@@ -73,39 +92,36 @@ export function StudentDashboard() {
     const resch = useReschedule("student");
     const cancel = useCancelAppointment();
 
+    // ── Carousel slides (welcome always first; placeholder when no events) ──
+    const slides: CarouselSlide[] = [
+        WELCOME_SLIDE,
+        ...(events.length > 0 ? events : [PLACEHOLDER_SLIDE]),
+    ];
+
     // ── Banner auto-rotation ──────────────────────────────
     useEffect(() => {
-        if (events.length <= 1) return;
-        const t = setInterval(() => setActiveBannerIndex(p => (p + 1) % events.length), 5000);
+        if (slides.length <= 1) return;
+        const t = setInterval(() => setActiveBannerIndex(p => (p + 1) % slides.length), 5000);
         return () => clearInterval(t);
-    }, [events.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [slides.length]);
 
     if (!user) return null;
 
     return (
         <AppShell>
-            <div className="space-y-8 max-w-7xl mx-auto w-full pb-12">
+            <div className="space-y-8 max-w-7xl mx-auto w-full pb-28">
 
                 {/* ── Page Header ── */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-                    <div>
-                        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
-                            Bienvenido(a), <span className="text-blue-600">{user.name?.split(" ")[0]}</span>
-                        </h1>
-                        <p className="text-slate-500 mt-1 font-medium">
-                            {user.carrera || "Estudiante"}
-                            <span className="mx-2 text-slate-300">•</span> Semestre {user.semestre || "—"}
-                            <span className="mx-2 text-slate-300">•</span> No. Control: {user.matricula || "—"}
-                        </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                        <Btn variant="outline" onClick={() => setShowResources(true)} size="lg">
-                            <BookOpen className="w-5 h-5" /> Mis Recursos
-                        </Btn>
-                        <Btn onClick={() => { wizard.setShow(true); wizard.reset(); }} size="lg" className="shadow-blue-600/20">
-                            <CalendarCheck className="w-5 h-5" /> Solicitar Cita
-                        </Btn>
-                    </div>
+                <div className="mb-8">
+                    <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">
+                        Bienvenido(a), <span className="text-blue-600">{user.name?.split(" ")[0]}</span>
+                    </h1>
+                    <p className="text-slate-500 mt-1 font-medium">
+                        {user.carrera || "Estudiante"}
+                        <span className="mx-2 text-slate-300 dark:text-slate-600">•</span> Semestre {user.semestre || "—"}
+                        <span className="mx-2 text-slate-300 dark:text-slate-600">•</span> No. Control: {user.matricula || "—"}
+                    </p>
                 </div>
 
                 {/* ── Banner Carousel ── */}
@@ -114,42 +130,98 @@ export function StudentDashboard() {
                         className="flex h-full transition-transform duration-700 ease-out"
                         style={{ transform: `translateX(-${activeBannerIndex * 100}%)` }}
                     >
-                        {events.map(ev => (
-                            <div key={ev.id} className="relative w-full h-full shrink-0 overflow-hidden">
-                                <img src={ev.imageUrl} alt={ev.title} className="absolute inset-0 w-full h-full object-cover" />
-                                <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex flex-col items-center justify-center p-6 sm:p-12 text-center">
+                        {slides.map(slide => (
+                            <div key={slide.id} className="relative w-full h-full shrink-0 overflow-hidden">
+                                {/* Background: gradient for static slides, image for events */}
+                                {slide.imageUrl ? (
+                                    <>
+                                        <img src={slide.imageUrl} alt={slide.title} className="absolute inset-0 w-full h-full object-cover" />
+                                        <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px]" />
+                                    </>
+                                ) : (
+                                    <div className={`absolute inset-0 bg-gradient-to-br ${slide.gradient}`}>
+                                        <div className="absolute top-0 right-0 w-96 h-96 bg-white/5 rounded-full blur-3xl" />
+                                        <div className="absolute bottom-0 left-0 w-72 h-72 bg-white/5 rounded-full blur-3xl" />
+                                        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEiIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSIvPjwvc3ZnPg==')] opacity-60" />
+                                    </div>
+                                )}
+
+                                {/* Content */}
+                                <div className="absolute inset-0 flex flex-col items-center justify-center p-6 sm:p-12 text-center z-10">
                                     <div className="max-w-4xl space-y-4 sm:space-y-6 animate-in fade-in zoom-in-95 duration-1000 delay-300">
-                                        <div className="flex justify-center gap-2">
-                                            <span className={`px-3 py-1 rounded-full text-[0.7rem] font-black uppercase tracking-[0.2em] shadow-lg ${ev.type === "conferencia" ? "bg-violet-600 text-white" : "bg-blue-600 text-white"}`}>
-                                                {ev.type}
-                                            </span>
-                                            <span className="px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-white text-[0.7rem] font-black uppercase tracking-[0.2em] border border-white/20">
-                                                {ev.department}
-                                            </span>
-                                        </div>
-                                        <h2 className="text-2xl sm:text-5xl font-black text-white leading-tight drop-shadow-2xl uppercase italic tracking-tighter">
-                                            {ev.title}
-                                        </h2>
-                                        <p className="text-white/90 text-base md:text-lg font-medium line-clamp-2 max-w-2xl mx-auto hidden sm:block">
-                                            {ev.description}
-                                        </p>
-                                        <div className="pt-4 flex items-center justify-center gap-4">
-                                            <Btn
-                                                size="lg"
-                                                onClick={() => {
-                                                    if (ev.type === "taller" && ev.registrationUrl) window.open(ev.registrationUrl, "_blank");
-                                                    else if (ev.type === "conferencia") { setSelConf(ev); setShowConfModal(true); }
-                                                    else toast.success("¡Registrado en el evento!");
-                                                }}
-                                                className="bg-slate-900 text-white hover:bg-black border-0 shadow-2xl px-12 py-4 uppercase italic font-black tracking-tighter transform hover:scale-105 transition-transform active:scale-95"
-                                            >
-                                                {ev.type === "conferencia" ? "Más información" : "¡Registrarme Ahora!"}
-                                            </Btn>
-                                        </div>
-                                        <div className="flex items-center justify-center gap-2 text-white/70 text-xs font-black uppercase italic tracking-[0.3em] pt-4 border-t border-white/10 w-fit mx-auto">
-                                            <Clock className="w-4 h-4" />
-                                            {new Date(ev.date + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "long" })}
-                                        </div>
+                                        {slide._static ? (
+                                            /* ── Static slide content ── */
+                                            <>
+                                                <div className="flex justify-center">
+                                                    <div className="w-16 h-16 sm:w-20 sm:h-20 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center border border-white/20 shadow-xl">
+                                                        {slide.id === "__welcome__"
+                                                            ? <CalendarCheck className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+                                                            : <Calendar className="w-8 h-8 sm:w-10 sm:h-10 text-white/70" />
+                                                        }
+                                                    </div>
+                                                </div>
+                                                <h2 className="text-2xl sm:text-5xl font-black text-white leading-tight drop-shadow-2xl uppercase italic tracking-tighter">
+                                                    {slide.title}
+                                                </h2>
+                                                <p className="text-white/70 text-base md:text-lg font-medium max-w-2xl mx-auto">
+                                                    {slide.description}
+                                                </p>
+                                                {slide.id === "__welcome__" && (
+                                                    <>
+                                                        <div className="pt-4 flex items-center justify-center">
+                                                            <Btn size="lg"
+                                                                onClick={() => { wizard.setShow(true); wizard.reset(); }}
+                                                                className="bg-white text-slate-900 hover:bg-white/90 border-0 shadow-2xl px-10 py-4 uppercase italic font-black tracking-tighter transform hover:scale-105 transition-transform active:scale-95">
+                                                                Solicitar Cita
+                                                            </Btn>
+                                                        </div>
+                                                        <div className="flex items-center justify-center gap-6 pt-4 border-t border-white/10 w-fit mx-auto">
+                                                            {["Psicología", "Tutorías", "Nutrición"].map(d => (
+                                                                <span key={d} className="text-white/50 text-xs font-black uppercase tracking-widest">{d}</span>
+                                                            ))}
+                                                        </div>
+                                                    </>
+                                                )}
+                                                {slide.id === "__placeholder__" && (
+                                                    <div className="flex items-center justify-center gap-2 text-white/40 text-xs font-black uppercase tracking-[0.3em] pt-4 border-t border-white/10 w-fit mx-auto">
+                                                        <Clock className="w-4 h-4" /> Muy pronto
+                                                    </div>
+                                                )}
+                                            </>
+                                        ) : (
+                                            /* ── Real event content ── */
+                                            <>
+                                                <div className="flex justify-center gap-2">
+                                                    <span className={`px-3 py-1 rounded-full text-[0.7rem] font-black uppercase tracking-[0.2em] shadow-lg ${slide.type === "conferencia" ? "bg-violet-600 text-white" : "bg-blue-600 text-white"}`}>
+                                                        {slide.type}
+                                                    </span>
+                                                    <span className="px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-white text-[0.7rem] font-black uppercase tracking-[0.2em] border border-white/20">
+                                                        {slide.department}
+                                                    </span>
+                                                </div>
+                                                <h2 className="text-2xl sm:text-5xl font-black text-white leading-tight drop-shadow-2xl uppercase italic tracking-tighter">
+                                                    {slide.title}
+                                                </h2>
+                                                <p className="text-white/90 text-base md:text-lg font-medium line-clamp-2 max-w-2xl mx-auto hidden sm:block">
+                                                    {slide.description}
+                                                </p>
+                                                <div className="pt-4 flex items-center justify-center gap-4">
+                                                    <Btn size="lg"
+                                                        onClick={() => {
+                                                            if (slide.type === "taller" && slide.registrationUrl) window.open(slide.registrationUrl, "_blank");
+                                                            else if (slide.type === "conferencia") { setSelConf(slide); setShowConfModal(true); }
+                                                            else toast.success("¡Registrado en el evento!");
+                                                        }}
+                                                        className="bg-slate-900 text-white hover:bg-black border-0 shadow-2xl px-12 py-4 uppercase italic font-black tracking-tighter transform hover:scale-105 transition-transform active:scale-95">
+                                                        {slide.type === "conferencia" ? "Más información" : "¡Registrarme Ahora!"}
+                                                    </Btn>
+                                                </div>
+                                                <div className="flex items-center justify-center gap-2 text-white/70 text-xs font-black uppercase italic tracking-[0.3em] pt-4 border-t border-white/10 w-fit mx-auto">
+                                                    <Clock className="w-4 h-4" />
+                                                    {new Date(slide.date + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "long" })}
+                                                </div>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -158,7 +230,7 @@ export function StudentDashboard() {
 
                     {/* Dots */}
                     <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2.5 z-20">
-                        {events.map((_, i) => (
+                        {slides.map((_, i) => (
                             <button key={i} onClick={() => setActiveBannerIndex(i)}
                                 className={`w-3 h-3 rounded-full transition-all duration-300 border-2 ${i === activeBannerIndex ? "bg-white border-white w-8" : "bg-white/20 border-white/40 hover:bg-white/40"}`}
                             />
@@ -166,11 +238,11 @@ export function StudentDashboard() {
                     </div>
 
                     {/* Arrows */}
-                    <button onClick={() => setActiveBannerIndex(p => (p - 1 + events.length) % events.length)}
+                    <button onClick={() => setActiveBannerIndex(p => (p - 1 + slides.length) % slides.length)}
                         className="absolute left-6 top-1/2 -translate-y-1/2 p-3 bg-white/10 backdrop-blur-md hover:bg-white/20 text-white rounded-2xl border border-white/10 opacity-0 group-hover:opacity-100 hidden sm:block">
                         <ChevronLeft className="w-6 h-6" />
                     </button>
-                    <button onClick={() => setActiveBannerIndex(p => (p + 1) % events.length)}
+                    <button onClick={() => setActiveBannerIndex(p => (p + 1) % slides.length)}
                         className="absolute right-6 top-1/2 -translate-y-1/2 p-3 bg-white/10 backdrop-blur-md hover:bg-white/20 text-white rounded-2xl border border-white/10 opacity-0 group-hover:opacity-100 hidden sm:block">
                         <ChevronRight className="w-6 h-6" />
                     </button>
@@ -183,48 +255,63 @@ export function StudentDashboard() {
 
                 {/* ── Appointments ── */}
                 <div className="mt-8">
-                    <h3 className="text-xl font-bold text-slate-900 mb-4">Mis Citas</h3>
-                    <TabNav
-                        tabs={[
-                            { key: "proximas", label: `Próximas (${proximas.length})` },
-                            { key: "historial", label: `Historial (${historial.length})` },
-                        ]}
-                        active={activeApptTab}
-                        onSelect={setActiveApptTab}
-                    />
+                    <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-4">Mis Citas</h3>
+                    <div className="flex items-center justify-between">
+                        <TabNav
+                            tabs={[
+                                { key: "proximas", label: `Próximas (${proximas.length})` },
+                                { key: "historial", label: `Historial (${historial.length})` },
+                            ]}
+                            active={activeApptTab}
+                            onSelect={setActiveApptTab}
+                        />
+                        <Btn variant="ghost" onClick={() => setShowResources(true)} size="sm" className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white shrink-0">
+                            <BookOpen className="w-4 h-4" /> Mis Recursos
+                        </Btn>
+                    </div>
 
                     <div className="mt-6 space-y-4">
                         {activeApptTab === "proximas" && (
                             proximas.length === 0 ? (
-                                <div className="bg-white rounded-3xl border border-dashed border-slate-200 p-12 text-center">
-                                    <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                                        <CalendarCheck className="w-8 h-8 text-slate-300" />
-                                    </div>
-                                    <p className="text-slate-500 font-medium">No tienes citas próximas</p>
-                                    <p className="text-slate-400 text-sm mt-1">Solicita una cita usando el botón de arriba</p>
+                                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700">
+                                    <EmptyState icon={CalendarCheck} title="No tienes citas próximas" subtitle="Solicita una cita usando el botón de arriba" />
                                 </div>
                             ) : proximas.map(appt => {
                                 const apptDate = new Date(appt.date + "T12:00:00");
                                 const today = new Date(); today.setHours(0, 0, 0, 0);
                                 const isPast = apptDate < today;
+                                const apptDateTime = new Date(`${appt.date}T${appt.time}:00`);
+                                const hoursUntil = (apptDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
+                                const isWithin24h = hoursUntil >= 0 && hoursUntil < 24;
                                 return (
-                                <div key={appt.id} className={`bg-white rounded-2xl border shadow-sm p-5 flex flex-col sm:flex-row sm:items-center gap-4 hover:shadow-md transition-shadow ${isPast ? "border-rose-100 bg-rose-50/30" : "border-slate-200"}`}>
+                                <div key={appt.id} className={`bg-white dark:bg-slate-800 rounded-2xl border shadow-sm p-5 flex flex-col sm:flex-row sm:items-center gap-4 hover:shadow-md transition-shadow ${isPast ? "border-rose-100 dark:border-rose-900/50 bg-rose-50/30 dark:bg-rose-900/10" : "border-slate-200 dark:border-slate-700"}`}>
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                            <p className="font-bold text-slate-900">{appt.department}</p>
+                                            <p className="font-bold text-slate-900 dark:text-white">{appt.department}</p>
                                             {isPast ? (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[0.65rem] font-bold border border-rose-200">
-                                                    Sin atender
-                                                </span>
+                                                <StatusBadge status="Sin atender" />
                                             ) : (
                                                 <StatusBadge status={appt.status} />
                                             )}
                                         </div>
-                                        <p className="text-slate-500 text-sm">{appt.specialistName}</p>
-                                        <p className="text-slate-400 text-xs mt-1">
+                                        <p className="text-slate-500 dark:text-slate-300 text-sm">{appt.specialistName}</p>
+                                        <p className="text-slate-400 dark:text-slate-400 text-xs mt-1">
                                             {apptDate.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" })} — {appt.time}
                                         </p>
-                                        {appt.motivo && <p className="text-slate-400 text-xs mt-0.5">Motivo: {appt.motivo}</p>}
+                                        {appt.motivo && <p className="text-slate-400 dark:text-slate-400 text-xs mt-0.5">Motivo: {appt.motivo}</p>}
+                                        {appt.status === "Confirmada" && appt.modality === "Virtual" && (() => {
+                                            const specData = specialists.find(s => s.id === appt.specialistId);
+                                            return specData?.meetingUrl ? (
+                                                <a href={specData.meetingUrl} target="_blank" rel="noopener noreferrer"
+                                                    className="inline-flex items-center gap-1.5 mt-1.5 text-xs font-semibold text-blue-600 hover:text-blue-800">
+                                                    <Video className="w-3.5 h-3.5" /> Unirse a videollamada
+                                                </a>
+                                            ) : (
+                                                <p className="text-blue-500 text-xs mt-1 flex items-center gap-1">
+                                                    <Video className="w-3.5 h-3.5" /> Cita virtual — el especialista compartirá el enlace
+                                                </p>
+                                            );
+                                        })()}
                                         {isPast && (
                                             <p className="text-rose-500 text-xs mt-1 font-medium">El especialista debe registrar el resultado de esta sesión.</p>
                                         )}
@@ -232,18 +319,22 @@ export function StudentDashboard() {
                                     <div className="flex items-center gap-2 flex-wrap">
                                         {!isPast && (
                                             <>
-                                                {!isPast && (
-                                                    <Btn size="sm" variant="ghost" onClick={() => resch.open(appt.id)}>
-                                                        <RefreshCw className="w-3.5 h-3.5" /> Reagendar
-                                                    </Btn>
-                                                )}
+                                                <Btn size="sm" variant="ghost" onClick={() => resch.open(appt.id)}>
+                                                    <RefreshCw className="w-3.5 h-3.5" /> Reagendar
+                                                </Btn>
                                                 {appt.status === "Pendiente" && (
-                                                    <Btn size="sm" variant="rose" onClick={() => cancel.open(appt.id)}>
-                                                        Cancelar
-                                                    </Btn>
+                                                    isWithin24h ? (
+                                                        <span className="text-xs text-amber-700 font-medium px-2 py-1 bg-amber-50 rounded-lg border border-amber-200">
+                                                            No cancelable — menos de 24h
+                                                        </span>
+                                                    ) : (
+                                                        <Btn size="sm" variant="rose" onClick={() => cancel.open(appt.id)}>
+                                                            Cancelar
+                                                        </Btn>
+                                                    )
                                                 )}
                                                 {appt.status === "Confirmada" && (
-                                                    <span className="text-xs text-slate-400 font-medium px-2 py-1 bg-slate-50 rounded-lg border border-slate-200">
+                                                    <span className="text-xs text-slate-500 dark:text-slate-400 font-medium px-2 py-1 bg-slate-50 dark:bg-slate-700 rounded-lg border border-slate-200 dark:border-slate-600">
                                                         Confirmada — contacta al especialista
                                                     </span>
                                                 )}
@@ -257,29 +348,34 @@ export function StudentDashboard() {
 
                         {activeApptTab === "historial" && (
                             historial.length === 0 ? (
-                                <div className="bg-white rounded-3xl border border-dashed border-slate-200 p-12 text-center">
-                                    <p className="text-slate-500 font-medium">Sin historial de citas</p>
+                                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700">
+                                    <EmptyState icon={CalendarCheck} title="Sin historial de citas" />
                                 </div>
                             ) : historial.map(appt => {
                                 const isLate = appt.status === "Completada" &&
                                     appt.updatedAt &&
                                     appt.updatedAt.split("T")[0] > appt.date;
                                 return (
-                                <div key={appt.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex items-center gap-4 opacity-80">
+                                <div key={appt.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-5 flex items-center gap-4 opacity-80">
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                            <p className="font-bold text-slate-900">{appt.department}</p>
+                                            <p className="font-bold text-slate-900 dark:text-white">{appt.department}</p>
                                             <StatusBadge status={appt.status} />
-                                            {isLate && (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[0.65rem] font-bold border border-amber-200">
-                                                    Sesión tardía
-                                                </span>
-                                            )}
+                                            {isLate && <StatusBadge status="Sesión tardía" />}
                                         </div>
-                                        <p className="text-slate-500 text-sm">{appt.specialistName}</p>
-                                        <p className="text-slate-400 text-xs mt-1">
+                                        <p className="text-slate-500 dark:text-slate-300 text-sm">{appt.specialistName}</p>
+                                        <p className="text-slate-400 dark:text-slate-400 text-xs mt-1">
                                             {new Date(appt.date + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })} — {appt.time}
                                         </p>
+                                        {appt.status === "Cancelada" && appt.notes && (
+                                            <div className="mt-2 flex items-start gap-2 p-2.5 bg-rose-50 rounded-xl border border-rose-100">
+                                                <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                                                <div>
+                                                    <p className="text-[0.65rem] font-bold text-rose-400 uppercase tracking-wider mb-0.5">Motivo de cancelación</p>
+                                                    <p className="text-slate-600 text-xs leading-relaxed">{appt.notes}</p>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 );
@@ -326,9 +422,7 @@ export function StudentDashboard() {
                                 {wizard.deptSpecialists.map(s => (
                                     <button key={s.id} onClick={() => wizard.setSelSpecId(s.id)}
                                         className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-all cursor-pointer text-left ${wizard.selSpecId === s.id ? "border-blue-600 bg-blue-50" : "border-slate-200 hover:border-slate-300"}`}>
-                                        <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center font-bold text-blue-700 text-sm">
-                                            {s.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
-                                        </div>
+                                        <Avatar name={s.name} size="md" avatarUrl={s.avatarUrl} />
                                         <div>
                                             <p className="font-bold text-slate-900 text-sm">{s.name}</p>
                                             <p className="text-slate-400 text-xs">{s.shift} • {s.email}</p>
@@ -341,7 +435,7 @@ export function StudentDashboard() {
                             {wizard.selSpecId && (
                                 <div>
                                     <p className="font-bold text-slate-700 text-sm mb-2">Selecciona una fecha disponible</p>
-                                    <MiniCalendar selectedDate={wizard.selDate} onSelect={wizard.setSelDate} availableDates={wizard.availDates} />
+                                    <MiniCalendar selectedDate={wizard.selDate} onSelect={wizard.setSelDate} availableDates={wizard.availDates} onMonthChange={wizard.handleMonthChange} />
                                 </div>
                             )}
 
@@ -351,9 +445,9 @@ export function StudentDashboard() {
                                     <p className="font-bold text-slate-700 text-sm mb-2">Selecciona un horario</p>
                                     <div className="grid grid-cols-3 gap-2">
                                         {wizard.slotsForDate.map(slot => (
-                                            <button key={slot} onClick={() => wizard.setSelSlot(slot)}
-                                                className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 font-bold text-sm transition-all cursor-pointer ${wizard.selSlot === slot ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:border-blue-300"}`}>
-                                                <Clock className="w-3.5 h-3.5" />{slot}
+                                            <button key={slot.start} onClick={() => wizard.setSelSlot(slot.start)}
+                                                className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 font-bold text-sm transition-all cursor-pointer ${wizard.selSlot === slot.start ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:border-blue-300"}`}>
+                                                <Clock className="w-3.5 h-3.5" />{slot.start}–{slot.end}
                                             </button>
                                         ))}
                                     </div>
@@ -371,6 +465,24 @@ export function StudentDashboard() {
                             <button onClick={() => wizard.setStep(2)} className="text-slate-500 text-sm flex items-center gap-1 hover:text-slate-700 cursor-pointer">
                                 <ChevronLeft className="w-4 h-4" /> Volver
                             </button>
+
+                            {/* Specialist summary */}
+                            {wizard.deptSpecialists.filter(s => s.id === wizard.selSpecId).map(selSpec => (
+                                <div key={selSpec.id} className="flex items-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                                    <Avatar name={selSpec.name} size="lg" avatarUrl={selSpec.avatarUrl} />
+                                    <div className="min-w-0">
+                                        <p className="font-bold text-slate-900 text-sm">{selSpec.name}</p>
+                                        <p className="text-slate-500 text-xs">{selSpec.department}</p>
+                                        <p className="text-blue-600 text-xs font-semibold mt-0.5">
+                                            {wizard.selDate
+                                                ? new Date(wizard.selDate.getTime() - wizard.selDate.getTimezoneOffset() * 60000)
+                                                    .toISOString().split("T")[0]
+                                                    .split("-").reverse().join("/")
+                                                : ""} · {wizard.selSlot}
+                                        </p>
+                                    </div>
+                                </div>
+                            ))}
 
                             {/* Reason */}
                             {wizard.selDept && DEPT_REASONS[wizard.selDept] && (
@@ -399,6 +511,28 @@ export function StudentDashboard() {
                                         </button>
                                     ))}
                                 </div>
+                                {wizard.selModality === "Virtual" && (() => {
+                                    const selSpec = wizard.deptSpecialists.find(s => s.id === wizard.selSpecId);
+                                    return (
+                                        <div className="mt-3 p-3 bg-blue-50 border border-blue-100 rounded-xl flex items-start gap-2">
+                                            <Video className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                                            <div className="text-sm">
+                                                <p className="font-bold text-blue-800">Cita virtual</p>
+                                                {selSpec?.meetingUrl ? (
+                                                    <p className="text-blue-700 mt-0.5">
+                                                        Enlace de acceso:{" "}
+                                                        <a href={selSpec.meetingUrl} target="_blank" rel="noopener noreferrer"
+                                                            className="underline font-semibold break-all">
+                                                            {selSpec.meetingUrl}
+                                                        </a>
+                                                    </p>
+                                                ) : (
+                                                    <p className="text-blue-600 mt-0.5">El especialista te compartirá el enlace de videoconferencia al confirmar la cita.</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
                             </div>
 
                             {/* Confidentiality */}
@@ -429,14 +563,14 @@ export function StudentDashboard() {
                 {/* ── Reschedule Modal ── */}
                 <Modal open={resch.show} onClose={() => resch.setShow(false)} title="Reagendar Cita" maxWidth="max-w-lg">
                     <div className="space-y-5">
-                        <MiniCalendar selectedDate={resch.date} onSelect={resch.setDate} availableDates={resch.availDates} />
+                        <MiniCalendar selectedDate={resch.date} onSelect={resch.setDate} availableDates={resch.availDates} onMonthChange={resch.handleMonthChange} />
                         {resch.date && (
                             resch.slots.length > 0 ? (
                                 <div className="grid grid-cols-3 gap-2">
                                     {resch.slots.map(slot => (
-                                        <button key={slot} onClick={() => resch.setSlot(slot)}
-                                            className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 font-bold text-sm transition-all cursor-pointer ${resch.slot === slot ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:border-blue-300"}`}>
-                                            <Clock className="w-3.5 h-3.5" />{slot}
+                                        <button key={slot.start} onClick={() => resch.setSlot(slot.start)}
+                                            className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 font-bold text-sm transition-all cursor-pointer ${resch.slot === slot.start ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:border-blue-300"}`}>
+                                            <Clock className="w-3.5 h-3.5" />{slot.start}–{slot.end}
                                         </button>
                                     ))}
                                 </div>
@@ -548,7 +682,7 @@ export function StudentDashboard() {
                         />
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 min-h-[400px]">
                             {resources.filter(r => r.department === activeResTab).map(item => (
-                                <div key={item.id} className="bg-white rounded-3xl border border-slate-200 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 overflow-hidden group">
+                                <div key={item.id} className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 overflow-hidden group">
                                     {item.type === "image" && item.imageUrl && (
                                         <div className="h-36 overflow-hidden bg-slate-100">
                                             <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
@@ -565,9 +699,9 @@ export function StudentDashboard() {
                                                 {item.type === "image" ? "Imagen" : item.type === "video" ? "Video" : "Enlace"}
                                             </span>
                                         </div>
-                                        <p className="text-slate-900 font-bold leading-tight mb-2">{item.title}</p>
+                                        <p className="text-slate-900 dark:text-white font-bold leading-tight mb-2">{item.title}</p>
                                         <p className="text-slate-500 text-sm leading-relaxed line-clamp-3">{item.description}</p>
-                                        <div className="mt-4 pt-4 border-t border-slate-50">
+                                        <div className="mt-4 pt-4 border-t border-slate-50 dark:border-slate-700">
                                             <Btn
                                                 variant="outline"
                                                 className="w-full text-blue-600 border-blue-100 hover:bg-blue-50"
@@ -649,6 +783,15 @@ export function StudentDashboard() {
                     </div>
                 )}
             </Modal>
+
+            {/* ── FAB: Solicitar Cita ── */}
+            <button
+                onClick={() => { wizard.setShow(true); wizard.reset(); }}
+                className="fixed bottom-8 right-8 z-50 flex items-center gap-3 px-6 py-4 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-2xl shadow-2xl shadow-blue-600/40 font-bold text-sm transition-all hover:-translate-y-0.5 group"
+            >
+                <CalendarCheck className="w-5 h-5 shrink-0" />
+                <span>Solicitar Cita</span>
+            </button>
 
         </AppShell>
     );

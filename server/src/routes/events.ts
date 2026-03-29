@@ -58,6 +58,29 @@ router.post('/', upload.single('image'), async (req, res) => {
   }
 });
 
+// PATCH /api/events/:id
+router.patch('/:id', upload.single('image'), async (req, res) => {
+  try {
+    const { title, description, department, date, time, type, registrationUrl } = req.body;
+    const data: any = {};
+    if (title !== undefined)           data.title = title;
+    if (description !== undefined)     data.description = description;
+    if (department !== undefined)      data.department = department;
+    if (date !== undefined)            data.date = date;
+    if (time !== undefined)            data.time = time;
+    if (type !== undefined)            data.type = type;
+    if (registrationUrl !== undefined) data.registrationUrl = registrationUrl;
+    if (req.file)                      data.imageUrl = `/uploads/${req.file.filename}`;
+    else if (req.body.imageUrl !== undefined) data.imageUrl = req.body.imageUrl;
+
+    const event = await prisma.appEvent.update({ where: { id: req.params.id as string }, data });
+    res.json(event);
+  } catch (error) {
+    console.error('Error updating event:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
 // DELETE /api/events/:id
 router.delete('/:id', async (req, res) => {
   try {

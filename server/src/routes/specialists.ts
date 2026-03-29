@@ -2,6 +2,9 @@ import { Router } from 'express';
 import { prisma } from '../db';
 import bcrypt from 'bcryptjs';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
+import { sendWelcomeEmail } from '../services/email';
+
+const EMAIL_REGEX = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/;
 
 const router = Router();
 
@@ -14,10 +17,13 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
 
     const specialists = await prisma.specialist.findMany({
       where,
-      include: { schedules: true }
+      include: { schedules: true, user: { select: { avatarUrl: true } } }
     });
 
-    res.json(specialists);
+    res.json(specialists.map((s: any) => {
+      const { user, ...rest } = s;
+      return { ...rest, avatarUrl: user?.avatarUrl ?? null };
+    }));
   } catch (error) {
     console.error('Error fetching specialists:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
@@ -37,6 +43,18 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Faltan campos obligatorios' });
     }
 
+    if (!EMAIL_REGEX.test(email)) {
+      return res.status(400).json({ error: 'El formato del correo no es válido' });
+    }
+
+    const allowedDomain = process.env.ALLOWED_EMAIL_DOMAIN;
+    if (allowedDomain && email) {
+      const emailDomain = email.split('@')[1];
+      if (emailDomain !== allowedDomain) {
+        return res.status(400).json({ error: `Solo se permiten correos institucionales (@${allowedDomain})` });
+      }
+    }
+
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) return res.status(400).json({ error: 'El correo ya está registrado' });
 
@@ -44,13 +62,18 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
 
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
-        data: { email, password: hashedPassword, name, role: 'especialista', department }
+        data: { email, password: hashedPassword, name, role: 'especialista', department, emailVerified: true }
       });
 
       return await tx.specialist.create({
         data: { userId: user.id, name, department, email, active: true, shift: shift || 'Matutino' },
         include: { schedules: true }
       });
+    });
+
+    // Send welcome email with credentials (non-blocking)
+    sendWelcomeEmail(name, email, password, 'especialista').catch(err => {
+      console.error('Error sending welcome email:', err);
     });
 
     res.status(201).json(result);
@@ -102,6 +125,31 @@ router.patch('/:id', verifyToken as any, async (req: AuthRequest, res) => {
     res.json(updated);
   } catch (error) {
     console.error('Error updating specialist:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// PATCH /api/specialists/:id/meeting-url — specialist (self) or admin
+router.patch('/:id/meeting-url', verifyToken as any, async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const specialist = await prisma.specialist.findUnique({ where: { id } });
+    if (!specialist) return res.status(404).json({ error: 'No encontrado' });
+
+    if (req.user?.role !== 'admin' && req.user?.id !== specialist.userId) {
+      return res.status(403).json({ error: 'Sin permisos' });
+    }
+
+    const { meetingUrl } = req.body;
+    const updated = await prisma.specialist.update({
+      where: { id },
+      data: { meetingUrl: meetingUrl || null },
+      include: { schedules: true },
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error('Error updating meeting URL:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
@@ -161,6 +209,7 @@ router.get('/:id/available-slots', verifyToken as any, async (req: AuthRequest, 
 
     const now = new Date();
     now.setHours(0, 0, 0, 0);
+    // Sunday (0): Monday is tomorrow (+1), matching specialist dashboard behaviour
     const dayShift = now.getDay() === 0 ? 1 : 1 - now.getDay();
     const mondayOfCurrentWeek = new Date(now);
     mondayOfCurrentWeek.setDate(now.getDate() + dayShift);
@@ -176,30 +225,36 @@ router.get('/:id/available-slots', verifyToken as any, async (req: AuthRequest, 
 
     if (!specialist) return res.status(404).json({ error: 'No encontrado' });
 
-    let activeSlotsForDay = specialist.schedules.filter((s: any) =>
+    // Combine both specific-date slots AND recurring slots for the day
+    // (previously used OR logic which dropped recurring slots if any specific-date slot existed)
+    const specificSlots = specialist.schedules.filter((s: any) =>
       s.specificDate === date && s.available
     );
 
-    if (activeSlotsForDay.length === 0) {
-      activeSlotsForDay = specialist.schedules.filter((s: any) =>
-        s.dayOfWeek === dayOfWeek &&
-        s.available &&
-        s.specificDate === null &&
-        (s.week === null || s.week === requestedWeek)
-      );
-    }
+    const recurringSlots = specialist.schedules.filter((s: any) =>
+      s.dayOfWeek === dayOfWeek &&
+      s.available &&
+      s.specificDate === null &&
+      (s.week === null || s.week === requestedWeek)
+    );
+
+    const activeSlotsForDay = [...specificSlots, ...recurringSlots];
 
     const appointmentsOnDate = await prisma.appointment.findMany({
       where: { specialistId: id, date, status: { not: 'Cancelada' } }
     });
 
     const occupiedTimes = new Set(appointmentsOnDate.map((a: any) => a.time));
-    const resultsSet = new Set<string>();
+    const seen = new Set<string>();
+    const results: { start: string; end: string }[] = [];
     activeSlotsForDay.forEach((slot: any) => {
-      if (!occupiedTimes.has(slot.startTime)) resultsSet.add(slot.startTime);
+      if (!occupiedTimes.has(slot.startTime) && !seen.has(slot.startTime)) {
+        seen.add(slot.startTime);
+        results.push({ start: slot.startTime, end: slot.endTime });
+      }
     });
 
-    res.json(Array.from(resultsSet).sort());
+    res.json(results.sort((a, b) => a.start.localeCompare(b.start)));
   } catch (error) {
     console.error('Error fetching slots:', error);
     res.status(500).json({ error: 'Error interno del servidor' });

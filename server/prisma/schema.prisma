@@ -8,19 +8,25 @@ generator client {
 }
 
 model User {
-  id         String   @id @default(uuid())
-  email      String   @unique
-  password   String
-  name       String
-  role       String   // "alumno", "especialista", "admin"
-  matricula  String?
-  carrera    String?
-  semestre   Int?
-  edad       Int?
-  genero     String?
-  department String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id                String   @id @default(uuid())
+  email             String   @unique
+  password          String
+  name              String
+  role              String   // "alumno", "especialista", "admin"
+  matricula         String?
+  carrera           String?
+  semestre          Int?
+  edad              Int?
+  genero            String?
+  department        String?
+  avatarUrl         String?
+  emailVerified              Boolean   @default(false)
+  verificationToken          String?
+  verificationTokenExpiresAt DateTime?
+  resetPasswordToken         String?
+  resetPasswordTokenExpiresAt DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
   
   specialist Specialist?
   studentAppointments Appointment[] @relation("StudentAppointments")
@@ -34,9 +40,10 @@ model Specialist {
   name       String
   department String
   email      String
-  active     Boolean  @default(true)
-  shift      String?  // "Matutino", "Vespertino"
-  
+  active      Boolean  @default(true)
+  shift       String?  // "Matutino", "Vespertino"
+  meetingUrl  String?  // Enlace de videoconferencia para citas virtuales
+
   schedules    ScheduleSlot[]
   appointments Appointment[] @relation("SpecialistAppointments")
 }
@@ -68,6 +75,10 @@ model Appointment {
   modality       String
   motivo         String
   notes          String?
+  isFollowUp     Boolean    @default(false)
+  parentId       String?
+  parent         Appointment?  @relation("AppointmentFollowUps", fields: [parentId], references: [id], onDelete: SetNull)
+  followUps      Appointment[] @relation("AppointmentFollowUps")
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 }

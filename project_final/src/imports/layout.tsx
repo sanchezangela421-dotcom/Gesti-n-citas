@@ -9,8 +9,8 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 const dmSans = DM_Sans({ subsets: ['latin'], variable: '--font-dm-sans' })
 
 export const metadata: Metadata = {
-  title: 'Sistema Institucional de Citas',
-  description: 'Sistema de gestión de citas para los departamentos de Psicología, Tutorías y Nutrición',
+  title: 'Synkros',
+  description: 'Plataforma institucional para sincronizar Psicología, Tutorías y Nutrición en un solo lugar',
 }
 
 export const viewport: Viewport = {

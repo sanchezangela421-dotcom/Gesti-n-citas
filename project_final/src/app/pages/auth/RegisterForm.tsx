@@ -11,7 +11,7 @@ const FEATURES = [
     { title: "Historial Completo", desc: "Lleva el control de todas tus asistencias y evaluaciones.", icon: FileText },
 ];
 
-const INPUT_BASE = "w-full px-3.5 py-2.5 rounded-xl border-2 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none transition-all text-sm font-medium";
+const INPUT_BASE = "w-full px-3.5 py-2.5 rounded-xl border-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none transition-all text-sm font-medium";
 
 const INIT_FORM = {
     name: "", email: "", carrera: "", semestre: "", edad: "",
@@ -29,7 +29,7 @@ export function RegisterForm({ onSwitchToLogin }: { onSwitchToLogin: () => void 
         e.preventDefault();
         if (form.password !== form.confirmPassword) { toast.error("Las contraseñas no coinciden"); return; }
         setLoading(true);
-        await register({
+        const result = await register({
             name: form.name,
             email: form.email,
             password: form.password,
@@ -40,7 +40,12 @@ export function RegisterForm({ onSwitchToLogin }: { onSwitchToLogin: () => void 
             genero: form.genero,
         });
         setLoading(false);
-        toast.success("¡Registro exitoso! Bienvenido(a).");
+        if (result.ok) {
+            toast.success("¡Registro exitoso! Revisa tu correo para verificar tu cuenta.");
+            onSwitchToLogin();
+        } else {
+            toast.error(result.error || "No se pudo completar el registro.");
+        }
     };
 
     return (

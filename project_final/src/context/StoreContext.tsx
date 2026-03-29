@@ -1,4 +1,4 @@
-import React, { useState, useCallback, createContext, useContext } from "react";
+import React, { useState, useCallback, createContext, useContext, useRef } from "react";
 import { localISODate } from "../utils/date";
 import { API, API_BASE, authHeaders, getImageUrl } from "../lib/api";
 import type { StoreContextType } from "../types";
@@ -24,7 +24,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     users:           usersStore.users,
     addNotification: notificationsStore.addNotification,
   });
-  const contentStore = useContentStore();
+  const contentStore = useContentStore({
+    users:           usersStore.users,
+    addNotification: notificationsStore.addNotification,
+  });
 
   // ── Stats (derived from appointments, fetched from backend) ──
   const [realStats, setRealStats] = useState<any>(null);
@@ -60,7 +63,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [appointmentsStore.appointments, realStats]);
 
   // ── Available slots / days (backend) ───────────────────
-  const getAvailableSlots = useCallback(async (specialistId: string, dateStr: string): Promise<string[]> => {
+  const getAvailableSlots = useCallback(async (specialistId: string, dateStr: string): Promise<{ start: string; end: string }[]> => {
     try {
       const res = await fetch(`${API}/specialists/${specialistId}/available-slots?date=${dateStr}`, { headers: authHeaders() });
       if (res.ok) return await res.json();
@@ -157,6 +160,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [fetchVolatile]);
 
+  // Online / offline detection
+  const [isOnline, setIsOnline] = React.useState(navigator.onLine);
+  React.useEffect(() => {
+    const onOnline  = () => { setIsOnline(true);  fetchAll(); };
+    const onOffline = () => { setIsOnline(false); };
+    window.addEventListener("online",  onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("online",  onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, [fetchAll]);
+
   return (
     <StoreContext.Provider value={{
       // users
@@ -173,6 +189,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       removeSpecialist: specialistsStore.removeSpecialist,
       addScheduleSlot: specialistsStore.addScheduleSlot,
       removeScheduleSlot: specialistsStore.removeScheduleSlot,
+      updateMeetingUrl: specialistsStore.updateMeetingUrl,
       // appointments
       appointments: appointmentsStore.appointments,
       getAppointments: appointmentsStore.getAppointments,
@@ -184,9 +201,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // content
       events: contentStore.events,
       addEvent: contentStore.addEvent,
+      updateEvent: contentStore.updateEvent,
       deleteEvent: contentStore.deleteEvent,
       resources: contentStore.resources,
       addResource: contentStore.addResource,
+      updateResource: contentStore.updateResource,
       deleteResource: contentStore.deleteResource,
       // stats
       getStats,
@@ -198,6 +217,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       clearAllNotifications: notificationsStore.clearAllNotifications,
       // global
       fetchAll,
+      isOnline,
     }}>
       {children}
     </StoreContext.Provider>

@@ -65,6 +65,36 @@ router.post('/', upload.single('file'), async (req, res) => {
   }
 });
 
+// PATCH /api/resources/:id
+router.patch('/:id', upload.single('file'), async (req, res) => {
+  try {
+    const { department, type, title, description, url } = req.body;
+    const data: any = {};
+    if (department !== undefined)   data.department = department;
+    if (type !== undefined)         data.type = type;
+    if (title !== undefined)        data.title = title;
+    if (description !== undefined)  data.description = description;
+    if (url !== undefined)          data.url = url;
+    if (req.body.imageUrl !== undefined) data.imageUrl = req.body.imageUrl;
+
+    if (req.file) {
+      const uploadedPath = `/uploads/${req.file.filename}`;
+      if (type === 'image') {
+        data.imageUrl = uploadedPath;
+      } else {
+        data.fileUrl = uploadedPath;
+        data.fileName = req.file.originalname;
+      }
+    }
+
+    const resource = await prisma.resource.update({ where: { id: req.params.id as string }, data });
+    res.json(resource);
+  } catch (error) {
+    console.error('Error updating resource:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
 // DELETE /api/resources/:id
 router.delete('/:id', async (req, res) => {
   try {

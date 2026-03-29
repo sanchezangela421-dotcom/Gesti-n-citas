@@ -7,32 +7,32 @@ import {
 export function NotifIcon({ type }: { type: string }) {
     const props = { className: "w-4 h-4" };
     switch (type) {
-        case "confirmed": return <CheckCircle2 {...props} style={{ color: "#16A34A" }} />;
-        case "reminder": return <Clock        {...props} style={{ color: "#EA580C" }} />;
-        case "event": return <Megaphone    {...props} style={{ color: "#2563EB" }} />;
-        case "reschedule": return <RefreshCw    {...props} style={{ color: "#8b5cf6" }} />;
-        case "new_user": return <UserPlus     {...props} style={{ color: "#16A34A" }} />;
-        case "report": return <FileText     {...props} style={{ color: "#2563EB" }} />;
-        case "cancelled": return <AlertTriangle {...props} style={{ color: "#dc2626" }} />;
-        default: return <CalendarCheck {...props} style={{ color: "#64748b" }} />;
+        case "confirmed":  return <CheckCircle2 {...props} className="w-4 h-4 text-emerald-600" />;
+        case "reminder":   return <Clock        {...props} className="w-4 h-4 text-orange-500" />;
+        case "event":      return <Megaphone    {...props} className="w-4 h-4 text-blue-600" />;
+        case "reschedule": return <RefreshCw    {...props} className="w-4 h-4 text-violet-500" />;
+        case "new_user":   return <UserPlus     {...props} className="w-4 h-4 text-emerald-600" />;
+        case "report":     return <FileText     {...props} className="w-4 h-4 text-blue-600" />;
+        case "cancelled":  return <AlertTriangle {...props} className="w-4 h-4 text-rose-500" />;
+        default:           return <CalendarCheck {...props} className="w-4 h-4 text-slate-400" />;
     }
 }
 
 // ─── StatusBadge ─────────────────────────────────────────
 const STATUS_VARIANTS: Record<string, { bg: string; text: string; border: string; dot: string }> = {
-    Pendiente: { bg: "bg-amber-100", text: "text-amber-700", border: "border-amber-200", dot: "bg-amber-500" },
-    Confirmada: { bg: "bg-blue-100", text: "text-blue-700", border: "border-blue-200", dot: "bg-blue-500" },
-    Completada: { bg: "bg-emerald-100", text: "text-emerald-700", border: "border-emerald-200", dot: "bg-emerald-500" },
-    Cancelada: { bg: "bg-rose-100", text: "text-rose-700", border: "border-rose-200", dot: "bg-rose-500" },
+    Pendiente:      { bg: "bg-amber-100",   text: "text-amber-700",   border: "border-amber-200",   dot: "bg-amber-500"   },
+    Confirmada:     { bg: "bg-blue-100",    text: "text-blue-700",    border: "border-blue-200",    dot: "bg-blue-500"    },
+    Completada:     { bg: "bg-emerald-100", text: "text-emerald-700", border: "border-emerald-200", dot: "bg-emerald-500" },
+    Cancelada:      { bg: "bg-rose-100",    text: "text-rose-700",    border: "border-rose-200",    dot: "bg-rose-500"    },
+    "Sin atender":  { bg: "bg-rose-100",    text: "text-rose-700",    border: "border-rose-200",    dot: "bg-rose-400"    },
+    "Sesión tardía":{ bg: "bg-amber-100",   text: "text-amber-700",   border: "border-amber-200",   dot: "bg-amber-400"   },
+    "Sin cerrar":   { bg: "bg-amber-100",   text: "text-amber-700",   border: "border-amber-200",   dot: "bg-amber-400"   },
 };
 
 export function StatusBadge({ status }: { status: string }) {
     const v = STATUS_VARIANTS[status] ?? STATUS_VARIANTS.Pendiente;
     return (
-        <span
-            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border ${v.bg} ${v.text} ${v.border}`}
-            style={{ fontSize: "0.75rem", fontWeight: 500 }}
-        >
+        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-medium ${v.bg} ${v.text} ${v.border}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${v.dot}`} />
             {status}
         </span>
@@ -49,9 +49,18 @@ const AVATAR_COLORS = [
 ];
 const AVATAR_SIZES = { sm: "w-8 h-8 text-xs", md: "w-10 h-10 text-sm", lg: "w-12 h-12 text-base" };
 
-export function Avatar({ name, size = "md" }: { name: string; size?: "sm" | "md" | "lg" }) {
+export function Avatar({ name, size = "md", avatarUrl }: { name: string; size?: "sm" | "md" | "lg"; avatarUrl?: string | null }) {
     const initials = name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase() || "?";
     const gradient = AVATAR_COLORS[name ? name.charCodeAt(0) % AVATAR_COLORS.length : 0];
+    if (avatarUrl) {
+        const API_BASE: string = (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:3000';
+        const src = avatarUrl.startsWith('/uploads/') ? `${API_BASE}${avatarUrl}` : avatarUrl;
+        return (
+            <div className={`shrink-0 rounded-full overflow-hidden shadow-sm ${AVATAR_SIZES[size]}`}>
+                <img src={src} alt={name} className="w-full h-full object-cover" />
+            </div>
+        );
+    }
     return (
         <div className={`shrink-0 rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center text-white font-medium shadow-sm ${AVATAR_SIZES[size]}`}>
             {initials}
@@ -73,9 +82,9 @@ export function StatCard({ label, value, icon: Icon, gradient, sub }: StatCardPr
             <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl pointer-events-none" />
             <div className="flex items-start justify-between relative z-10">
                 <div>
-                    <p className="text-white/80 font-medium tracking-wide mb-1" style={{ fontSize: "0.85rem" }}>{label}</p>
+                    <p className="text-white/80 font-medium tracking-wide mb-1 text-sm">{label}</p>
                     <p className="text-3xl font-bold tracking-tight">{value}</p>
-                    {sub && <p className="text-white/70 mt-1" style={{ fontSize: "0.75rem" }}>{sub}</p>}
+                    {sub && <p className="text-white/70 mt-1 text-xs">{sub}</p>}
                 </div>
                 <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center shrink-0">
                     <Icon className="w-6 h-6 text-white" />
@@ -86,18 +95,19 @@ export function StatCard({ label, value, icon: Icon, gradient, sub }: StatCardPr
 }
 
 // ─── Btn ─────────────────────────────────────────────────
-type BtnVariant = "primary" | "emerald" | "rose" | "outline" | "ghost" | "teal";
+type BtnVariant = "primary" | "emerald" | "rose" | "outline" | "ghost" | "teal" | "gradient";
 type BtnSize = "sm" | "md" | "lg";
 
 const BTN_BASE = "inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none cursor-pointer";
 const BTN_SIZES: Record<BtnSize, string> = { sm: "px-3 py-1.5 text-xs", md: "px-4 py-2.5 text-sm", lg: "px-6 py-3 text-base" };
 const BTN_VARIANTS: Record<BtnVariant, string> = {
-    primary: "bg-blue-600 text-white hover:bg-blue-700 shadow-sm border border-transparent",
-    emerald: "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm border border-transparent",
-    rose: "bg-rose-600 text-white hover:bg-rose-700 shadow-sm border border-transparent",
-    teal: "bg-teal-600 text-white hover:bg-teal-700 shadow-sm border border-transparent",
-    outline: "bg-white text-slate-700 border-2 border-slate-200 hover:border-slate-300 hover:bg-slate-50",
-    ghost: "bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-transparent",
+    primary:  "bg-blue-600 text-white hover:bg-blue-700 shadow-sm border border-transparent",
+    emerald:  "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm border border-transparent",
+    rose:     "bg-rose-600 text-white hover:bg-rose-700 shadow-sm border border-transparent",
+    teal:     "bg-teal-600 text-white hover:bg-teal-700 shadow-sm border border-transparent",
+    gradient: "bg-gradient-to-r from-blue-700 to-teal-600 text-white shadow-lg shadow-blue-600/20 hover:shadow-blue-600/40 hover:-translate-y-0.5 disabled:hover:translate-y-0 border border-transparent",
+    outline:  "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-2 border-slate-200 dark:border-slate-600 hover:border-slate-300 dark:hover:border-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700",
+    ghost:    "bg-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-white border border-transparent",
 };
 
 export function Btn({
@@ -116,7 +126,7 @@ export function Btn({
 // ─── Card ────────────────────────────────────────────────
 export function Card({ children, className = "", hover = false }: { children: React.ReactNode; className?: string; hover?: boolean }) {
     return (
-        <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm ${hover ? "transition-all duration-300 hover:shadow-md hover:border-slate-300" : ""} ${className}`}>
+        <div className={`bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm ${hover ? "transition-all duration-300 hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600" : ""} ${className}`}>
             {children}
         </div>
     );
@@ -130,20 +140,25 @@ interface TabNavProps {
 }
 export function TabNav({ tabs, active, onSelect }: TabNavProps) {
     return (
-        <div className="inline-flex bg-slate-100 p-1 rounded-xl mb-4 overflow-x-auto">
+        <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl mb-4 overflow-x-auto">
             {tabs.map(t => {
                 const isActive = active === t.key;
                 return (
                     <button
                         key={t.key}
                         onClick={() => onSelect(t.key)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg whitespace-nowrap transition-all duration-200 ${isActive ? "bg-white shadow-sm text-slate-900 font-medium" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"}`}
-                        style={{ fontSize: "0.85rem" }}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg whitespace-nowrap transition-all duration-200 text-sm ${isActive
+                            ? "bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white font-medium"
+                            : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-700/50"
+                        }`}
                     >
-                        {t.icon && <t.icon className={`w-4 h-4 ${isActive ? "text-blue-600" : ""}`} />}
+                        {t.icon && <t.icon className={`w-4 h-4 ${isActive ? "text-blue-600 dark:text-blue-400" : ""}`} />}
                         {t.label}
                         {t.badge !== undefined && t.badge > 0 && (
-                            <span className={`ml-1 flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${isActive ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-600"}`}>
+                            <span className={`ml-1 flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${isActive
+                                ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400"
+                                : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400"
+                            }`}>
                                 {t.badge}
                             </span>
                         )}
@@ -181,13 +196,13 @@ export function Modal({ open, onClose, title, subtitle, children, maxWidth = "ma
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
-            <div className={`relative bg-white rounded-3xl shadow-2xl w-full ${maxWidth} max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200`}>
-                <div className="flex items-start justify-between p-6 border-b border-slate-100">
+            <div className={`relative bg-white dark:bg-slate-800 rounded-3xl shadow-2xl dark:shadow-slate-900/60 w-full ${maxWidth} max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200`}>
+                <div className="flex items-start justify-between p-6 border-b border-slate-100 dark:border-slate-700">
                     <div>
-                        <h3 className="text-xl font-semibold text-slate-900">{title}</h3>
-                        {subtitle && <div className="text-slate-500 mt-1 text-sm">{subtitle}</div>}
+                        <h3 className="text-xl font-semibold text-slate-900 dark:text-white">{title}</h3>
+                        {subtitle && <div className="text-slate-500 dark:text-slate-400 mt-1 text-sm">{subtitle}</div>}
                     </div>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-2 rounded-xl hover:bg-slate-100 transition-colors shrink-0 cursor-pointer">
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors shrink-0 cursor-pointer">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
@@ -203,6 +218,7 @@ interface MiniCalendarProps {
     onSelect: (d: Date) => void;
     availableDates?: Date[] | null;
     highlightedDates?: Date[] | null;
+    onMonthChange?: (year: number, month: number) => void;
 }
 
 const isSameDay = (a: Date | null, b: Date | null) =>
@@ -211,7 +227,7 @@ const isSameDay = (a: Date | null, b: Date | null) =>
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate();
 
-export function MiniCalendar({ selectedDate, onSelect, availableDates = null, highlightedDates = null }: MiniCalendarProps) {
+export function MiniCalendar({ selectedDate, onSelect, availableDates = null, highlightedDates = null, onMonthChange }: MiniCalendarProps) {
     const [viewDate, setViewDate] = useState(selectedDate || new Date());
     const year = viewDate.getFullYear();
     const month = viewDate.getMonth();
@@ -227,22 +243,30 @@ export function MiniCalendar({ selectedDate, onSelect, availableDates = null, hi
     for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(year, month, d));
 
     return (
-        <div className="select-none bg-white p-4 rounded-xl border border-slate-200">
+        <div className="select-none bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
             <div className="flex items-center justify-between mb-4">
-                <button onClick={() => setViewDate(new Date(year, month - 1, 1))} className="p-2 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
-                    <ChevronLeft className="w-4 h-4 text-slate-600" />
+                <button onClick={() => {
+                    const d = new Date(year, month - 1, 1);
+                    setViewDate(d);
+                    onMonthChange?.(d.getFullYear(), d.getMonth());
+                }} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer">
+                    <ChevronLeft className="w-4 h-4 text-slate-600 dark:text-slate-400" />
                 </button>
-                <span className="text-slate-900 font-medium text-sm capitalize">
+                <span className="text-slate-900 dark:text-white font-medium text-sm capitalize">
                     {new Date(year, month).toLocaleDateString("es-MX", { month: "long", year: "numeric" })}
                 </span>
-                <button onClick={() => setViewDate(new Date(year, month + 1, 1))} className="p-2 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
-                    <ChevronRight className="w-4 h-4 text-slate-600" />
+                <button onClick={() => {
+                    const d = new Date(year, month + 1, 1);
+                    setViewDate(d);
+                    onMonthChange?.(d.getFullYear(), d.getMonth());
+                }} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer">
+                    <ChevronRight className="w-4 h-4 text-slate-600 dark:text-slate-400" />
                 </button>
             </div>
 
             <div className="grid grid-cols-7 gap-1 mb-2">
                 {["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa"].map(d => (
-                    <div key={d} className="text-center text-slate-400 font-medium text-xs">{d}</div>
+                    <div key={d} className="text-center text-slate-400 dark:text-slate-500 font-medium text-xs">{d}</div>
                 ))}
             </div>
 
@@ -255,11 +279,11 @@ export function MiniCalendar({ selectedDate, onSelect, availableDates = null, hi
                     const sel = isSameDay(d, selectedDate);
 
                     let cls = "w-full aspect-square rounded-lg flex items-center justify-center text-sm font-medium transition-all ";
-                    if (sel) cls += "bg-blue-600 text-white shadow-sm shadow-blue-200 ";
-                    else if (hilit) cls += "bg-blue-50 text-blue-700 border border-blue-200/50 ";
-                    else if (isPast) cls += "text-slate-300 cursor-not-allowed ";
-                    else if (avail) cls += "text-slate-700 hover:bg-slate-100 hover:text-slate-900 cursor-pointer ";
-                    else cls += "text-slate-300 cursor-not-allowed ";
+                    if (sel)       cls += "bg-blue-600 text-white shadow-sm shadow-blue-200 dark:shadow-blue-900 ";
+                    else if (hilit) cls += "bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200/50 dark:border-blue-800 ";
+                    else if (isPast) cls += "text-slate-300 dark:text-slate-600 cursor-not-allowed ";
+                    else if (avail) cls += "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-white cursor-pointer ";
+                    else            cls += "text-slate-300 dark:text-slate-600 cursor-not-allowed ";
 
                     return (
                         <button key={i} className={cls} disabled={isPast || !avail} onClick={() => avail && onSelect(d)}>
@@ -272,5 +296,23 @@ export function MiniCalendar({ selectedDate, onSelect, availableDates = null, hi
     );
 }
 
+// ─── EmptyState ──────────────────────────────────────────
+interface EmptyStateProps {
+    icon: React.ElementType;
+    title: string;
+    subtitle?: string;
+}
+export function EmptyState({ icon: Icon, title, subtitle }: EmptyStateProps) {
+    return (
+        <div className="text-center py-12 px-6">
+            <div className="w-14 h-14 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                <Icon className="w-7 h-7 text-slate-300 dark:text-slate-600" />
+            </div>
+            <p className="text-slate-500 dark:text-slate-400 font-medium text-sm">{title}</p>
+            {subtitle && <p className="text-slate-400 dark:text-slate-500 text-xs mt-1">{subtitle}</p>}
+        </div>
+    );
+}
+
 // ─── shared input class ──────────────────────────────────
-export const inputCls = "w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600 transition-colors text-sm font-medium";
+export const inputCls = "w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600 transition-colors text-sm font-medium";

@@ -1,7 +1,11 @@
 node_modules
+
 # Keep environment variables out of version control
 .env
 
 /generated/prisma
+
+# Script local de creación de BD — no va al repo
+database_setup.sql
 
 

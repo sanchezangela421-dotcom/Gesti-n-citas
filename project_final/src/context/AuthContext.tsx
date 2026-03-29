@@ -54,7 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     restoreSession();
   }, [restoreSession]);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string): Promise<{ ok: boolean; unverified?: boolean; error?: string }> => {
     try {
       const res = await fetch(`${API_BASE}/api/auth/login`, {
         method: 'POST',
@@ -65,32 +65,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const data = await res.json();
         localStorage.setItem('token', data.token);
         setUser(data.user);
-        return true;
+        return { ok: true };
       }
-      return false;
+      const body = await res.json().catch(() => ({}));
+      if (body.code === 'EMAIL_NOT_VERIFIED') {
+        return { ok: false, unverified: true };
+      }
+      return { ok: false, error: body.error };
     } catch (e) {
       console.error(e);
-      return false;
+      return { ok: false, error: 'Error de conexión con el servidor' };
     }
   }, []);
 
-  const register = useCallback(async (data: Partial<User>) => {
+  const register = useCallback(async (data: Partial<User>): Promise<{ ok: boolean; error?: string }> => {
     try {
       const res = await fetch(`${API_BASE}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
-      if (res.ok) {
-        const result = await res.json();
-        localStorage.setItem('token', result.token);
-        setUser(result.user);
-        return true;
-      }
-      return false;
+      if (res.ok) return { ok: true };
+      const body = await res.json().catch(() => ({}));
+      return { ok: false, error: body.error };
     } catch (e) {
       console.error(e);
-      return false;
+      return { ok: false, error: 'Error de conexión con el servidor' };
     }
   }, []);
 
@@ -99,8 +99,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) setUser(await res.json());
+    } catch { /* silent */ }
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, loading, login, register, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );
