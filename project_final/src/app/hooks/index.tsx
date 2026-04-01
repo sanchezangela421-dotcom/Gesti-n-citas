@@ -96,7 +96,7 @@ export function useAppointmentWizard() {
 // Encapsula el estado del modal de reagendamiento (alumno y especialista)
 
 export function useReschedule(role: "student" | "specialist") {
-    const { rescheduleAppointment, getAvailableDays, getAvailableSlots, getAppointments } = useStore();
+    const { rescheduleAppointment, getAvailableDays, getAvailableSlots, getAppointments, specialists } = useStore();
     const { user } = useAuth();
 
     const [show, setShow] = useState(false);
@@ -108,21 +108,29 @@ export function useReschedule(role: "student" | "specialist") {
     const [selModality, setSelModality] = useState("Presencial");
     const loadedMonths = useRef<Set<string>>(new Set());
 
+    // For specialist role: user.id is the User ID, but appointments store Specialist.id
+    const specId = role === "specialist"
+        ? specialists.find(s => s.userId === user?.id)?.id
+        : undefined;
+
     const appointments = getAppointments(
-        role === "student" ? { studentId: user?.id } : { specialistId: user?.id }
+        role === "student" ? { studentId: user?.id } : { specialistId: specId }
     );
 
     useEffect(() => {
         if (!apptId) { setAvailDates([]); loadedMonths.current.clear(); return; }
         const appt = appointments.find(a => a.id === apptId);
         if (!appt) return;
+        // For specialist role, prefer specId (already resolved from specialists store)
+        // to avoid using a stale getSpecialistById if specialists haven't loaded yet
+        const targetSpecId = (role === "specialist" && specId) ? specId : appt.specialistId;
         loadedMonths.current.clear();
         const now = new Date();
         const y = now.getFullYear(), m = now.getMonth();
         loadedMonths.current.add(`${y}-${m}`);
         loadedMonths.current.add(`${m === 11 ? y + 1 : y}-${m === 11 ? 0 : m + 1}`);
-        getAvailableDays(appt.specialistId, y, m).then(setAvailDates);
-    }, [apptId]);
+        getAvailableDays(targetSpecId, y, m).then(setAvailDates);
+    }, [apptId, specId]);
 
     const handleMonthChange = useCallback(async (year: number, month: number) => {
         if (!apptId) return;
@@ -132,7 +140,8 @@ export function useReschedule(role: "student" | "specialist") {
         loadedMonths.current.add(`${month === 11 ? year + 1 : year}-${month === 11 ? 0 : month + 1}`);
         const appt = appointments.find(a => a.id === apptId);
         if (!appt) return;
-        const newDates = await getAvailableDays(appt.specialistId, year, month);
+        const targetSpecId = (role === "specialist" && specId) ? specId : appt.specialistId;
+        const newDates = await getAvailableDays(targetSpecId, year, month);
         setAvailDates(prev => {
             const seen = new Set<string>();
             return [...prev, ...newDates].filter(d => {
@@ -140,7 +149,7 @@ export function useReschedule(role: "student" | "specialist") {
                 return seen.has(k) ? false : (seen.add(k), true);
             });
         });
-    }, [apptId, appointments, getAvailableDays]);
+    }, [apptId, appointments, getAvailableDays, role, specId]);
 
     useEffect(() => {
         if (!date || !apptId) { setSlots([]); return; }

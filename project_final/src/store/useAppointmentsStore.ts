@@ -92,7 +92,7 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
     return tempAppt;
   }, [specialists, users]);
 
-  const updateAppointmentStatus = useCallback((id: string, status: string, notes?: string, byStudent?: boolean) => {
+  const updateAppointmentStatus = useCallback((id: string, status: string, notes?: string, byStudent?: boolean, meetingUrl?: string) => {
     let originalStatus: string | null = null;
     let capturedAppt: Appointment | null = null;
 
@@ -109,7 +109,7 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
     fetch(`${API}/appointments/${id}/status`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ status, notes }),
+      body: JSON.stringify({ status, notes, ...(meetingUrl ? { meetingUrl } : {}) }),
     }).then(async res => {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -182,11 +182,15 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
             type: "reschedule",
           });
         } else if (byRole === "student") {
-          addNotification(appt.specialistId, {
-            title: "Cita Reagendada por Alumno",
-            message: `${appt.studentName} reagendó su cita para el ${new Date(newDate + "T12:00:00").toLocaleDateString()} a las ${newTime}.${modalityChanged ? ` Modalidad: ${newModality}.` : ""}`,
-            type: "reschedule",
-          });
+          // Use specialist.userId (User model ID), not specialist.id (Specialist model ID)
+          const specUserId = specialists.find(s => s.id === appt.specialistId)?.userId;
+          if (specUserId) {
+            addNotification(specUserId, {
+              title: "Cita Reagendada por Alumno",
+              message: `${appt.studentName} reagendó su cita para el ${new Date(newDate + "T12:00:00").toLocaleDateString()} a las ${newTime}.${modalityChanged ? ` Modalidad: ${newModality}.` : ""}`,
+              type: "reschedule",
+            });
+          }
         }
       }
       return p.map(a => a.id === id ? { ...a, date: newDate, time: newTime, ...(byRole === "student" && { status: "Pendiente" }), ...(modality && { modality }) } : a);

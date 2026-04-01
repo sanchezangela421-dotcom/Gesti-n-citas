@@ -200,10 +200,7 @@ export function SpecialistDashboard() {
             toast.error("Agrega el enlace de videollamada antes de confirmar.");
             return;
         }
-        if (virtualConfirmUrl.trim() !== spec.meetingUrl) {
-            await updateMeetingUrl(spec.id, virtualConfirmUrl.trim());
-        }
-        updateAppointmentStatus(virtualConfirmAppt.id, "Confirmada", undefined);
+        updateAppointmentStatus(virtualConfirmAppt.id, "Confirmada", undefined, false, virtualConfirmUrl.trim());
         toast.success("Cita virtual confirmada");
         setVirtualConfirmAppt(null);
         setVirtualConfirmUrl("");

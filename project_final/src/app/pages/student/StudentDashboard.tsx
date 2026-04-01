@@ -265,7 +265,7 @@ export function StudentDashboard() {
                             active={activeApptTab}
                             onSelect={setActiveApptTab}
                         />
-                        <Btn variant="ghost" onClick={() => setShowResources(true)} size="sm" className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white shrink-0">
+                        <Btn variant="outline" onClick={() => setShowResources(true)} size="sm" className="shrink-0 border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:border-blue-500 hover:text-blue-600 dark:hover:border-blue-400 dark:hover:text-blue-400">
                             <BookOpen className="w-4 h-4" /> Mis Recursos
                         </Btn>
                     </div>
@@ -518,17 +518,7 @@ export function StudentDashboard() {
                                             <Video className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
                                             <div className="text-sm">
                                                 <p className="font-bold text-blue-800">Cita virtual</p>
-                                                {selSpec?.meetingUrl ? (
-                                                    <p className="text-blue-700 mt-0.5">
-                                                        Enlace de acceso:{" "}
-                                                        <a href={selSpec.meetingUrl} target="_blank" rel="noopener noreferrer"
-                                                            className="underline font-semibold break-all">
-                                                            {selSpec.meetingUrl}
-                                                        </a>
-                                                    </p>
-                                                ) : (
-                                                    <p className="text-blue-600 mt-0.5">El especialista te compartirá el enlace de videoconferencia al confirmar la cita.</p>
-                                                )}
+                                                <p className="text-blue-600 mt-0.5">El enlace de videollamada te será enviado por correo al confirmar tu cita.</p>
                                             </div>
                                         </div>
                                     );
