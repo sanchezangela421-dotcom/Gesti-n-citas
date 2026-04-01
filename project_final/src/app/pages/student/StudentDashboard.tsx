@@ -171,7 +171,7 @@ export function StudentDashboard() {
                                                         <div className="pt-4 flex items-center justify-center">
                                                             <Btn size="lg"
                                                                 onClick={() => { wizard.setShow(true); wizard.reset(); }}
-                                                                className="bg-white text-slate-900 hover:bg-white/90 border-0 shadow-2xl px-10 py-4 uppercase italic font-black tracking-tighter transform hover:scale-105 transition-transform active:scale-95">
+                                                                className="!bg-white !text-slate-900 hover:!bg-slate-100 border-0 shadow-2xl px-10 py-4 uppercase italic font-black tracking-tighter transform hover:scale-105 transition-transform active:scale-95">
                                                                 Solicitar Cita
                                                             </Btn>
                                                         </div>
