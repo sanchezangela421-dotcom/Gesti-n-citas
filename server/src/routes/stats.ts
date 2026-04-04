@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { prisma } from '../db';
+import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 
 const router = Router();
 
 // GET /api/stats
-router.get('/', async (req, res) => {
+router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const totalAppointments = await prisma.appointment.count();
     const pendientes = await prisma.appointment.count({ where: { status: 'Pendiente' } });

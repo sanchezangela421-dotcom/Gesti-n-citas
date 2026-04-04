@@ -170,6 +170,17 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       return res.status(404).json({ error: 'Cita no encontrada' });
     }
 
+    // Validar propiedad: alumnos solo sus citas, especialistas solo las asignadas
+    if (req.user?.role === 'alumno' && current.studentId !== req.user.id) {
+      return res.status(403).json({ error: 'Sin permisos sobre esta cita' });
+    }
+    if (req.user?.role === 'especialista') {
+      const spec = await prisma.specialist.findFirst({ where: { userId: req.user.id } });
+      if (!spec || current.specialistId !== spec.id) {
+        return res.status(403).json({ error: 'Sin permisos sobre esta cita' });
+      }
+    }
+
     const allowed = VALID_TRANSITIONS[current.status] ?? [];
     if (!allowed.includes(status)) {
       return res.status(422).json({

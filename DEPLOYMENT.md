@@ -1,7 +1,7 @@
 # Guía de Despliegue — Sistema de Citas TECNL
 
 > Infraestructura objetivo: VPS WebhostingMX (Ubuntu 22.04)
-> Carga esperada: ~300 usuarios/año — SQLite es suficiente.
+> Carga esperada: ~300 usuarios/año — SQLite es suficiente, PostgreSQL disponible si se escala.
 
 ---
 
@@ -32,7 +32,8 @@ Los archivos `.env` **no** están en el repositorio — se crean manualmente en 
 5. [Actualizar a una nueva versión](#5-actualizar-a-una-nueva-versión)
 6. [Configurar backups automáticos](#6-configurar-backups-automáticos)
 7. [Configurar nginx + HTTPS](#7-configurar-nginx--https)
-8. [Checklist final antes de ir a producción](#8-checklist-final-antes-de-ir-a-producción)
+8. [Migración a PostgreSQL (opcional)](#8-migración-a-postgresql-opcional)
+9. [Checklist final antes de ir a producción](#9-checklist-final-antes-de-ir-a-producción)
 
 ---
 
@@ -294,12 +295,21 @@ Contenido del archivo nginx:
 server {
     server_name api.tudominio.mx;
 
+    # ── Headers de seguridad ──
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
     location / {
         proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
     }
 
@@ -317,6 +327,14 @@ server {
 
     root /var/www/citas-tecnl/project_final/dist;
     index index.html;
+
+    # ── Headers de seguridad ──
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.tudominio.mx;" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
 
     # SPA — todas las rutas apuntan al index.html
     location / {
@@ -337,10 +355,92 @@ sudo certbot --nginx -d api.tudominio.mx -d citas.tudominio.mx
 
 ---
 
-## 8. Checklist final antes de ir a producción
+## 8. Migración a PostgreSQL (opcional)
+
+> SQLite es suficiente para ~300 usuarios/año. Si la carga crece o necesitas concurrencia real, migra a PostgreSQL.
+
+### Paso 1 — Instalar PostgreSQL en el VPS
+
+```bash
+sudo apt install postgresql postgresql-contrib -y
+sudo systemctl enable postgresql
+```
+
+### Paso 2 — Crear la base de datos y usuario
+
+```bash
+sudo -u postgres psql
+```
+
+```sql
+CREATE USER citas_user WITH PASSWORD 'tu_contraseña_segura';
+CREATE DATABASE citas_db OWNER citas_user;
+GRANT ALL PRIVILEGES ON DATABASE citas_db TO citas_user;
+\q
+```
+
+### Paso 3 — Cambiar el provider en `schema.prisma`
+
+```diff
+datasource db {
+-  provider = "sqlite"
++  provider = "postgresql"
+   url      = env("DATABASE_URL")
+}
+```
+
+### Paso 4 — Actualizar `DATABASE_URL` en `server/.env`
+
+```env
+DATABASE_URL="postgresql://citas_user:tu_contraseña_segura@localhost:5432/citas_db"
+```
+
+### Paso 5 — Regenerar migraciones y desplegar
+
+```bash
+cd /var/www/citas-tecnl/server
+
+# Borrar migraciones viejas de SQLite
+rm -rf prisma/migrations
+
+# Crear nueva migración para PostgreSQL
+npx prisma migrate dev --name initial
+
+# Regenerar cliente Prisma
+npx prisma generate
+
+# Crear admin inicial
+npx ts-node scripts/create-admin.ts admin@nuevoleon.tecnm.mx "ContraseñaSegura" "Admin TECNL"
+
+# Reiniciar
+pm2 restart citas-backend
+```
+
+### Paso 6 — Actualizar script de backups
+
+Si migras a PostgreSQL, reemplaza el script de backup:
+
+```bash
+cat > /usr/local/bin/backup-citas.sh << 'EOF'
+#!/bin/bash
+BACKUP_DIR="/var/www/citas-tecnl/backups"
+FECHA=$(date +%Y-%m-%d)
+
+pg_dump -U citas_user -h localhost citas_db > "$BACKUP_DIR/backup-$FECHA.sql"
+find "$BACKUP_DIR" -name "backup-*.sql" -mtime +30 -delete
+echo "Backup completado: backup-$FECHA.sql"
+EOF
+chmod +x /usr/local/bin/backup-citas.sh
+```
+
+> **Importante:** El código de rutas, queries de Prisma y frontend **no cambian nada**. Prisma abstrae la base de datos.
+
+---
+
+## 9. Checklist final antes de ir a producción
 
 ### Backend `.env`
-- [ ] `DATABASE_URL` apunta a `/var/www/citas-tecnl/data/prod.db`
+- [ ] `DATABASE_URL` apunta a `/var/www/citas-tecnl/data/prod.db` (SQLite) o PostgreSQL
 - [ ] `ALLOWED_EMAIL_DOMAIN` = `nuevoleon.tecnm.mx`
 - [ ] `BACKEND_URL` = URL pública real (https)
 - [ ] `FRONTEND_URL` = URL pública real (https)
@@ -355,6 +455,15 @@ sudo certbot --nginx -d api.tudominio.mx -d citas.tudominio.mx
 ### Código
 - [ ] Bloque de **cuentas de acceso rápido** eliminado de `LoginForm.tsx`
 - [ ] Seed **NO ejecutado** en producción
+
+### Seguridad
+- [ ] CORS configurado con URL de producción (`FRONTEND_URL`)
+- [ ] Helmet activo en Express (ya instalado)
+- [ ] Rate limiting activo en endpoints de auth (ya instalado)
+- [ ] Headers de seguridad en Nginx (ver sección 7)
+- [ ] HTTPS activo con Let's Encrypt
+- [ ] Migrar JWT de `localStorage` a **cookies httpOnly** cuando se use HTTPS
+- [ ] `npm audit fix` ejecutado y sin vulnerabilidades críticas
 
 ### Infraestructura
 - [ ] PM2 configurado y en arranque automático (`pm2 startup && pm2 save`)

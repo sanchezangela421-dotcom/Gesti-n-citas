@@ -95,9 +95,15 @@ router.post('/register', async (req, res) => {
 
     const user = await prisma.user.create({
       data: {
-        ...data,
+        email: data.email,
         password: hashedPassword,
-        role: data.role || 'alumno',
+        name: data.name,
+        role: 'alumno', // Siempre alumno en registro público — admins/especialistas se crean por admin
+        matricula: data.matricula || null,
+        carrera: data.carrera || null,
+        semestre: data.semestre ? Number(data.semestre) : null,
+        edad: data.edad ? Number(data.edad) : null,
+        genero: data.genero || null,
         emailVerified: false,
         verificationToken,
         verificationTokenExpiresAt,

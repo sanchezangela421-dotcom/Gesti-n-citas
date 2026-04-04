@@ -19,9 +19,12 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   }
 });
 
-// POST /api/notifications — crear notificación (uso interno/backend o admin)
+// POST /api/notifications — crear notificación (solo admin)
 router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Sin permisos' });
+    }
     const { userId, title, message, type } = req.body;
     const notification = await prisma.notification.create({
       data: {

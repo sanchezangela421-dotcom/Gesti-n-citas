@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { prisma } from '../db';
+import { verifyToken, AuthRequest } from '../middleware/verifyToken';
+import { upload } from '../middleware/upload';
 
 const router = Router();
-
-import { upload } from '../middleware/upload';
 
 // GET /api/events
 router.get('/', async (req, res) => {
@@ -24,7 +24,10 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/events
-router.post('/', upload.single('image'), async (req, res) => {
+router.post('/', verifyToken as any, upload.single('image'), async (req: AuthRequest, res) => {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Sin permisos' });
+  }
   try {
     const { title, description, department, date, time, type, registrationUrl } = req.body;
     let imageUrl = req.body.imageUrl;
@@ -59,7 +62,10 @@ router.post('/', upload.single('image'), async (req, res) => {
 });
 
 // PATCH /api/events/:id
-router.patch('/:id', upload.single('image'), async (req, res) => {
+router.patch('/:id', verifyToken as any, upload.single('image'), async (req: AuthRequest, res) => {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Sin permisos' });
+  }
   try {
     const { title, description, department, date, time, type, registrationUrl } = req.body;
     const data: any = {};
@@ -82,9 +88,12 @@ router.patch('/:id', upload.single('image'), async (req, res) => {
 });
 
 // DELETE /api/events/:id
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', verifyToken as any, async (req: AuthRequest, res) => {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Sin permisos' });
+  }
   try {
-    await prisma.appEvent.delete({ where: { id: req.params.id } });
+    await prisma.appEvent.delete({ where: { id: req.params.id as string } });
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Error interno del servidor' });

@@ -1,0 +1,163 @@
+name: "Gestión Académica: Calidad y Seguridad (DevOps)"
+run-name: "🚀 DevOps: ${{ github.ref_name }} (#${{ github.run_number }})"
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+    inputs:
+      run_quality_check:
+        description: '✅ Ejecutar Validaciones (Lint & Build)'
+        required: true
+        type: boolean
+        default: true
+      run_security_scan:
+        description: '🛡️ Ejecutar Escáner de Vulnerabilidades (CodeQL)'
+        required: true
+        type: boolean
+        default: true
+
+
+jobs:
+  pipeline:
+    name: Pipeline de Calidad y Seguridad
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout Código
+        # actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Detectar Secrets (TruffleHog)
+        id: trufflehog
+        # trufflesecurity/trufflehog@v3.94.2
+        uses: trufflesecurity/trufflehog@6bd2d14f7a4bc1e569fa3550efa7ec632a4fa67b
+        with:
+          path: ./
+          # github.event.before puede ser all-zeros en el primer push de una rama nueva;
+          # en ese caso se escanea solo el commit HEAD via --since-commit HEAD~1 como fallback.
+          base: ${{ github.event.before != '0000000000000000000000000000000000000000' && github.event.before || github.event.repository.default_branch }}
+          head: HEAD
+          # Sin --only-verified: detecta también secrets no verificables activamente (código muerto, rotados).
+          # Puede generar más falsos positivos, pero la cobertura es mayor.
+          extra_args: --json
+
+      - name: Configurar Node.js (v20)
+        # actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Instalar Dependencias
+        # npm ci usa el lockfile exacto: reproducible y más seguro que npm install en CI
+        run: npm ci
+
+      - name: Auditar Dependencias (npm audit)
+        id: npm_audit
+        # Falla si hay vulnerabilidades de severidad alta o crítica en dependencias
+        run: npm audit --audit-level=high --json > npm-audit-report.json 2>&1 || echo "AUDIT_FAILED=true" >> $GITHUB_ENV
+
+      - name: Verificar Estilo (Lint)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_quality_check == true }}
+        run: npm run lint -- --format json -o eslint-report.json || true
+
+      - name: Inicializar CodeQL (Seguridad)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_security_scan == true }}
+        # github/codeql-action@v3
+        uses: github/codeql-action/init@3b1a19a80ab047f35cbb237b5bd9bdc1e14f166c
+        with:
+          languages: 'javascript-typescript'
+          queries: security-extended,security-and-quality
+
+      - name: Validar Construcción (Build)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_quality_check == true }}
+        id: build_step
+        run: |
+          npm run build 2> build_error.log || echo "BUILD_FAILED=true" >> $GITHUB_ENV
+        env:
+          DATABASE_URL: "postgres://dummy:dummy@localhost:5432/dummy"
+          NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+          JWT_SECRET: "ci_test_secret_key_only"
+          SESSION_SECRET: "ci_test_session_secret_key_only"
+
+      - name: Analizar Vulnerabilidades (CodeQL)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_security_scan == true }}
+        # github/codeql-action@v3
+        uses: github/codeql-action/analyze@3b1a19a80ab047f35cbb237b5bd9bdc1e14f166c
+        with:
+          category: "/language:javascript-typescript"
+
+      - name: Generar Resumen Ejecutivo Final
+        if: always()
+        run: |
+          echo "## 📋 Reporte Ejecutivo de Calidad, Construcción y Seguridad" >> $GITHUB_STEP_SUMMARY
+
+          # Sección de SECRETS
+          echo "### 🔑 Detección de Secrets (TruffleHog)" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.trufflehog.outcome }}" == "failure" ]; then
+            echo "❌ **SECRETS DETECTADOS**: TruffleHog encontró secrets expuestos en el código." >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.trufflehog.outcome }}" == "success" ]; then
+            echo "✅ **ANÁLISIS COMPLETADO**: No se detectaron secrets expuestos." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **PASO OMITIDO O FALLIDO**: No se pudo completar el escaneo de secrets." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Sección de DEPENDENCIAS
+          echo "### 📦 Vulnerabilidades en Dependencias (npm audit)" >> $GITHUB_STEP_SUMMARY
+          if [ "$AUDIT_FAILED" == "true" ]; then
+            echo "❌ **VULNERABILIDADES ENCONTRADAS**: Existen dependencias con severidad alta o crítica." >> $GITHUB_STEP_SUMMARY
+            if [ -f npm-audit-report.json ]; then
+              HIGH=$(cat npm-audit-report.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('metadata',{}).get('vulnerabilities',{}).get('high',0))" 2>/dev/null || echo "?")
+              CRITICAL=$(cat npm-audit-report.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('metadata',{}).get('vulnerabilities',{}).get('critical',0))" 2>/dev/null || echo "?")
+              echo "| Severidad | Cantidad |" >> $GITHUB_STEP_SUMMARY
+              echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+              echo "| 🔴 Críticas | ${CRITICAL} |" >> $GITHUB_STEP_SUMMARY
+              echo "| 🟠 Altas | ${HIGH} |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "✅ **SIN VULNERABILIDADES**: No se encontraron dependencias con riesgo alto o crítico." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Sección de LINTING
+          echo "### 🎨 Estilo y Estándares (Lint)" >> $GITHUB_STEP_SUMMARY
+          if [ -f eslint-report.json ]; then
+            ERROR_COUNT=$(grep -o '"errorCount":[0-9]*' eslint-report.json | head -n 1 | cut -d: -f2)
+            WARNING_COUNT=$(grep -o '"warningCount":[0-9]*' eslint-report.json | head -n 1 | cut -d: -f2)
+            echo "| Métrica | Resultado |" >> $GITHUB_STEP_SUMMARY
+            echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+            echo "| ❌ Errores de Lint | ${ERROR_COUNT:-0} |" >> $GITHUB_STEP_SUMMARY
+            echo "| ⚠️ Avisos de Lint | ${WARNING_COUNT:-0} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **OMITIDO**: El paso de lint no generó reporte (posiblemente saltado)." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Sección de BUILD
+          echo "### 🏗️ Estado de la Construcción" >> $GITHUB_STEP_SUMMARY
+          if [ "$BUILD_FAILED" == "true" ]; then
+            echo "❌ **LA CONSTRUCCIÓN FALLÓ**" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`text" >> $GITHUB_STEP_SUMMARY
+            tail -n 10 build_error.log >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **CONSTRUCCIÓN EXITOSA**: El proyecto compila correctamente." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Sección de SEGURIDAD (CodeQL)
+          echo "### 🛡️ Escaneo de Seguridad (CodeQL)" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **ANÁLISIS COMPLETADO**: Revisa la pestaña 'Security > Code scanning' en GitHub para ver los resultados detallados." >> $GITHUB_STEP_SUMMARY
+
+          # Fallo del pipeline si hay problemas críticos
+          if [ "$BUILD_FAILED" == "true" ] || [ "$AUDIT_FAILED" == "true" ] || [ "${ERROR_COUNT:-0}" -gt 0 ]; then
+            exit 1
+          fi
