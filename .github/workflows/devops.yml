@@ -111,7 +111,7 @@ jobs:
       - name: Inicializar CodeQL
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_security_scan == true }}
         # github/codeql-action@v3
-        uses: github/codeql-action/init@3b1a19a80ab047f35cbb237b5bd9bdc1e14f166c
+        uses: github/codeql-action/init@5c8a8a642e79153f5d047b10ec1cba1d1cc65699
         with:
           languages: 'javascript-typescript'
           queries: security-extended,security-and-quality
@@ -119,7 +119,7 @@ jobs:
       - name: Analizar Vulnerabilidades (CodeQL)
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_security_scan == true }}
         # github/codeql-action@v3
-        uses: github/codeql-action/analyze@3b1a19a80ab047f35cbb237b5bd9bdc1e14f166c
+        uses: github/codeql-action/analyze@5c8a8a642e79153f5d047b10ec1cba1d1cc65699
         with:
           category: "/language:javascript-typescript"
 
