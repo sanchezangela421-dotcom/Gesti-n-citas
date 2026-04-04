@@ -49,6 +49,7 @@ export function AppShell({ children, sidebar }: AppShellProps) {
     const [showNew, setShowNew] = useState(false);
     const [pwLoading, setPwLoading] = useState(false);
     const userMenuRef = useRef<HTMLDivElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         if (!showUserMenu) return;
@@ -71,8 +72,6 @@ export function AppShell({ children, sidebar }: AppShellProps) {
         if (!showNotif && unread > 0) markNotificationsRead(user.id);
         setShowNotif(v => !v);
     };
-
-    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const openPwModal = () => { setShowUserMenu(false); setShowPwModal(true); };
     const closePwModal = () => { setShowPwModal(false); setCurrentPw(""); setNewPw(""); setConfirmPw(""); };

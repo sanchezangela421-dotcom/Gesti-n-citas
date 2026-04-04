@@ -26,19 +26,19 @@ async function main() {
   const espPwd = await hash("esp123");
 
   // 1. Users
-  const u1 = await prisma.user.create({
+  await prisma.user.create({
     data: { id: "u1", email: "admin@instituto.edu.mx", password: adminPwd, name: "Admin Sistema", role: "admin", emailVerified: true }
   });
-  const u2 = await prisma.user.create({
+  await prisma.user.create({
     data: { id: "u2", email: "alumno@mail.com", password: alumnoPwd, name: "María García López", role: "alumno", matricula: "20210001", carrera: "Ing. en Sistemas Computacionales", semestre: 5, edad: 21, genero: "Femenino", emailVerified: true }
   });
-  const u3 = await prisma.user.create({
+  await prisma.user.create({
     data: { id: "u3", email: "psicologo@instituto.edu.mx", password: espPwd, name: "Dr. Carlos Mendoza", role: "especialista", department: "Psicología", emailVerified: true }
   });
-  const u4 = await prisma.user.create({
+  await prisma.user.create({
     data: { id: "u4", email: "tutor@instituto.edu.mx", password: espPwd, name: "Mtra. Ana Ruiz", role: "especialista", department: "Tutorías", emailVerified: true }
   });
-  const u5 = await prisma.user.create({
+  await prisma.user.create({
     data: { id: "u5", email: "nutriologo@instituto.edu.mx", password: espPwd, name: "Lic. Roberto Sánchez", role: "especialista", department: "Nutrición", emailVerified: true }
   });
 

@@ -63,7 +63,7 @@ router.get('/:id', verifyToken as any, async (req: AuthRequest, res) => {
 
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
     res.json(user);
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });

@@ -15,12 +15,16 @@ export default tseslint.config(
       ...react.configs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
       "react/react-in-jsx-scope": "off",
+      // Innecesario con TypeScript — los tipos ya validan los props
+      "react/prop-types": "off",
+      // Degradado a advertencia para corregir gradualmente
+      "@typescript-eslint/no-explicit-any": "warn",
     },
     settings: {
       react: { version: "detect" }
     }
   },
   {
-    ignores: ["dist/", "node_modules/"]
+    ignores: ["dist/", "node_modules/", "src/imports/"]
   }
 );

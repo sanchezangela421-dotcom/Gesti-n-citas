@@ -142,7 +142,7 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
 // ─── Component ───────────────────────────────────────────
 export function SpecialistDashboard() {
     const { user } = useAuth();
-    const { specialists, specialistsLoaded, getAppointments, addScheduleSlot, addEvent, updateEvent, deleteEvent, addResource, updateResource, deleteResource, resources, events, getAvailableDays, getAvailableSlots, createAppointment, addNotification, updateMeetingUrl } = useStore();
+    const { specialists, specialistsLoaded, getAppointments, addEvent, updateEvent, deleteEvent, addResource, updateResource, deleteResource, resources, events, getAvailableDays, getAvailableSlots, createAppointment, addNotification, updateMeetingUrl } = useStore();
 
     const spec = specialists.find(s => s.userId === user?.id);
     const dept = user?.department || "Psicología";
@@ -171,7 +171,6 @@ export function SpecialistDashboard() {
 
     // Calendar tab state
     const [selDate, setSelDate] = useState(new Date());
-    const [activeListTab, setActiveListTab] = useState("pending");
     const apptDates = [...new Set(allAppts.filter(a => a.status !== "Cancelada").map(a => a.date))]
         .map(d => new Date(d + "T12:00:00"))
         .filter(d => d >= todayMidnight);
@@ -407,12 +406,6 @@ export function SpecialistDashboard() {
         { key: "content", label: "Publicar Contenido", icon: FileText },
         { key: "event", label: "Publicar Evento", icon: Megaphone },
     ];
-
-    const isPastDay = (date: Date) => {
-        const today = new Date(); today.setHours(0, 0, 0, 0);
-        const d = new Date(date); d.setHours(0, 0, 0, 0);
-        return d < today;
-    };
 
     return (
         <AppShell sidebar={{ tabs: sidebarTabs, active: activeTab, onSelect: setActiveTab, badges: { calendar: pendientes.length + sinCerrar.length } }}>

@@ -25,7 +25,7 @@ export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction)
     const verified = jwt.verify(token, JWT_SECRET) as any;
     req.user = verified;
     next();
-  } catch (error) {
+  } catch {
     res.status(401).json({ error: 'Token inválido o expirado' });
   }
 };

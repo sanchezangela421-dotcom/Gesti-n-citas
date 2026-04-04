@@ -95,7 +95,7 @@ router.delete('/:id', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     await prisma.appEvent.delete({ where: { id: req.params.id as string } });
     res.json({ success: true });
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });

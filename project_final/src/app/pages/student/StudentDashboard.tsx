@@ -1,15 +1,15 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
     CalendarCheck, Clock, CheckCircle2, BookOpen, RefreshCw,
     AlertTriangle, Info, Video, Users, ChevronLeft, ChevronRight,
-    Calendar, Plus, Brain, GraduationCap, Apple,
+    Calendar, Brain, GraduationCap, Apple,
     ExternalLink, Image as ImageIcon, Maximize2,
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
 import { AppShell } from "../../components/layout/AppShell";
-import { Btn, StatCard, TabNav, Modal, MiniCalendar, StatusBadge, inputCls, Avatar, EmptyState } from "../../components/ui";
+import { Btn, StatCard, TabNav, Modal, MiniCalendar, StatusBadge, Avatar, EmptyState } from "../../components/ui";
 import { DEPT_CONFIG, DEPT_REASONS } from "../../../constants";
 import { useAppointmentWizard, useReschedule, useCancelAppointment } from "../../hooks";
 import type { AppEvent } from "../../../types";
@@ -63,7 +63,7 @@ const DEPARTMENTS = [
 
 export function StudentDashboard() {
     const { user } = useAuth();
-    const { getAppointments, updateAppointmentStatus, events, resources, getStats, specialists } = useStore();
+    const { getAppointments, events, resources, specialists } = useStore();
 
     // ── UI state ──────────────────────────────────────────
     const [activeApptTab, setActiveApptTab] = useState("proximas");
@@ -74,7 +74,7 @@ export function StudentDashboard() {
     const [videoModal, setVideoModal] = useState<{ embedUrl: string; title: string } | null>(null);
     const [showConfModal, setShowConfModal] = useState(false);
     const [selConf, setSelConf] = useState<AppEvent | null>(null);
-    const resourcesRef = useRef<HTMLDivElement>(null);
+
 
     // ── Derived data ──────────────────────────────────────
     const appointments = getAppointments({ studentId: user?.id });
@@ -103,7 +103,7 @@ export function StudentDashboard() {
         if (slides.length <= 1) return;
         const t = setInterval(() => setActiveBannerIndex(p => (p + 1) % slides.length), 5000);
         return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     }, [slides.length]);
 
     if (!user) return null;
@@ -512,7 +512,6 @@ export function StudentDashboard() {
                                     ))}
                                 </div>
                                 {wizard.selModality === "Virtual" && (() => {
-                                    const selSpec = wizard.deptSpecialists.find(s => s.id === wizard.selSpecId);
                                     return (
                                         <div className="mt-3 p-3 bg-blue-50 border border-blue-100 rounded-xl flex items-start gap-2">
                                             <Video className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />

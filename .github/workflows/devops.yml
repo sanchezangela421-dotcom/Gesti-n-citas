@@ -40,6 +40,8 @@ jobs:
 
       - name: Detectar Secrets (TruffleHog)
         id: trufflehog
+        # Solo corre en push/PR — en workflow_dispatch y schedule no hay diff que escanear
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
         # trufflesecurity/trufflehog@v3.94.2
         uses: trufflesecurity/trufflehog@6bd2d14f7a4bc1e569fa3550efa7ec632a4fa67b
         with:

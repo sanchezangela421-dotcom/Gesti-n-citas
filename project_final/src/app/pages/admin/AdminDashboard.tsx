@@ -12,7 +12,6 @@ import {
 } from "recharts";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
 import { AppShell } from "../../components/layout/AppShell";
 import { Btn, StatCard, Avatar, StatusBadge, Modal, inputCls, EmptyState } from "../../components/ui";
@@ -384,9 +383,8 @@ export function AdminDashboard() {
         : { borderRadius: "12px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" };
     const cursorStyle = dark ? { fill: "rgba(255,255,255,0.04)" } : { fill: "#f8fafc" };
 
-    const { user } = useAuth();
     const {
-        getAppointments, updateAppointmentStatus, getStats,
+        getAppointments, getStats,
         specialists, addSpecialist, updateSpecialist, removeSpecialist,
         events, addEvent, updateEvent, deleteEvent, resources, addResource, updateResource, deleteResource, users, deleteUser,
     } = useStore();

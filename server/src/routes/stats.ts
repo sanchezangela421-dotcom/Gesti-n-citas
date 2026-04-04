@@ -35,7 +35,7 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
       if (!monthlyMap[monthKey]) {
         monthlyMap[monthKey] = { month: monthKey, Psicología: 0, Tutorías: 0, Nutrición: 0 };
       }
-      if (monthlyMap[monthKey].hasOwnProperty(appt.department)) {
+      if (Object.prototype.hasOwnProperty.call(monthlyMap[monthKey], appt.department)) {
         monthlyMap[monthKey][appt.department]++;
       }
     });
