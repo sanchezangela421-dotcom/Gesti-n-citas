@@ -27,7 +27,7 @@ jobs:
     name: Pipeline de Calidad y Seguridad
     runs-on: ubuntu-latest
     permissions:
-      actions: read
+      actions: write
       contents: read
       security-events: write
 
@@ -211,7 +211,86 @@ jobs:
           echo "### 🛡️ Escaneo de Seguridad (CodeQL)" >> $GITHUB_STEP_SUMMARY
           echo "✅ **ANÁLISIS COMPLETADO**: Revisa la pestaña 'Security > Code scanning' en GitHub para ver resultados detallados." >> $GITHUB_STEP_SUMMARY
 
+          # ── Generar reporte de texto descargable ──────────────────
+          REPORT="reporte-pipeline.txt"
+          echo "============================================" >> $REPORT
+          echo " REPORTE DE CALIDAD Y SEGURIDAD" >> $REPORT
+          echo " Rama   : ${{ github.ref_name }}" >> $REPORT
+          echo " Commit : ${{ github.sha }}" >> $REPORT
+          echo " Fecha  : $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $REPORT
+          echo "============================================" >> $REPORT
+
+          echo "" >> $REPORT
+          echo "[ SECRETS (TruffleHog) ]" >> $REPORT
+          if [ "${{ steps.trufflehog.outcome }}" == "failure" ]; then
+            echo "  ESTADO : SECRETS DETECTADOS" >> $REPORT
+          elif [ "${{ steps.trufflehog.outcome }}" == "success" ]; then
+            echo "  ESTADO : Sin secrets expuestos" >> $REPORT
+          else
+            echo "  ESTADO : Omitido (trigger manual)" >> $REPORT
+          fi
+
+          echo "" >> $REPORT
+          echo "[ VULNERABILIDADES EN DEPENDENCIAS (npm audit) ]" >> $REPORT
+          for proj in server frontend; do
+            label="Backend (server)"; [ "$proj" == "frontend" ] && label="Frontend (project_final)"
+            echo "  $label:" >> $REPORT
+            if [ "${proj}" == "server" ] && [ "$AUDIT_SERVER_FAILED" == "true" ]; then
+              python3 -c "import json; d=json.load(open('npm-audit-server.json')); v=d.get('metadata',{}).get('vulnerabilities',{}); print('    ESTADO  : VULNERABILIDADES ENCONTRADAS'); print('    Criticas: ' + str(v.get('critical',0))); print('    Altas   : ' + str(v.get('high',0)))" 2>/dev/null >> $REPORT || echo "    ESTADO  : No se pudo parsear el reporte" >> $REPORT
+            elif [ "${proj}" == "frontend" ] && [ "$AUDIT_FRONTEND_FAILED" == "true" ]; then
+              python3 -c "import json; d=json.load(open('npm-audit-frontend.json')); v=d.get('metadata',{}).get('vulnerabilities',{}); print('    ESTADO  : VULNERABILIDADES ENCONTRADAS'); print('    Criticas: ' + str(v.get('critical',0))); print('    Altas   : ' + str(v.get('high',0)))" 2>/dev/null >> $REPORT || echo "    ESTADO  : No se pudo parsear el reporte" >> $REPORT
+            else
+              echo "    ESTADO  : Sin vulnerabilidades altas o criticas" >> $REPORT
+            fi
+          done
+
+          echo "" >> $REPORT
+          echo "[ LINT (ESLint) ]" >> $REPORT
+          for proj in server frontend; do
+            label="Backend (server)"; [ "$proj" == "frontend" ] && label="Frontend (project_final)"
+            report="eslint-${proj}-report.json"
+            echo "  $label:" >> $REPORT
+            if [ -f "$report" ]; then
+              python3 -c "import json; d=json.load(open('$report')); errs=sum(f['errorCount'] for f in d); warns=sum(f['warningCount'] for f in d); bad=[f['filePath'] for f in d if f['errorCount']>0]; print('    Errores : '+str(errs)); print('    Avisos  : '+str(warns)); [print('    - '+fp) for fp in bad[:10]]; bad[10:] and print('    ... y '+str(len(bad)-10)+' mas')" 2>/dev/null >> $REPORT || echo "    No se pudo parsear el reporte" >> $REPORT
+            else
+              echo "    ESTADO  : Reporte no generado" >> $REPORT
+            fi
+          done
+
+          echo "" >> $REPORT
+          echo "[ CONSTRUCCION (Build) ]" >> $REPORT
+          echo "  Backend (server)        : $([ "$BUILD_SERVER_FAILED" == "true" ] && echo "FALLO" || echo "Exitosa")" >> $REPORT
+          echo "  Frontend (project_final): $([ "$BUILD_FRONTEND_FAILED" == "true" ] && echo "FALLO" || echo "Exitosa")" >> $REPORT
+          if [ "$BUILD_SERVER_FAILED" == "true" ] && [ -f build_server_error.log ]; then
+            echo "  -- Error Backend --" >> $REPORT
+            tail -n 15 build_server_error.log >> $REPORT
+          fi
+          if [ "$BUILD_FRONTEND_FAILED" == "true" ] && [ -f build_frontend_error.log ]; then
+            echo "  -- Error Frontend --" >> $REPORT
+            tail -n 15 build_frontend_error.log >> $REPORT
+          fi
+
+          echo "" >> $REPORT
+          echo "[ CODEQL ]" >> $REPORT
+          echo "  Ver resultados en: Security > Code scanning en GitHub" >> $REPORT
+          echo "============================================" >> $REPORT
+
           # Fallo del pipeline si hay problemas críticos
           if [ "$BUILD_SERVER_FAILED" == "true" ] || [ "$BUILD_FRONTEND_FAILED" == "true" ] || [ "$AUDIT_SERVER_FAILED" == "true" ] || [ "$AUDIT_FRONTEND_FAILED" == "true" ] || [ "$LINT_SERVER_FAILED" == "true" ] || [ "$LINT_FRONTEND_FAILED" == "true" ]; then
             exit 1
           fi
+
+      - name: Subir Reporte como Artefacto
+        if: always()
+        # actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: reporte-pipeline-${{ github.run_number }}
+          path: |
+            reporte-pipeline.txt
+            eslint-server-report.json
+            eslint-frontend-report.json
+            npm-audit-server.json
+            npm-audit-frontend.json
+          if-no-files-found: ignore
+          retention-days: 30
