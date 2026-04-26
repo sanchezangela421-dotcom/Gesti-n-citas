@@ -213,11 +213,20 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       }
     }
 
+    // Resolver meetingUrl antes del update para guardarlo en la cita
+    let resolvedMeetingUrl: string | undefined;
+    if (status === 'Confirmada') {
+      resolvedMeetingUrl = bodyMeetingUrl
+        || (await prisma.specialist.findUnique({ where: { id: current.specialistId } }))?.meetingUrl
+        || undefined;
+    }
+
     const appointment = await prisma.appointment.update({
       where: { id },
       data: {
         status,
         ...(notes !== undefined && { notes }),
+        ...(resolvedMeetingUrl !== undefined && { meetingUrl: resolvedMeetingUrl }),
       },
     });
 
@@ -240,9 +249,6 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       };
 
       if (status === 'Confirmada' && studentEmail) {
-        const resolvedMeetingUrl = bodyMeetingUrl
-          || (await prisma.specialist.findUnique({ where: { id: appointment.specialistId } }))?.meetingUrl
-          || undefined;
         await sendAppointmentConfirmedEmail(studentEmail, {
           ...base,
           meetingUrl: resolvedMeetingUrl,

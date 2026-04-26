@@ -16,7 +16,7 @@ model User {
   matricula         String?
   carrera           String?
   semestre          Int?
-  edad              Int?
+  fechaNacimiento   String?   // YYYY-MM-DD
   genero            String?
   department        String?
   avatarUrl         String?
@@ -86,6 +86,7 @@ model Appointment {
   modality       String
   motivo         String
   notes          String?
+  meetingUrl     String?       // Enlace único de videollamada para esta cita
   isFollowUp     Boolean       @default(false)
   parentId       String?
   parent         Appointment?  @relation("AppointmentFollowUps", fields: [parentId], references: [id], onDelete: SetNull)

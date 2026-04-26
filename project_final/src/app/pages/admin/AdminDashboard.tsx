@@ -12,6 +12,7 @@ import {
     PieChart, Pie, Cell,
 } from "recharts";
 import type { DateRange } from "react-day-picker";
+import { es } from "date-fns/locale";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { useStore } from "../../../context/StoreContext";
@@ -23,6 +24,7 @@ import { PIE_COLORS } from "../../../data/mockData";
 import { useActionModal } from "../../hooks";
 import { useTheme } from "../../hooks/useTheme";
 import { API, authHeaders } from "../../../lib/api";
+import { calcularEdad } from "../../../utils/date";
 import type { Appointment, Specialist, AppEvent, Resource } from "../../../types";
 
 // ─── ReportPeriod type ────────────────────────────────────────────────────────
@@ -194,8 +196,17 @@ async function downloadChartAsImage(
     }
 }
 
+// ─── Age ranges (shared between PDF and charts) ───────────────────────────────
+const AGE_RANGES = [
+    { label: "15–17", min: 15, max: 17 },
+    { label: "18–20", min: 18, max: 20 },
+    { label: "21–23", min: 21, max: 23 },
+    { label: "24–26", min: 24, max: 26 },
+    { label: "27+",   min: 27, max: 99 },
+];
+
 // ─── PDF report (pure jsPDF + autoTable, no canvas capture) ──────────────────
-function generatePDFReport(deptReport: string, allAppts: Appointment[], users: { id: string; carrera?: string; genero?: string; semestre?: number }[]) {
+function generatePDFReport(deptReport: string, allAppts: Appointment[], users: { id: string; carrera?: string; genero?: string; semestre?: number; fechaNacimiento?: string }[], periodName?: string) {
     const doc = new jsPDF();
     const today = new Date().toLocaleDateString("es-MX");
 
@@ -206,8 +217,12 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[], users: {
         doc.text(title, 105, 23, { align: "center" });
         doc.setFontSize(10); doc.setTextColor(100, 116, 139);
         doc.text(`Fecha de generación: ${today}`, 105, 29, { align: "center" });
+        if (periodName) {
+            doc.setFontSize(9); doc.setTextColor(71, 85, 105);
+            doc.text(`Período: ${periodName}`, 105, 34, { align: "center" });
+        }
         doc.setDrawColor(226, 232, 240);
-        doc.line(20, 35, 190, 35);
+        doc.line(20, periodName ? 38 : 35, 190, periodName ? 38 : 35);
     };
 
     const getDeptStats = (list: Appointment[]) => {
@@ -216,6 +231,7 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[], users: {
         const carreraMap: Record<string, number> = {};
         const generoMap: Record<string, number> = {};
         const semestreMap: Record<string, number> = {};
+        const edadMap: Record<string, number> = {};
         list.forEach(a => {
             const m = a.motivo || "Consulta General";
             motivosMap[m] = (motivosMap[m] || 0) + 1;
@@ -227,6 +243,11 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[], users: {
             generoMap[g] = (generoMap[g] || 0) + 1;
             const s = student?.semestre ? `Sem. ${student.semestre}` : "No esp.";
             semestreMap[s] = (semestreMap[s] || 0) + 1;
+            if (student?.fechaNacimiento) {
+                const edad = calcularEdad(student.fechaNacimiento);
+                const rango = AGE_RANGES.find(r => edad >= r.min && edad <= r.max)?.label ?? "Otro";
+                edadMap[rango] = (edadMap[rango] || 0) + 1;
+            }
         });
         return {
             total: list.length,
@@ -243,8 +264,13 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[], users: {
                 const nb = parseInt(b.replace("Sem. ", "")) || 99;
                 return na - nb;
             }),
+            edad: AGE_RANGES
+                .map(r => [r.label, edadMap[r.label] ?? 0] as [string, number])
+                .filter(([, v]) => v > 0),
         };
     };
+
+    const headerBottomY = periodName ? 44 : 41;
 
     const addStatsPage = (dept: string, list: Appointment[], isFirst: boolean, pageTitle?: string) => {
         if (!isFirst) doc.addPage();
@@ -252,9 +278,9 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[], users: {
         const stats = getDeptStats(list);
 
         doc.setFontSize(12); doc.setTextColor(30, 41, 59);
-        doc.text("Resumen de Actividad", 20, 45);
+        doc.text("Resumen de Actividad", 20, headerBottomY);
         autoTable(doc, {
-            startY: 50,
+            startY: headerBottomY + 5,
             head: [["Métrica", "Cantidad"]],
             body: [
                 ["Total de Citas", stats.total],
@@ -268,7 +294,7 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[], users: {
             margin: { left: 20, right: 20 },
         });
 
-        const currentY = (doc as any).lastAutoTable.finalY + 15;
+        const currentY = (doc as any).lastAutoTable.finalY + 12;
         doc.text("Distribución de Motivos y Modalidad", 20, currentY);
 
         autoTable(doc, {
@@ -279,6 +305,8 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[], users: {
             headStyles: { fillColor: [71, 85, 105] },
             margin: { left: 20, right: 105 },
         });
+        const motivosEndY = (doc as any).lastAutoTable.finalY;
+
         autoTable(doc, {
             startY: currentY + 5,
             head: [["Modalidad", "Citas"]],
@@ -287,8 +315,9 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[], users: {
             headStyles: { fillColor: [71, 85, 105] },
             margin: { left: 110, right: 20 },
         });
+        const modalidadEndY = (doc as any).lastAutoTable.finalY;
 
-        const demoY = (doc as any).lastAutoTable.finalY + 15;
+        const demoY = Math.max(motivosEndY, modalidadEndY) + 12;
         doc.setFontSize(12); doc.setTextColor(30, 41, 59);
         doc.text("Perfil Demográfico de Alumnos Atendidos", 20, demoY);
 
@@ -300,6 +329,8 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[], users: {
             headStyles: { fillColor: [109, 40, 217] },
             margin: { left: 20, right: 105 },
         });
+        const carreraEndY = (doc as any).lastAutoTable.finalY;
+
         autoTable(doc, {
             startY: demoY + 5,
             head: [["Género", "Citas"]],
@@ -308,8 +339,9 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[], users: {
             headStyles: { fillColor: [109, 40, 217] },
             margin: { left: 110, right: 20 },
         });
+        const generoEndY = (doc as any).lastAutoTable.finalY;
 
-        const semY = (doc as any).lastAutoTable.finalY + 10;
+        const semY = Math.max(carreraEndY, generoEndY) + 10;
         autoTable(doc, {
             startY: semY,
             head: [["Semestre", "Citas"]],
@@ -318,11 +350,22 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[], users: {
             headStyles: { fillColor: [109, 40, 217] },
             margin: { left: 20, right: 105 },
         });
+        const semestreEndY = (doc as any).lastAutoTable.finalY;
+
+        autoTable(doc, {
+            startY: semY,
+            head: [["Edad", "Citas"]],
+            body: stats.edad.length > 0 ? stats.edad : [["Sin datos", "—"]],
+            theme: "striped",
+            headStyles: { fillColor: [109, 40, 217] },
+            margin: { left: 110, right: 20 },
+        });
+        const edadEndY = (doc as any).lastAutoTable.finalY;
 
         doc.setFontSize(10); doc.setTextColor(100, 116, 139);
         doc.text(
             "* Las gráficas están disponibles para descarga en la sección de Estadísticas.",
-            20, (doc as any).lastAutoTable.finalY + 15
+            20, Math.max(semestreEndY, edadEndY) + 12
         );
     };
 
@@ -387,7 +430,10 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[], users: {
         doc.text(`* Mostrando los primeros 100 registros de ${finalList.length} totales.`, 20, (doc as any).lastAutoTable.finalY + 10);
     }
 
-    doc.save(`reporte_${deptReport.replace(/\s+/g, "_").toLowerCase()}.pdf`);
+    const suffix = periodName
+        ? periodName.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_áéíóúÁÉÍÓÚñÑ]/g, "")
+        : new Date().toLocaleDateString("es-MX").replace(/\//g, "-");
+    doc.save(`reporte_${deptReport.replace(/\s+/g, "_").toLowerCase()}_${suffix}.pdf`);
     toast.success("Reporte generado con éxito.");
 }
 
@@ -436,6 +482,10 @@ export function AdminDashboard() {
     const [nextPeriodName, setNextPeriodName] = useState("");
     const [nextPeriodDateRange, setNextPeriodDateRange] = useState<DateRange | undefined>(undefined);
     const [createNextPeriod, setCreateNextPeriod] = useState(true);
+    // Absorber citas sin período al crear uno nuevo
+    const [absorbUnassigned, setAbsorbUnassigned] = useState(false);
+    // Período seleccionado para exportar PDF
+    const [pdfPeriodId, setPdfPeriodId] = useState<string>("all");
 
     const fetchPeriods = useCallback(async () => {
         try {
@@ -470,6 +520,7 @@ export function AdminDashboard() {
         setEditingPeriod(null);
         setPeriodName("");
         setPeriodDateRange(undefined);
+        setAbsorbUnassigned(false);
         setShowPeriodModal(true);
     };
 
@@ -506,10 +557,14 @@ export function AdminDashboard() {
                         name: periodName,
                         startDate: toISO(periodDateRange.from),
                         endDate: periodDateRange.to ? toISO(periodDateRange.to) : null,
+                        absorbUnassigned,
                     }),
                 });
                 if (!res.ok) { const e = await res.json(); toast.error(e.error); return; }
-                toast.success("Período creado");
+                const created = await res.json();
+                toast.success(created.absorbed > 0
+                    ? `Período creado · ${created.absorbed} cita${created.absorbed !== 1 ? "s" : ""} sin período absorbida${created.absorbed !== 1 ? "s" : ""}`
+                    : "Período creado");
             } else if (periodModalMode === "edit" && editingPeriod) {
                 const res = await fetch(`${API}/periods/${editingPeriod.id}`, {
                     method: "PATCH",
@@ -651,10 +706,10 @@ export function AdminDashboard() {
     };
 
     // Chart refs (used for downloadChartAsImage)
-    const chartGlobal = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null), genero: useRef<HTMLDivElement>(null), semestre: useRef<HTMLDivElement>(null) };
-    const chartPsicologia = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null), genero: useRef<HTMLDivElement>(null), semestre: useRef<HTMLDivElement>(null) };
-    const chartTutorias = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null), genero: useRef<HTMLDivElement>(null), semestre: useRef<HTMLDivElement>(null) };
-    const chartNutricion = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null), genero: useRef<HTMLDivElement>(null), semestre: useRef<HTMLDivElement>(null) };
+    const chartGlobal = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null), genero: useRef<HTMLDivElement>(null), semestre: useRef<HTMLDivElement>(null), edad: useRef<HTMLDivElement>(null) };
+    const chartPsicologia = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null), genero: useRef<HTMLDivElement>(null), semestre: useRef<HTMLDivElement>(null), edad: useRef<HTMLDivElement>(null) };
+    const chartTutorias = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null), genero: useRef<HTMLDivElement>(null), semestre: useRef<HTMLDivElement>(null), edad: useRef<HTMLDivElement>(null) };
+    const chartNutricion = { monthly: useRef<HTMLDivElement>(null), motivos: useRef<HTMLDivElement>(null), modalidad: useRef<HTMLDivElement>(null), carrera: useRef<HTMLDivElement>(null), genero: useRef<HTMLDivElement>(null), semestre: useRef<HTMLDivElement>(null), edad: useRef<HTMLDivElement>(null) };
 
     const deptRefs: Record<string, typeof chartGlobal> = {
         Global: chartGlobal,
@@ -668,7 +723,11 @@ export function AdminDashboard() {
     const summary = fullStats.summary;
     const charts = fullStats.charts;
     const allAppts = getAppointments();
-    const activePeriod = periods.find(p => p.status === "activo") ?? null;
+    const todayStr = new Date().toISOString().split("T")[0];
+    const activePeriod = periods.find(
+        p => p.status === "activo" && (!p.endDate || p.endDate >= todayStr)
+    ) ?? null;
+    const unassignedCount = allAppts.filter(a => !a.periodId).length;
 
     const todayMidnightAdmin = new Date(); todayMidnightAdmin.setHours(0, 0, 0, 0);
     const sinCerrarCount = allAppts.filter(a =>
@@ -692,6 +751,7 @@ export function AdminDashboard() {
             const carMap: Record<string, number> = {};
             const genMap: Record<string, number> = {};
             const semMap: Record<string, number> = {};
+            const edaMap: Record<string, number> = {};
             dAppts.forEach(a => {
                 const m = a.motivo || "Consulta General";
                 motMap[m] = (motMap[m] || 0) + 1;
@@ -703,6 +763,11 @@ export function AdminDashboard() {
                 genMap[g] = (genMap[g] || 0) + 1;
                 const s = student?.semestre ? `Sem. ${student.semestre}` : "No esp.";
                 semMap[s] = (semMap[s] || 0) + 1;
+                if (student?.fechaNacimiento) {
+                    const edad = calcularEdad(student.fechaNacimiento);
+                    const rango = AGE_RANGES.find(r => edad >= r.min && edad <= r.max)?.label ?? "Otro";
+                    edaMap[rango] = (edaMap[rango] || 0) + 1;
+                }
             });
             result[d] = {
                 monthly: Object.values(monMap),
@@ -715,6 +780,7 @@ export function AdminDashboard() {
                     const nb = parseInt(b.name.replace("Sem. ", "")) || 99;
                     return na - nb;
                 }),
+                edad: AGE_RANGES.map(r => ({ name: r.label, value: edaMap[r.label] ?? 0 })),
             };
         });
         return result;
@@ -724,12 +790,18 @@ export function AdminDashboard() {
     const globalDemoData = useMemo(() => {
         const genMap: Record<string, number> = {};
         const semMap: Record<string, number> = {};
+        const edaMap: Record<string, number> = {};
         allAppts.forEach(a => {
             const student = users.find((u: any) => u.id === a.studentId);
             const g = student?.genero || "No especificado";
             genMap[g] = (genMap[g] || 0) + 1;
             const s = student?.semestre ? `Sem. ${student.semestre}` : "No esp.";
             semMap[s] = (semMap[s] || 0) + 1;
+            if (student?.fechaNacimiento) {
+                const edad = calcularEdad(student.fechaNacimiento);
+                const rango = AGE_RANGES.find(r => edad >= r.min && edad <= r.max)?.label ?? "Otro";
+                edaMap[rango] = (edaMap[rango] || 0) + 1;
+            }
         });
         return {
             genero: Object.entries(genMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
@@ -738,6 +810,7 @@ export function AdminDashboard() {
                 const nb = parseInt(b.name.replace("Sem. ", "")) || 99;
                 return na - nb;
             }),
+            edad: AGE_RANGES.map(r => ({ name: r.label, value: edaMap[r.label] ?? 0 })),
         };
     }, [allAppts, users]);
 
@@ -747,7 +820,8 @@ export function AdminDashboard() {
             if (storeActivePeriod) {
                 if (a.periodId !== storeActivePeriod.id) return false;
             }
-            // Si no hay período activo, se muestran todas (no filtra)
+        } else if (apptPeriodFilter === "unassigned") {
+            if (a.periodId) return false;
         } else if (apptPeriodFilter !== "all") {
             if (a.periodId !== apptPeriodFilter) return false;
         }
@@ -842,8 +916,22 @@ export function AdminDashboard() {
                 </div>
 
                 {/* Stats row */}
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                    {adminStats.map(s => <StatCard key={s.label} {...s} />)}
+                <div className="space-y-3">
+                    {periodStats && selectedPeriodId !== "all" && (() => {
+                        const filteredPeriodName = periods.find(p => p.id === selectedPeriodId)?.name;
+                        return filteredPeriodName ? (
+                            <div className="flex items-center gap-2">
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />
+                                    Estadísticas filtradas por período: {filteredPeriodName}
+                                </span>
+                                <span className="text-xs text-slate-400">— Los reportes siempre muestran todas las citas</span>
+                            </div>
+                        ) : null;
+                    })()}
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                        {adminStats.map(s => <StatCard key={s.label} {...s} />)}
+                    </div>
                 </div>
 
                 {/* Dept cards */}
@@ -890,6 +978,9 @@ export function AdminDashboard() {
                                     <select value={apptPeriodFilter} onChange={e => setApptPeriodFilter(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-sm font-medium text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600/20">
                                         <option value="active">{storeActivePeriod ? `${storeActivePeriod.name} (activo)` : "Período actual"}</option>
                                         <option value="all">Todos los períodos</option>
+                                        {unassignedCount > 0 && (
+                                            <option value="unassigned">Sin período asignado ({unassignedCount})</option>
+                                        )}
                                         {periods.filter(p => p.status === "cerrado").map(p => (
                                             <option key={p.id} value={p.id}>{p.name}</option>
                                         ))}
@@ -1148,6 +1239,9 @@ export function AdminDashboard() {
                                             className={`${inputCls} pr-8 text-sm font-semibold appearance-none cursor-pointer min-w-[220px]`}
                                         >
                                             <option value="all">Todos los períodos</option>
+                                            {unassignedCount > 0 && (
+                                                <option value="unassigned">Sin período asignado ({unassignedCount})</option>
+                                            )}
                                             {periods.map(p => (
                                                 <option key={p.id} value={p.id}>
                                                     {p.name}{p.status === "activo" ? " (activo)" : ""}
@@ -1321,6 +1415,39 @@ export function AdminDashboard() {
                                                         </ResponsiveContainer>
                                                     </div>
                                                 </div>
+
+                                                {/* Histograma de Edad */}
+                                                <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+                                                    <div className="flex items-center justify-between mb-6">
+                                                        <div>
+                                                            <h4 className="text-slate-900 dark:text-white font-bold text-lg">Distribución de Edad</h4>
+                                                            <p className="text-slate-400 text-xs mt-0.5">Alumnos atendidos por rango de edad</p>
+                                                        </div>
+                                                        <button onClick={() => downloadChartAsImage(refs.edad, `Edad_${statsView}`, "Distribución de Edad", dark)}
+                                                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all cursor-pointer" title="Descargar como imagen">
+                                                            <Download className="w-5 h-5" />
+                                                        </button>
+                                                    </div>
+                                                    {(data.edad ?? []).every((d: any) => d.value === 0) ? (
+                                                        <div className="flex items-center justify-center h-[260px] text-slate-400 text-sm">Sin datos de fecha de nacimiento</div>
+                                                    ) : (
+                                                        <div ref={refs.edad}>
+                                                            <ResponsiveContainer width="100%" height={260}>
+                                                                <BarChart data={data.edad ?? []} margin={{ top: 10, right: 10, left: -20, bottom: 10 }}>
+                                                                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                                                                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                                                                    <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                                                                    <Tooltip cursor={cursorStyle} contentStyle={tooltipStyle} formatter={(v: any) => [v, "Citas"]} />
+                                                                    <Bar dataKey="value" name="Citas" radius={[4, 4, 0, 0]} maxBarSize={48}>
+                                                                        {(data.edad ?? []).map((_: any, i: number) => (
+                                                                            <Cell key={i} fill={["#6366f1", "#3b82f6", "#0ea5e9", "#10b981", "#f59e0b"][i % 5]} />
+                                                                        ))}
+                                                                    </Bar>
+                                                                </BarChart>
+                                                            </ResponsiveContainer>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
                                     );
@@ -1368,59 +1495,122 @@ export function AdminDashboard() {
                                     </div>
                                 </div>
                             ) : (
-                                <div className="bg-slate-50 dark:bg-slate-800/50 border border-dashed border-slate-300 dark:border-slate-600 rounded-3xl p-8 text-center">
-                                    <Scissors className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-                                    <p className="text-slate-500 font-medium">No hay ningún período activo.</p>
-                                    <p className="text-slate-400 text-sm mt-1">Crea un período para comenzar a etiquetar las citas automáticamente.</p>
-                                </div>
-                            )}
-
-                            {/* ── Historial de períodos ── */}
-                            {periods.filter(p => p.status === "cerrado").length > 0 && (
-                                <div>
-                                    <h4 className="text-slate-900 dark:text-white font-bold text-base mb-4">Historial de períodos cerrados</h4>
-                                    <div className="space-y-3">
-                                        {periods.filter(p => p.status === "cerrado").map(p => (
-                                            <div key={p.id} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                                <div>
-                                                    <p className="text-slate-900 dark:text-white font-semibold">{p.name}</p>
-                                                    <p className="text-slate-500 text-sm">
-                                                        {p.startDate && new Date(p.startDate + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" })}
-                                                        {p.endDate && ` — ${new Date(p.endDate + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" })}`}
-                                                        {" · "}{p._count?.appointments ?? 0} citas
+                                <div className={`border rounded-3xl p-6 ${unassignedCount > 0 ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800" : "bg-slate-50 dark:bg-slate-800/50 border-dashed border-slate-300 dark:border-slate-600"}`}>
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                        <div className="flex items-start gap-3">
+                                            <Scissors className={`w-8 h-8 mt-0.5 shrink-0 ${unassignedCount > 0 ? "text-amber-500" : "text-slate-300"}`} />
+                                            <div>
+                                                <p className={`font-semibold ${unassignedCount > 0 ? "text-amber-800 dark:text-amber-300" : "text-slate-500"}`}>
+                                                    No hay ningún período activo
+                                                </p>
+                                                {unassignedCount > 0 ? (
+                                                    <p className="text-amber-700 dark:text-amber-400 text-sm mt-0.5">
+                                                        <strong>{unassignedCount} cita{unassignedCount !== 1 ? "s" : ""}</strong> registrada{unassignedCount !== 1 ? "s" : ""} sin período — no quedarán clasificadas hasta que crees uno nuevo.
                                                     </p>
-                                                </div>
-                                                <Btn variant="ghost" size="sm" onClick={() => openEditPeriod(p)}>
-                                                    <Pencil className="w-3.5 h-3.5 mr-1.5" /> Renombrar
-                                                </Btn>
+                                                ) : (
+                                                    <p className="text-slate-400 text-sm mt-0.5">Crea un período para comenzar a etiquetar las citas automáticamente.</p>
+                                                )}
                                             </div>
-                                        ))}
+                                        </div>
+                                        {unassignedCount > 0 && (
+                                            <Btn onClick={openCreatePeriod} className="shrink-0 bg-amber-500 hover:bg-amber-600 text-white border-0">
+                                                <Plus className="w-4 h-4 mr-2" /> Crear período
+                                            </Btn>
+                                        )}
                                     </div>
                                 </div>
                             )}
 
+                            {/* ── Historial de períodos ── */}
+                            {periods.filter(p => p.status === "cerrado").length > 0 && (() => {
+                                const closed = periods.filter(p => p.status === "cerrado");
+                                return (
+                                    <div>
+                                        <div className="flex items-center justify-between mb-3">
+                                            <h4 className="text-slate-900 dark:text-white font-bold text-base">Historial de períodos cerrados</h4>
+                                            <span className="text-xs text-slate-400 font-medium">{closed.length} período{closed.length !== 1 ? "s" : ""}</span>
+                                        </div>
+                                        <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden">
+                                            <div className="overflow-y-auto max-h-[13rem] divide-y divide-slate-100 dark:divide-slate-700/60">
+                                                {closed.map(p => (
+                                                    <div key={p.id} className="flex items-center justify-between gap-3 px-4 py-3 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                                                        <div className="min-w-0">
+                                                            <span className="text-slate-900 dark:text-white font-semibold text-sm truncate block">{p.name}</span>
+                                                            <span className="text-slate-400 text-xs">
+                                                                {p.startDate && new Date(p.startDate + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" })}
+                                                                {p.endDate && ` — ${new Date(p.endDate + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" })}`}
+                                                                {" · "}{p._count?.appointments ?? 0} citas
+                                                            </span>
+                                                        </div>
+                                                        <button onClick={() => openEditPeriod(p)} className="shrink-0 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors" title="Renombrar">
+                                                            <Pencil className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            {closed.length > 4 && (
+                                                <div className="px-4 py-2 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-700 text-center">
+                                                    <span className="text-xs text-slate-400">Desplázate para ver todos los períodos</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+
                             {/* ── Exportar PDF ── */}
                             <div>
-                                <h4 className="text-slate-900 dark:text-white font-bold text-base mb-4">Exportar reporte PDF</h4>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                                    {[
-                                        { label: "Psicología", icon: Brain, gradient: "from-blue-500 to-indigo-600" },
-                                        { label: "Tutorías", icon: GraduationCap, gradient: "from-emerald-500 to-teal-600" },
-                                        { label: "Nutrición", icon: Apple, gradient: "from-rose-500 to-orange-500" },
-                                        { label: "Reporte Global", icon: FileText, gradient: "from-violet-600 to-purple-700" },
-                                    ].map(r => (
-                                        <div key={r.label} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 text-center hover:shadow-xl transition-all flex flex-col h-full">
-                                            <div className={`w-16 h-16 bg-gradient-to-br ${r.gradient} rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg`}>
-                                                <r.icon className="w-8 h-8 text-white" />
-                                            </div>
-                                            <h4 className="text-slate-900 dark:text-white font-bold text-lg mb-2">{r.label}</h4>
-                                            <p className="text-slate-500 text-xs font-medium mb-6 flex-1">Datos consolidados, demografía y efectividad.</p>
-                                            <Btn onClick={() => generatePDFReport(r.label, allAppts, users)} variant="outline" className="w-full">
-                                                <Download className="w-4 h-4 mr-2" /> PDF Export
-                                            </Btn>
-                                        </div>
-                                    ))}
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                                    <h4 className="text-slate-900 dark:text-white font-bold text-base">Exportar reporte PDF</h4>
+                                    <div className="relative">
+                                        <select
+                                            value={pdfPeriodId}
+                                            onChange={e => setPdfPeriodId(e.target.value)}
+                                            className={`${inputCls} pr-8 text-sm appearance-none cursor-pointer min-w-[200px]`}
+                                        >
+                                            <option value="all">Todos los períodos</option>
+                                            {periods.map(p => (
+                                                <option key={p.id} value={p.id}>
+                                                    {p.name}{p.status === "activo" ? " (activo)" : ""}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                                    </div>
                                 </div>
+                                {(() => {
+                                    const pdfAppts = pdfPeriodId === "all"
+                                        ? allAppts
+                                        : allAppts.filter(a => a.periodId === pdfPeriodId);
+                                    const pdfPeriodName = pdfPeriodId === "all"
+                                        ? undefined
+                                        : periods.find(p => p.id === pdfPeriodId)?.name;
+                                    return (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                                            {[
+                                                { label: "Psicología", icon: Brain, gradient: "from-blue-500 to-indigo-600" },
+                                                { label: "Tutorías", icon: GraduationCap, gradient: "from-emerald-500 to-teal-600" },
+                                                { label: "Nutrición", icon: Apple, gradient: "from-rose-500 to-orange-500" },
+                                                { label: "Reporte Global", icon: FileText, gradient: "from-violet-600 to-purple-700" },
+                                            ].map(r => (
+                                                <div key={r.label} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 text-center hover:shadow-xl transition-all flex flex-col h-full">
+                                                    <div className={`w-16 h-16 bg-gradient-to-br ${r.gradient} rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg`}>
+                                                        <r.icon className="w-8 h-8 text-white" />
+                                                    </div>
+                                                    <h4 className="text-slate-900 dark:text-white font-bold text-lg mb-2">{r.label}</h4>
+                                                    <p className="text-slate-500 text-xs font-medium mb-1 flex-1">Datos consolidados, demografía y efectividad.</p>
+                                                    <p className="text-slate-400 text-xs mb-5">
+                                                        {pdfPeriodName ? `Período: ${pdfPeriodName}` : "Todos los períodos"}
+                                                        {" · "}{(r.label === "Reporte Global" ? pdfAppts : pdfAppts.filter(a => a.department === r.label)).length} citas
+                                                    </p>
+                                                    <Btn onClick={() => generatePDFReport(r.label, pdfAppts, users, pdfPeriodName)} variant="outline" className="w-full">
+                                                        <Download className="w-4 h-4 mr-2" /> PDF Export
+                                                    </Btn>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         </div>
                     )}
@@ -1937,6 +2127,8 @@ export function AdminDashboard() {
                                             selected={periodDateRange}
                                             onSelect={setPeriodDateRange}
                                             numberOfMonths={2}
+                                            locale={es}
+                                            defaultMonth={periodDateRange?.from}
                                         />
                                     </div>
                                 ) : (
@@ -1951,6 +2143,23 @@ export function AdminDashboard() {
                                     </p>
                                 )}
                             </div>
+                            {periodModalMode === "create" && unassignedCount > 0 && (
+                                <div className="flex items-start gap-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-4">
+                                    <input
+                                        type="checkbox"
+                                        id="absorb-unassigned"
+                                        checked={absorbUnassigned}
+                                        onChange={e => setAbsorbUnassigned(e.target.checked)}
+                                        className="w-4 h-4 mt-0.5 rounded border-slate-300 text-blue-600 shrink-0"
+                                    />
+                                    <label htmlFor="absorb-unassigned" className="text-sm text-amber-800 dark:text-amber-300 cursor-pointer">
+                                        <span className="font-semibold">Absorber {unassignedCount} cita{unassignedCount !== 1 ? "s" : ""} sin período</span>
+                                        <span className="block font-normal mt-0.5 text-amber-700 dark:text-amber-400">
+                                            Estas citas quedaron sin clasificar durante el lapso entre períodos y se asignarán a este nuevo período.
+                                        </span>
+                                    </label>
+                                </div>
+                            )}
                             <div className="flex gap-3 pt-2">
                                 <Btn variant="ghost" onClick={() => setShowPeriodModal(false)} className="flex-1">Cancelar</Btn>
                                 <Btn onClick={handleSavePeriod} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20">
@@ -2004,6 +2213,8 @@ export function AdminDashboard() {
                                                 selected={nextPeriodDateRange}
                                                 onSelect={setNextPeriodDateRange}
                                                 numberOfMonths={2}
+                                                locale={es}
+                                                defaultMonth={nextPeriodDateRange?.from}
                                             />
                                         </div>
                                         {nextPeriodDateRange?.from && (

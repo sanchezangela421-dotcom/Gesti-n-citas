@@ -2,7 +2,7 @@ import { User, Specialist, Appointment, AppEvent, Resource, AppNotification } fr
 
 export const SEED_USERS: User[] = [
   { id: "u1", email: "admin@instituto.edu.mx", password: "admin123", name: "Admin Sistema", role: "admin" },
-  { id: "u2", email: "alumno@instituto.edu.mx", password: "alumno123", name: "María García López", role: "alumno", matricula: "20210001", carrera: "Ing. en Sistemas Computacionales", semestre: 5, edad: 21, genero: "Femenino" },
+  { id: "u2", email: "alumno@instituto.edu.mx", password: "alumno123", name: "María García López", role: "alumno", matricula: "20210001", carrera: "Ing. en Sistemas Computacionales", semestre: 5, fechaNacimiento: "2003-03-15", genero: "Femenino" },
   { id: "u3", email: "psicologo@instituto.edu.mx", password: "esp123", name: "Dr. Carlos Mendoza", role: "especialista", department: "Psicología" },
   { id: "u4", email: "tutor@instituto.edu.mx", password: "esp123", name: "Mtra. Ana Ruiz", role: "especialista", department: "Tutorías" },
   { id: "u5", email: "nutriologo@instituto.edu.mx", password: "esp123", name: "Lic. Roberto Sánchez", role: "especialista", department: "Nutrición" },

@@ -10,7 +10,11 @@ const router = Router();
 router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const { periodId } = req.query;
-    const where: any = periodId ? { periodId: periodId as string } : {};
+    const where: any = periodId === 'unassigned'
+      ? { periodId: null }
+      : periodId
+        ? { periodId: periodId as string }
+        : {};
 
     const [totalAppointments, pendientes, confirmadas, completadas, canceladas] =
       await Promise.all([

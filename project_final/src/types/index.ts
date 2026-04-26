@@ -22,7 +22,7 @@ export interface User {
   matricula?: string;
   carrera?: string;
   semestre?: number;
-  edad?: number;
+  fechaNacimiento?: string;
   genero?: string;
   department?: string;
   avatarUrl?: string | null;
@@ -54,6 +54,7 @@ export interface Appointment {
   modality: string;
   motivo: string;
   notes?: string;
+  meetingUrl?: string | null;
   isFollowUp?: boolean;
   parentId?: string | null;
   periodId?: string | null;
@@ -138,7 +139,7 @@ export interface StoreContextType {
   appointments: Appointment[];
   getAppointments: (filters?: AppointmentFilters) => Appointment[];
   createAppointment: (req: { studentId: string; studentName?: string; specialistId: string; department: string; motivo: string; modality: string; preferredDate: string; preferredTime: string; isFollowUp?: boolean; parentId?: string }) => Appointment;
-  updateAppointmentStatus: (id: string, status: string, notes?: string, byStudent?: boolean) => void;
+  updateAppointmentStatus: (id: string, status: string, notes?: string, byStudent?: boolean, meetingUrl?: string) => void;
   rescheduleAppointment: (id: string, newDate: string, newTime: string, byRole?: 'specialist' | 'student', modality?: string) => void;
   getAvailableSlots: (specialistId: string, dateStr: string) => Promise<AvailableSlot[]>;
   getAvailableDays: (specialistId: string, year: number, month: number) => Promise<Date[]>;

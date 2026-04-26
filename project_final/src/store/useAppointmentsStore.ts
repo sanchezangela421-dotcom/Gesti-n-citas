@@ -103,7 +103,7 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
         originalStatus = appt.status;
         capturedAppt = appt;
       }
-      return p.map(a => a.id === id ? { ...a, status, ...(notes ? { notes } : {}) } : a);
+      return p.map(a => a.id === id ? { ...a, status, ...(notes ? { notes } : {}), ...(meetingUrl ? { meetingUrl } : {}) } : a);
     });
 
     fetch(`${API}/appointments/${id}/status`, {
@@ -119,10 +119,9 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
       if (!capturedAppt) return;
       const appt = capturedAppt;
       if (status === "Confirmada") {
-        const spec = specialists.find(s => s.id === appt.specialistId);
         const virtualInfo = appt.modality === "Virtual"
-          ? spec?.meetingUrl
-            ? ` Enlace de videollamada: ${spec.meetingUrl}`
+          ? meetingUrl
+            ? ` Enlace de videollamada: ${meetingUrl}`
             : " Tu especialista compartirá el enlace de videollamada."
           : "";
         addNotification(appt.studentId, {

@@ -318,10 +318,9 @@ export function StudentDashboard() {
                                             {apptDate.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" })} — {appt.time}
                                         </p>
                                         {appt.motivo && <p className="text-slate-400 dark:text-slate-400 text-xs mt-0.5">Motivo: {appt.motivo}</p>}
-                                        {appt.status === "Confirmada" && appt.modality === "Virtual" && (() => {
-                                            const specData = specialists.find(s => s.id === appt.specialistId);
-                                            return specData?.meetingUrl ? (
-                                                <a href={specData.meetingUrl} target="_blank" rel="noopener noreferrer"
+                                        {appt.status === "Confirmada" && appt.modality === "Virtual" && (
+                                            appt.meetingUrl ? (
+                                                <a href={appt.meetingUrl} target="_blank" rel="noopener noreferrer"
                                                     className="inline-flex items-center gap-1.5 mt-1.5 text-xs font-semibold text-blue-600 hover:text-blue-800">
                                                     <Video className="w-3.5 h-3.5" /> Unirse a videollamada
                                                 </a>
@@ -329,8 +328,8 @@ export function StudentDashboard() {
                                                 <p className="text-blue-500 text-xs mt-1 flex items-center gap-1">
                                                     <Video className="w-3.5 h-3.5" /> Cita virtual — el especialista compartirá el enlace
                                                 </p>
-                                            );
-                                        })()}
+                                            )
+                                        )}
                                         {isPast && (
                                             <p className="text-rose-500 text-xs mt-1 font-medium">El especialista debe registrar el resultado de esta sesión.</p>
                                         )}

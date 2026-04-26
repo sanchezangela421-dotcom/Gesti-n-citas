@@ -37,14 +37,27 @@ router.get('/', readLimiter, verifyToken as any, async (_req: AuthRequest, res) 
 });
 
 // ── GET /api/periods/active ───────────────────────────────────────────────────
-// Devuelve el período activo actual (o null si no hay ninguno)
+// Devuelve el período activo actual (o null si no hay ninguno).
+// Si el período activo tiene endDate vencida, lo cierra automáticamente.
 router.get('/active', readLimiter, verifyToken as any, async (_req: AuthRequest, res) => {
   try {
     const active = await prisma.reportPeriod.findFirst({
       where: { status: 'activo' },
       include: { _count: { select: { appointments: true } } },
     });
-    res.json(active ?? null);
+
+    if (!active) return res.json(null);
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (active.endDate && active.endDate < todayStr) {
+      await prisma.reportPeriod.update({
+        where: { id: active.id },
+        data: { status: 'cerrado', closedAt: new Date() },
+      });
+      return res.json(null);
+    }
+
+    res.json(active);
   } catch (error) {
     console.error('Error fetching active period:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
@@ -58,7 +71,7 @@ router.post('/', writeLimiter, verifyToken as any, async (req: AuthRequest, res)
     return res.status(403).json({ error: 'Solo el administrador puede crear períodos' });
   }
 
-  const { name, startDate, endDate } = req.body;
+  const { name, startDate, endDate, absorbUnassigned } = req.body;
 
   if (!name || !startDate) {
     return res.status(400).json({ error: 'El nombre y la fecha de inicio son requeridos' });
@@ -85,7 +98,16 @@ router.post('/', writeLimiter, verifyToken as any, async (req: AuthRequest, res)
       },
     });
 
-    res.status(201).json(period);
+    let absorbed = 0;
+    if (absorbUnassigned) {
+      const result = await prisma.appointment.updateMany({
+        where: { periodId: null },
+        data: { periodId: period.id },
+      });
+      absorbed = result.count;
+    }
+
+    res.status(201).json({ ...period, absorbed });
   } catch (error) {
     console.error('Error creating period:', error);
     res.status(500).json({ error: 'Error al crear el período' });

@@ -102,7 +102,7 @@ router.post('/register', async (req, res) => {
         matricula: data.matricula || null,
         carrera: data.carrera || null,
         semestre: data.semestre ? Number(data.semestre) : null,
-        edad: data.edad ? Number(data.edad) : null,
+        fechaNacimiento: data.fechaNacimiento ?? null,
         genero: data.genero || null,
         emailVerified: false,
         verificationToken,

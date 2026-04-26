@@ -10,3 +10,13 @@ export function localISODate(d: Date): string {
     `${String(d.getDate()).padStart(2, "0")}`
   );
 }
+
+/** Calcula la edad actual a partir de una fecha de nacimiento "YYYY-MM-DD". */
+export function calcularEdad(fechaNacimiento: string): number {
+  const hoy = new Date();
+  const nac = new Date(fechaNacimiento + "T12:00:00");
+  let edad = hoy.getFullYear() - nac.getFullYear();
+  const cumpleEsteAnio = new Date(hoy.getFullYear(), nac.getMonth(), nac.getDate());
+  if (hoy < cumpleEsteAnio) edad--;
+  return edad;
+}
