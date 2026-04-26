@@ -63,7 +63,7 @@ const DEPARTMENTS = [
 
 export function StudentDashboard() {
     const { user } = useAuth();
-    const { getAppointments, events, resources, specialists, activePeriod } = useStore();
+    const { getAppointments, events, resources, activePeriod } = useStore();
 
     // ── UI state ──────────────────────────────────────────
     const [activeApptTab, setActiveApptTab] = useState("proximas");
