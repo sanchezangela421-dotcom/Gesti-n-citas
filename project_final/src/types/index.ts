@@ -22,7 +22,7 @@ export interface User {
   matricula?: string;
   carrera?: string;
   semestre?: number;
-  edad?: number;
+  fechaNacimiento?: string;
   genero?: string;
   department?: string;
   avatarUrl?: string | null;
@@ -54,10 +54,23 @@ export interface Appointment {
   modality: string;
   motivo: string;
   notes?: string;
+  meetingUrl?: string | null;
   isFollowUp?: boolean;
   parentId?: string | null;
+  periodId?: string | null;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface ReportPeriod {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string | null;
+  status: "activo" | "cerrado";
+  closedAt: string | null;
+  createdAt: string;
+  _count?: { appointments: number };
 }
 
 export interface AppEvent {
@@ -126,7 +139,7 @@ export interface StoreContextType {
   appointments: Appointment[];
   getAppointments: (filters?: AppointmentFilters) => Appointment[];
   createAppointment: (req: { studentId: string; studentName?: string; specialistId: string; department: string; motivo: string; modality: string; preferredDate: string; preferredTime: string; isFollowUp?: boolean; parentId?: string }) => Appointment;
-  updateAppointmentStatus: (id: string, status: string, notes?: string, byStudent?: boolean) => void;
+  updateAppointmentStatus: (id: string, status: string, notes?: string, byStudent?: boolean, meetingUrl?: string) => void;
   rescheduleAppointment: (id: string, newDate: string, newTime: string, byRole?: 'specialist' | 'student', modality?: string) => void;
   getAvailableSlots: (specialistId: string, dateStr: string) => Promise<AvailableSlot[]>;
   getAvailableDays: (specialistId: string, year: number, month: number) => Promise<Date[]>;
@@ -150,6 +163,7 @@ export interface StoreContextType {
       carrera: any[];
     }
   };
+  activePeriod: ReportPeriod | null;
   notifications: Record<string, AppNotification[]>;
   addNotification: (userId: string, notif: Omit<AppNotification, "id" | "time" | "read">) => void;
   markNotificationsRead: (userId: string) => void;

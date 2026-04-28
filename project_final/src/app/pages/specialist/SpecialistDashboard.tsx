@@ -142,7 +142,7 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
 // ─── Component ───────────────────────────────────────────
 export function SpecialistDashboard() {
     const { user } = useAuth();
-    const { specialists, specialistsLoaded, getAppointments, addEvent, updateEvent, deleteEvent, addResource, updateResource, deleteResource, resources, events, getAvailableDays, getAvailableSlots, createAppointment, addNotification, updateMeetingUrl } = useStore();
+    const { specialists, specialistsLoaded, getAppointments, addEvent, updateEvent, deleteEvent, addResource, updateResource, deleteResource, resources, events, getAvailableDays, getAvailableSlots, createAppointment, addNotification, updateMeetingUrl, activePeriod } = useStore();
 
     const spec = specialists.find(s => s.userId === user?.id);
     const dept = user?.department || "Psicología";
@@ -338,6 +338,9 @@ export function SpecialistDashboard() {
         setCtitle(""); setCdesc(""); setCurl(""); setCimgUrl(""); setSelectedFile(null);
     };
 
+    // Historial pagination
+    const [historialSpecPage, setHistorialSpecPage] = useState(0);
+
     // Event form
     const [evTitle, setEvTitle] = useState("");
     const [evDesc, setEvDesc] = useState("");
@@ -389,6 +392,14 @@ export function SpecialistDashboard() {
     const historialAppts = allAppts
         .filter(a => (a.status === "Completada" || a.status === "Cancelada") && !a.parentId)
         .sort((a, b) => b.date.localeCompare(a.date));
+
+    // Paginación del historial
+    const HISTORIAL_SPEC_PAGE_SIZE = 10;
+    const historialSpecTotalPages = Math.ceil(historialAppts.length / HISTORIAL_SPEC_PAGE_SIZE);
+    const pagedHistorialAppts = historialAppts.slice(
+        historialSpecPage * HISTORIAL_SPEC_PAGE_SIZE,
+        (historialSpecPage + 1) * HISTORIAL_SPEC_PAGE_SIZE
+    );
 
     // Map parentId → follow-up appointments (any status, not cancelled)
     const followUpsByParent = allAppts.reduce((acc, a) => {
@@ -500,6 +511,7 @@ export function SpecialistDashboard() {
                                 <h3 className="text-2xl font-bold text-slate-900 dark:text-white">Historial de Citas</h3>
                                 <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">
                                     {completadas.length} completadas · {allAppts.filter(a => a.status === "Cancelada").length} canceladas
+                                    {activePeriod && <span className="ml-2 text-xs font-bold text-blue-500">· {activePeriod.name}</span>}
                                 </p>
                             </div>
                         </div>
@@ -511,7 +523,7 @@ export function SpecialistDashboard() {
                             </div>
                         ) : (
                             <div className="space-y-4">
-                                {historialAppts.map(appt => {
+                                {pagedHistorialAppts.map(appt => {
                                     const isLate = appt.status === "Completada" &&
                                         appt.updatedAt &&
                                         appt.updatedAt.split("T")[0] > appt.date;
@@ -611,6 +623,23 @@ export function SpecialistDashboard() {
                                         </div>
                                     );
                                 })}
+                                {historialSpecTotalPages > 1 && (
+                                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-700">
+                                        <span className="text-xs text-slate-400 font-medium">
+                                            {historialSpecPage * HISTORIAL_SPEC_PAGE_SIZE + 1}–{Math.min((historialSpecPage + 1) * HISTORIAL_SPEC_PAGE_SIZE, historialAppts.length)} de {historialAppts.length}
+                                        </span>
+                                        <div className="flex gap-1">
+                                            <button onClick={() => setHistorialSpecPage(p => Math.max(0, p - 1))} disabled={historialSpecPage === 0}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed">← Anterior</button>
+                                            {Array.from({ length: historialSpecTotalPages }, (_, i) => (
+                                                <button key={i} onClick={() => setHistorialSpecPage(i)}
+                                                    className={`w-7 h-7 rounded-lg text-xs font-bold ${i === historialSpecPage ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"}`}>{i + 1}</button>
+                                            ))}
+                                            <button onClick={() => setHistorialSpecPage(p => Math.min(historialSpecTotalPages - 1, p + 1))} disabled={historialSpecPage === historialSpecTotalPages - 1}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed">Siguiente →</button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
@@ -623,9 +652,9 @@ export function SpecialistDashboard() {
                         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-6 shadow-sm">
                             <div className="flex items-center gap-2 mb-3">
                                 <Video className="w-4 h-4 text-blue-600" />
-                                <h4 className="font-bold text-slate-900 dark:text-white text-sm">Enlace de Videoconferencia (Citas Virtuales)</h4>
+                                <h4 className="font-bold text-slate-900 dark:text-white text-sm">Sala permanente de videollamada <span className="font-normal text-slate-400">(opcional)</span></h4>
                             </div>
-                            <p className="text-slate-500 text-xs mb-3">Este enlace se mostrará a los alumnos al agendar una cita virtual contigo.</p>
+                            <p className="text-slate-500 text-xs mb-3">Si usas una sala fija de Zoom o Google Meet, guárdala aquí y se pre-llenará al confirmar citas virtuales. Si generas un enlace único por reunión, déjalo vacío y pégalo directamente al confirmar.</p>
                             <div className="flex gap-2">
                                 <input
                                     type="url"
@@ -1131,7 +1160,7 @@ export function SpecialistDashboard() {
                                 placeholder="https://meet.google.com/xxx-xxxx-xxx"
                                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
-                            <p className="text-slate-400 text-xs mt-1">Si lo cambias, se actualizará tu enlace general para citas virtuales.</p>
+                            <p className="text-slate-400 text-xs mt-1">Este enlace quedará guardado únicamente en esta cita. Para cambiar el predeterminado, edítalo en la sección de configuración.</p>
                         </div>
                         <div className="flex gap-3">
                             <Btn variant="ghost" onClick={() => setVirtualConfirmAppt(null)} className="flex-1">Cancelar</Btn>

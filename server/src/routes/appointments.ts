@@ -79,6 +79,12 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
     }
 
+    // Obtener período activo para etiquetar la cita (fuera de la tx para no bloquear)
+    const activePeriod = await prisma.reportPeriod.findFirst({
+      where: { status: 'activo' },
+      select: { id: true },
+    });
+
     const appointment = await prisma.$transaction(async (tx) => {
       const conflict = await tx.appointment.findFirst({
         where: {
@@ -116,6 +122,7 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
           notes: data.notes,
           isFollowUp: data.isFollowUp ?? false,
           parentId: data.parentId ?? null,
+          periodId: activePeriod?.id ?? null,
         },
       });
     });
@@ -188,24 +195,30 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       });
     }
 
-    if (status === 'Cancelada') {
+    if (status === 'Cancelada' && req.user?.role === 'alumno') {
       const [hours, minutes] = current.time.split(':').map(Number);
       const apptDateTime = new Date(`${current.date}T00:00:00`);
       apptDateTime.setHours(hours, minutes, 0, 0);
       const now = new Date();
 
       if (apptDateTime < now) {
-        return res.status(422).json({ error: 'No se puede cancelar una cita que ya pasó.' });
+        return res.status(422).json({ error: 'No puedes cancelar una cita que ya pasó.' });
       }
 
-      if (req.user?.role === 'alumno') {
-        const hoursUntil = (apptDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
-        if (hoursUntil < 24) {
-          return res.status(422).json({
-            error: 'No puedes cancelar con menos de 24 horas de anticipación. Contacta directamente a tu especialista.',
-          });
-        }
+      const hoursUntil = (apptDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+      if (hoursUntil < 24) {
+        return res.status(422).json({
+          error: 'No puedes cancelar con menos de 24 horas de anticipación. Contacta directamente a tu especialista.',
+        });
       }
+    }
+
+    // Resolver meetingUrl antes del update para guardarlo en la cita
+    let resolvedMeetingUrl: string | undefined;
+    if (status === 'Confirmada') {
+      resolvedMeetingUrl = bodyMeetingUrl
+        || (await prisma.specialist.findUnique({ where: { id: current.specialistId } }))?.meetingUrl
+        || undefined;
     }
 
     const appointment = await prisma.appointment.update({
@@ -213,6 +226,7 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       data: {
         status,
         ...(notes !== undefined && { notes }),
+        ...(resolvedMeetingUrl !== undefined && { meetingUrl: resolvedMeetingUrl }),
       },
     });
 
@@ -235,9 +249,6 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       };
 
       if (status === 'Confirmada' && studentEmail) {
-        const resolvedMeetingUrl = bodyMeetingUrl
-          || (await prisma.specialist.findUnique({ where: { id: appointment.specialistId } }))?.meetingUrl
-          || undefined;
         await sendAppointmentConfirmedEmail(studentEmail, {
           ...base,
           meetingUrl: resolvedMeetingUrl,
@@ -279,6 +290,14 @@ router.patch('/:id/reschedule', verifyToken as any, async (req: AuthRequest, res
 
       previousDate = current.date;
       previousTime = current.time;
+
+      if (byRole === 'student') {
+        const [h, m] = current.time.split(':').map(Number);
+        const apptDateTime = new Date(`${current.date}T00:00:00`);
+        apptDateTime.setHours(h, m, 0, 0);
+        const hoursUntil = (apptDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
+        if (hoursUntil < 24) throw new Error('WITHIN_24H');
+      }
 
       const conflict = await tx.appointment.findFirst({
         where: {
@@ -336,6 +355,9 @@ router.patch('/:id/reschedule', verifyToken as any, async (req: AuthRequest, res
     }
     if (error.message === 'NOT_FOUND') {
       return res.status(404).json({ error: 'Cita no encontrada' });
+    }
+    if (error.message === 'WITHIN_24H') {
+      return res.status(422).json({ error: 'No puedes reagendar con menos de 24 horas de anticipación. Contacta directamente a tu especialista.' });
     }
     console.error('Error rescheduling appointment:', error);
     res.status(500).json({ error: 'Error al reagendar la cita' });

@@ -27,7 +27,7 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
       select: {
         id: true, email: true, name: true, role: true,
         matricula: true, carrera: true, semestre: true,
-        edad: true, genero: true, department: true,
+        fechaNacimiento: true, genero: true, department: true,
         createdAt: true,
         specialist: { select: { id: true, department: true, active: true } }
       },
@@ -57,7 +57,7 @@ router.get('/:id', verifyToken as any, async (req: AuthRequest, res) => {
       select: {
         id: true, email: true, name: true, role: true,
         matricula: true, carrera: true, semestre: true,
-        edad: true, genero: true, department: true
+        fechaNacimiento: true, genero: true, department: true
       }
     });
 

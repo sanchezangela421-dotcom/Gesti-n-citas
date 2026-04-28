@@ -12,9 +12,7 @@ const DEPARTMENTS = [
 ];
 
 const DEMO_ACCOUNTS = [
-    { role: "Alumno",       email: "alumno@mail.com",                pass: "alumno123", badge: "bg-blue-100 text-blue-700"     },
-    { role: "Especialista", email: "psicologo@instituto.edu.mx",     pass: "esp123",    badge: "bg-emerald-100 text-emerald-700"},
-    { role: "Admin",        email: "admin@instituto.edu.mx",         pass: "admin123",  badge: "bg-slate-100 text-slate-600"   },
+    { role: "Admin", email: "admin@instituto.edu.mx", pass: "admin123", badge: "bg-slate-100 text-slate-600" },
 ];
 
 type View = "login" | "forgot" | "reset";

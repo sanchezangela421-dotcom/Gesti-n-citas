@@ -63,7 +63,7 @@ const DEPARTMENTS = [
 
 export function StudentDashboard() {
     const { user } = useAuth();
-    const { getAppointments, events, resources, specialists } = useStore();
+    const { getAppointments, events, resources, activePeriod } = useStore();
 
     // ── UI state ──────────────────────────────────────────
     const [activeApptTab, setActiveApptTab] = useState("proximas");
@@ -75,11 +75,27 @@ export function StudentDashboard() {
     const [showConfModal, setShowConfModal] = useState(false);
     const [selConf, setSelConf] = useState<AppEvent | null>(null);
 
+    // Paginación
+    const PROXIMAS_PAGE_SIZE = 5;
+    const HISTORIAL_PAGE_SIZE = 8;
+    const [proximasPage, setProximasPage] = useState(0);
+    const [historialPage, setHistorialPage] = useState(0);
 
     // ── Derived data ──────────────────────────────────────
     const appointments = getAppointments({ studentId: user?.id });
-    const proximas = appointments.filter(a => a.status === "Pendiente" || a.status === "Confirmada");
+
+    // Próximas: si hay período activo, solo las del período actual
+    const proximas = appointments.filter(a => {
+        if (a.status !== "Pendiente" && a.status !== "Confirmada") return false;
+        if (activePeriod && a.periodId && a.periodId !== activePeriod.id) return false;
+        return true;
+    });
     const historial = appointments.filter(a => a.status === "Completada" || a.status === "Cancelada");
+
+    const proximasTotalPages = Math.ceil(proximas.length / PROXIMAS_PAGE_SIZE);
+    const pagedProximas = proximas.slice(proximasPage * PROXIMAS_PAGE_SIZE, (proximasPage + 1) * PROXIMAS_PAGE_SIZE);
+    const historialTotalPages = Math.ceil(historial.length / HISTORIAL_PAGE_SIZE);
+    const pagedHistorial = historial.slice(historialPage * HISTORIAL_PAGE_SIZE, (historialPage + 1) * HISTORIAL_PAGE_SIZE);
 
     const stats = [
         { label: "Pendientes", value: appointments.filter(a => a.status === "Pendiente").length, icon: Clock, bg: "bg-gradient-to-br from-[#EA580C] to-[#f97316]" },
@@ -274,9 +290,12 @@ export function StudentDashboard() {
                         {activeApptTab === "proximas" && (
                             proximas.length === 0 ? (
                                 <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700">
-                                    <EmptyState icon={CalendarCheck} title="No tienes citas próximas" subtitle="Solicita una cita usando el botón de arriba" />
+                                    <EmptyState icon={CalendarCheck}
+                                        title="No tienes citas próximas"
+                                        subtitle={activePeriod ? `No hay citas en el período "${activePeriod.name}"` : "Solicita una cita usando el botón de arriba"} />
                                 </div>
-                            ) : proximas.map(appt => {
+                            ) : (<>
+                            {pagedProximas.map(appt => {
                                 const apptDate = new Date(appt.date + "T12:00:00");
                                 const today = new Date(); today.setHours(0, 0, 0, 0);
                                 const isPast = apptDate < today;
@@ -299,10 +318,9 @@ export function StudentDashboard() {
                                             {apptDate.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" })} — {appt.time}
                                         </p>
                                         {appt.motivo && <p className="text-slate-400 dark:text-slate-400 text-xs mt-0.5">Motivo: {appt.motivo}</p>}
-                                        {appt.status === "Confirmada" && appt.modality === "Virtual" && (() => {
-                                            const specData = specialists.find(s => s.id === appt.specialistId);
-                                            return specData?.meetingUrl ? (
-                                                <a href={specData.meetingUrl} target="_blank" rel="noopener noreferrer"
+                                        {appt.status === "Confirmada" && appt.modality === "Virtual" && (
+                                            appt.meetingUrl ? (
+                                                <a href={appt.meetingUrl} target="_blank" rel="noopener noreferrer"
                                                     className="inline-flex items-center gap-1.5 mt-1.5 text-xs font-semibold text-blue-600 hover:text-blue-800">
                                                     <Video className="w-3.5 h-3.5" /> Unirse a videollamada
                                                 </a>
@@ -310,8 +328,8 @@ export function StudentDashboard() {
                                                 <p className="text-blue-500 text-xs mt-1 flex items-center gap-1">
                                                     <Video className="w-3.5 h-3.5" /> Cita virtual — el especialista compartirá el enlace
                                                 </p>
-                                            );
-                                        })()}
+                                            )
+                                        )}
                                         {isPast && (
                                             <p className="text-rose-500 text-xs mt-1 font-medium">El especialista debe registrar el resultado de esta sesión.</p>
                                         )}
@@ -319,9 +337,15 @@ export function StudentDashboard() {
                                     <div className="flex items-center gap-2 flex-wrap">
                                         {!isPast && (
                                             <>
-                                                <Btn size="sm" variant="ghost" onClick={() => resch.open(appt.id)}>
-                                                    <RefreshCw className="w-3.5 h-3.5" /> Reagendar
-                                                </Btn>
+                                                {isWithin24h ? (
+                                                    <span className="text-xs text-amber-700 font-medium px-2 py-1 bg-amber-50 rounded-lg border border-amber-200">
+                                                        No reagendable — menos de 24h
+                                                    </span>
+                                                ) : (
+                                                    <Btn size="sm" variant="ghost" onClick={() => resch.open(appt.id)}>
+                                                        <RefreshCw className="w-3.5 h-3.5" /> Reagendar
+                                                    </Btn>
+                                                )}
                                                 {appt.status === "Pendiente" && (
                                                     isWithin24h ? (
                                                         <span className="text-xs text-amber-700 font-medium px-2 py-1 bg-amber-50 rounded-lg border border-amber-200">
@@ -343,7 +367,23 @@ export function StudentDashboard() {
                                     </div>
                                 </div>
                                 );
-                            })
+                            })}
+                            {proximasTotalPages > 1 && (
+                                <div className="flex items-center justify-between pt-2">
+                                    <span className="text-xs text-slate-400">{proximasPage * PROXIMAS_PAGE_SIZE + 1}–{Math.min((proximasPage + 1) * PROXIMAS_PAGE_SIZE, proximas.length)} de {proximas.length}</span>
+                                    <div className="flex gap-1">
+                                        <button onClick={() => setProximasPage(p => Math.max(0, p - 1))} disabled={proximasPage === 0}
+                                            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed">← Anterior</button>
+                                        {Array.from({ length: proximasTotalPages }, (_, i) => (
+                                            <button key={i} onClick={() => setProximasPage(i)}
+                                                className={`w-7 h-7 rounded-lg text-xs font-bold ${i === proximasPage ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"}`}>{i + 1}</button>
+                                        ))}
+                                        <button onClick={() => setProximasPage(p => Math.min(proximasTotalPages - 1, p + 1))} disabled={proximasPage === proximasTotalPages - 1}
+                                            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed">Siguiente →</button>
+                                    </div>
+                                </div>
+                            )}
+                            </>)
                         )}
 
                         {activeApptTab === "historial" && (
@@ -351,7 +391,8 @@ export function StudentDashboard() {
                                 <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700">
                                     <EmptyState icon={CalendarCheck} title="Sin historial de citas" />
                                 </div>
-                            ) : historial.map(appt => {
+                            ) : (<>
+                            {pagedHistorial.map(appt => {
                                 const isLate = appt.status === "Completada" &&
                                     appt.updatedAt &&
                                     appt.updatedAt.split("T")[0] > appt.date;
@@ -379,7 +420,23 @@ export function StudentDashboard() {
                                     </div>
                                 </div>
                                 );
-                            })
+                            })}
+                            {historialTotalPages > 1 && (
+                                <div className="flex items-center justify-between pt-2">
+                                    <span className="text-xs text-slate-400">{historialPage * HISTORIAL_PAGE_SIZE + 1}–{Math.min((historialPage + 1) * HISTORIAL_PAGE_SIZE, historial.length)} de {historial.length}</span>
+                                    <div className="flex gap-1">
+                                        <button onClick={() => setHistorialPage(p => Math.max(0, p - 1))} disabled={historialPage === 0}
+                                            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed">← Anterior</button>
+                                        {Array.from({ length: historialTotalPages }, (_, i) => (
+                                            <button key={i} onClick={() => setHistorialPage(i)}
+                                                className={`w-7 h-7 rounded-lg text-xs font-bold ${i === historialPage ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"}`}>{i + 1}</button>
+                                        ))}
+                                        <button onClick={() => setHistorialPage(p => Math.min(historialTotalPages - 1, p + 1))} disabled={historialPage === historialTotalPages - 1}
+                                            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed">Siguiente →</button>
+                                    </div>
+                                </div>
+                            )}
+                            </>)
                         )}
                     </div>
                 </div>

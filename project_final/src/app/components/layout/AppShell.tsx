@@ -321,7 +321,7 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                             {showNotif && (
                                 <>
                                     <div className="fixed inset-0 z-40" onClick={() => setShowNotif(false)} />
-                                    <div className="absolute right-0 top-full mt-3 w-[min(24rem,calc(100vw-1rem))] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-xl shadow-slate-200/50 dark:shadow-slate-950/80 z-50 overflow-hidden animate-in fade-in slide-in-from-top-4 duration-200">
+                                    <div className="fixed inset-x-2 top-16 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-3 w-auto sm:w-[24rem] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-xl shadow-slate-200/50 dark:shadow-slate-950/80 z-50 overflow-hidden animate-in fade-in slide-in-from-top-4 duration-200">
 
                                         {/* Panel header */}
                                         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800">
@@ -352,7 +352,7 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                                         </div>
 
                                         {/* List */}
-                                        <div className="overflow-y-auto max-h-[28rem] select-none">
+                                        <div className="overflow-y-auto max-h-[calc(100vh-8rem)] sm:max-h-[28rem] select-none">
                                             {notifs.length === 0 ? (
                                                 <div className="flex flex-col items-center justify-center py-12 text-center px-6">
                                                     <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mb-3">

@@ -30,7 +30,7 @@ async function main() {
     data: { id: "u1", email: "admin@instituto.edu.mx", password: adminPwd, name: "Admin Sistema", role: "admin", emailVerified: true }
   });
   await prisma.user.create({
-    data: { id: "u2", email: "alumno@mail.com", password: alumnoPwd, name: "María García López", role: "alumno", matricula: "20210001", carrera: "Ing. en Sistemas Computacionales", semestre: 5, edad: 21, genero: "Femenino", emailVerified: true }
+    data: { id: "u2", email: "alumno@mail.com", password: alumnoPwd, name: "María García López", role: "alumno", matricula: "20210001", carrera: "Ing. en Sistemas Computacionales", semestre: 5, fechaNacimiento: "2003-03-15", genero: "Femenino", emailVerified: true }
   });
   await prisma.user.create({
     data: { id: "u3", email: "psicologo@instituto.edu.mx", password: espPwd, name: "Dr. Carlos Mendoza", role: "especialista", department: "Psicología", emailVerified: true }

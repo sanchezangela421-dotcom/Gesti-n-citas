@@ -9,7 +9,9 @@ export const API = `${API_BASE}/api`;
 
 export function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const base: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) base['Authorization'] = `Bearer ${token}`;
+  return base;
 }
 
 /**

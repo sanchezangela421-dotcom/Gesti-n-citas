@@ -1,7 +1,7 @@
 import React, { useState, useCallback, createContext, useContext } from "react";
 import { localISODate } from "../utils/date";
 import { API, API_BASE, authHeaders, getImageUrl } from "../lib/api";
-import type { StoreContextType } from "../types";
+import type { StoreContextType, ReportPeriod } from "../types";
 
 // ── Domain stores ──────────────────────────────────────────
 import { useUsersStore }        from "../store/useUsersStore";
@@ -28,6 +28,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     users:           usersStore.users,
     addNotification: notificationsStore.addNotification,
   });
+
+  // ── Período activo ─────────────────────────────────────
+  const [activePeriod, setActivePeriod] = useState<ReportPeriod | null>(null);
+
+  const fetchActivePeriod = useCallback(async () => {
+    if (!localStorage.getItem("token")) return;
+    try {
+      const res = await fetch(`${API}/periods/active`, { headers: authHeaders() });
+      if (res.ok) setActivePeriod(await res.json());
+    } catch { /* silencioso */ }
+  }, []);
 
   // ── Stats (derived from appointments, fetched from backend) ──
   const [realStats, setRealStats] = useState<any>(null);
@@ -118,6 +129,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       contentStore.loadEvents(headers),
       contentStore.loadResources(headers),
       notificationsStore.loadNotifications(headers),
+      fetchActivePeriod(),
     ]);
   }, [
     specialistsStore.loadSpecialists,
@@ -126,6 +138,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     contentStore.loadEvents,
     contentStore.loadResources,
     notificationsStore.loadNotifications,
+    fetchActivePeriod,
   ]);
 
   // fetchVolatile: only appointments + notifications (runs on the fast 30s poll)
@@ -209,6 +222,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteResource: contentStore.deleteResource,
       // stats
       getStats,
+      activePeriod,
       // notifications
       notifications: notificationsStore.notifications,
       addNotification: notificationsStore.addNotification,

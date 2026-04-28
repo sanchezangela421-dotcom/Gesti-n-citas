@@ -16,7 +16,7 @@ model User {
   matricula         String?
   carrera           String?
   semestre          Int?
-  edad              Int?
+  fechaNacimiento   String?   // YYYY-MM-DD
   genero            String?
   department        String?
   avatarUrl         String?
@@ -60,27 +60,41 @@ model ScheduleSlot {
   specificDate String?    // YYYY-MM-DD para disponibilidad en fecha única
 }
 
+model ReportPeriod {
+  id           String        @id @default(uuid())
+  name         String
+  startDate    String        // YYYY-MM-DD
+  endDate      String?       // YYYY-MM-DD — estimado al crear, null hasta que se defina
+  status       String        @default("activo") // "activo" | "cerrado"
+  closedAt     DateTime?
+  createdAt    DateTime      @default(now())
+  appointments Appointment[]
+}
+
 model Appointment {
-  id             String     @id @default(uuid())
+  id             String        @id @default(uuid())
   studentId      String
-  student        User       @relation("StudentAppointments", fields: [studentId], references: [id], onDelete: Cascade)
+  student        User          @relation("StudentAppointments", fields: [studentId], references: [id], onDelete: Cascade)
   studentName    String
   specialistId   String
-  specialist     Specialist @relation("SpecialistAppointments", fields: [specialistId], references: [id], onDelete: Cascade)
+  specialist     Specialist    @relation("SpecialistAppointments", fields: [specialistId], references: [id], onDelete: Cascade)
   specialistName String
   department     String
   date           String
   time           String
-  status         String     @default("Pendiente")
+  status         String        @default("Pendiente")
   modality       String
   motivo         String
   notes          String?
-  isFollowUp     Boolean    @default(false)
+  meetingUrl     String?       // Enlace único de videollamada para esta cita
+  isFollowUp     Boolean       @default(false)
   parentId       String?
   parent         Appointment?  @relation("AppointmentFollowUps", fields: [parentId], references: [id], onDelete: SetNull)
   followUps      Appointment[] @relation("AppointmentFollowUps")
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  periodId       String?
+  period         ReportPeriod? @relation(fields: [periodId], references: [id], onDelete: SetNull)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 }
 
 model AppEvent {

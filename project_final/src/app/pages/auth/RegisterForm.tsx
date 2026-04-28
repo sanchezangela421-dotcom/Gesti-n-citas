@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { CalendarCheck, GraduationCap, UserPlus, ShieldCheck, Users, FileText, Clock, RefreshCw } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 import { CAREERS } from "../../../constants";
+import { calcularEdad } from "../../../utils/date";
 
 const FEATURES = [
     { title: "Seguro y Privado", desc: "Información tratada con total confidencialidad institucional.", icon: ShieldCheck },
@@ -14,7 +15,7 @@ const FEATURES = [
 const INPUT_BASE = "w-full px-3.5 py-2.5 rounded-xl border-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none transition-all text-sm font-medium";
 
 const INIT_FORM = {
-    name: "", email: "", carrera: "", semestre: "", edad: "",
+    name: "", email: "", carrera: "", semestre: "", fechaNacimiento: "",
     matricula: "", genero: "Masculino", password: "", confirmPassword: "",
 };
 
@@ -35,7 +36,7 @@ export function RegisterForm({ onSwitchToLogin }: { onSwitchToLogin: () => void 
             password: form.password,
             carrera: form.carrera,
             semestre: form.semestre ? parseInt(form.semestre) : undefined,
-            edad: form.edad ? parseInt(form.edad) : undefined,
+            fechaNacimiento: form.fechaNacimiento || undefined,
             matricula: form.matricula,
             genero: form.genero,
         });
@@ -141,10 +142,22 @@ export function RegisterForm({ onSwitchToLogin }: { onSwitchToLogin: () => void 
                                             className={`${INPUT_BASE} border-emerald-200 focus:border-emerald-600 focus:bg-white`} />
                                     </div>
                                     <div>
-                                        <label className="block mb-1.5 text-slate-700 text-sm font-semibold ml-1">Edad</label>
-                                        <input type="number" value={form.edad} placeholder="Ej. 21" min="15" max="60"
-                                            onChange={e => set("edad", e.target.value)}
-                                            className={`${INPUT_BASE} border-emerald-200 focus:border-emerald-600 focus:bg-white`} />
+                                        <label className="block mb-1.5 text-slate-700 text-sm font-semibold ml-1">
+                                            Fecha de nacimiento
+                                            {form.fechaNacimiento && (
+                                                <span className="ml-2 font-normal text-emerald-600">
+                                                    · {calcularEdad(form.fechaNacimiento)} años
+                                                </span>
+                                            )}
+                                        </label>
+                                        <input
+                                            type="date"
+                                            value={form.fechaNacimiento}
+                                            max={new Date(new Date().setFullYear(new Date().getFullYear() - 14)).toISOString().split("T")[0]}
+                                            min="1970-01-01"
+                                            onChange={e => set("fechaNacimiento", e.target.value)}
+                                            className={`${INPUT_BASE} border-emerald-200 focus:border-emerald-600 focus:bg-white`}
+                                        />
                                     </div>
                                 </div>
 

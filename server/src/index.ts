@@ -30,7 +30,10 @@ const authLimiter = rateLimit({
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
 app.use('/api/auth/forgot-password', authLimiter);
-app.use('/uploads', express.static(process.env.UPLOADS_PATH || path.join(process.cwd(), 'uploads')));
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+}, express.static(process.env.UPLOADS_PATH || path.join(process.cwd(), 'uploads')));
 
 import authRoutes from './routes/auth';
 import appointmentsRoutes from './routes/appointments';
@@ -40,6 +43,7 @@ import resourcesRoutes from './routes/resources';
 import usersRoutes from './routes/users';
 import statsRoutes from './routes/stats';
 import notificationsRoutes from './routes/notifications';
+import periodsRoutes from './routes/periods';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/appointments', appointmentsRoutes);
@@ -49,6 +53,7 @@ app.use('/api/resources', resourcesRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/periods', periodsRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'API is running' });

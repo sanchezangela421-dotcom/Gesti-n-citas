@@ -19,13 +19,42 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   }
 });
 
-// POST /api/notifications — crear notificación (solo admin)
+// POST /api/notifications — crear notificación
+// Admin:       puede notificar a cualquier usuario.
+// Especialista: solo puede notificar a alumnos que tienen citas con él.
+// Alumno:      solo puede notificar a especialistas que tienen citas con él.
 router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
-    if (req.user?.role !== 'admin') {
-      return res.status(403).json({ error: 'Sin permisos' });
-    }
+    const actorRole = req.user?.role;
+    const actorId   = req.user!.id;
     const { userId, title, message, type } = req.body;
+
+    if (actorRole === 'especialista') {
+      const spec = await prisma.specialist.findFirst({ where: { userId: actorId } });
+      if (!spec) return res.status(403).json({ error: 'Perfil de especialista no encontrado.' });
+      const hasRelation = await prisma.appointment.findFirst({
+        where: { specialistId: spec.id, studentId: userId },
+      });
+      if (!hasRelation) {
+        return res.status(403).json({ error: 'Solo puedes notificar a tus propios pacientes.' });
+      }
+    }
+
+    if (actorRole === 'alumno') {
+      // El alumno notifica al especialista: verificar que existe una cita entre ellos.
+      // userId aquí es el User.id del especialista (no el Specialist.id).
+      const spec = await prisma.specialist.findFirst({ where: { userId } });
+      if (!spec) {
+        return res.status(403).json({ error: 'Solo puedes notificar a tus propios especialistas.' });
+      }
+      const hasRelation = await prisma.appointment.findFirst({
+        where: { specialistId: spec.id, studentId: actorId },
+      });
+      if (!hasRelation) {
+        return res.status(403).json({ error: 'Solo puedes notificar a tus propios especialistas.' });
+      }
+    }
+
     const notification = await prisma.notification.create({
       data: {
         userId,
