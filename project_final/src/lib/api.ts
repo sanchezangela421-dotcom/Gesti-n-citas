@@ -14,6 +14,13 @@ export function authHeaders(): Record<string, string> {
   return base;
 }
 
+/** Solo devuelve el header Authorization, sin Content-Type.
+ *  Úsalo en requests con FormData para que el browser ponga el boundary correcto. */
+export function authOnlyHeaders(): Record<string, string> {
+  const token = localStorage.getItem('token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
 /**
  * Convierte una ruta relativa de upload (/uploads/...) a URL absoluta.
  * URLs externas (http/https) se devuelven tal cual.

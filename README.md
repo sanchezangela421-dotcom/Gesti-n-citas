@@ -1,173 +1,202 @@
-# 📅 Sistema de Gestión de Citas — TECNL
+# Synkros — Plataforma de Gestión de Citas
 
-Aplicación web full-stack para gestionar citas entre alumnos y especialistas (Psicología, Tutorías, Nutrición) del Tecnológico de Nuevo León.
+Aplicación web full-stack para gestionar citas entre alumnos y especialistas de bienestar estudiantil (Psicología, Tutorías, Nutrición). Diseñada para instituciones educativas que quieran digitalizar y centralizar su atención personalizada.
 
 ---
 
-## 🗂️ Estructura del Proyecto
+## Características principales
+
+- **Tres roles** — Alumno, Especialista y Administrador con paneles dedicados
+- **Agenda inteligente** — Horarios recurrentes, por semana o por fecha específica
+- **Citas presenciales y virtuales** — Con soporte para enlaces de videollamada
+- **Notificaciones en tiempo real** — In-app y por correo electrónico en cada cambio de estado
+- **Publicación de contenido** — Eventos, talleres y material educativo por departamento
+- **Reportes y estadísticas** — Exportación a PDF con métricas demográficas y de atención
+- **Dark mode** — Interfaz adaptable al tema del sistema
+
+---
+
+## Estructura del proyecto
 
 ```
-Gesti-n-citas/
+Synkros/
 ├── project_final/   # Frontend → React + Vite + TypeScript
 └── server/          # Backend  → Node.js + Express + Prisma + SQLite
 ```
----
-
-## 🚀 Puesta en Marcha
-
-Necesitas tener instalado **Node.js 18+** y **npm**.
-
-Abre **dos terminales** de forma simultánea — una para el backend y otra para el frontend.
 
 ---
 
-### 🔧 Terminal 1 — Backend (API + Base de Datos)
+## Puesta en marcha
+
+Requisitos: **Node.js 18+** y **pnpm 9+**.
 
 ```bash
-# 1. Entrar a la carpeta del servidor
+# Instalar pnpm si no lo tienes
+npm install -g pnpm
+```
+
+Abre **dos terminales** simultáneas — una para el backend y otra para el frontend.
+
+---
+
+### Terminal 1 — Backend
+
+```bash
 cd server
 
-# 2. Instalar dependencias
-npm install
+pnpm install
 
-# 3. Crear el archivo de variables de entorno
-#    (Solo la primera vez — puedes copiar el ejemplo de abajo)
-echo "DATABASE_URL=file:./prisma/dev.db" > .env
-echo "JWT_SECRET=super-secret-key-123"  >> .env
+# Crear archivo de variables de entorno (solo la primera vez)
+cp .env.example .env   # o crea el archivo manualmente (ver sección Variables de Entorno)
 
-# 4. Generar el cliente de Prisma
-npx prisma generate
+# Generar el cliente de Prisma
+pnpm prisma generate
 
-# 5. Crear las tablas en la base de datos SQLite
-npx prisma migrate deploy
-# Si es la primera vez y no hay migraciones aún, usa:
-#   npx prisma db push
+# Crear las tablas en la base de datos
+pnpm prisma migrate deploy
 
-# 6. Poblar la base de datos con datos iniciales (solo la primera vez)
-npx ts-node src/seed.ts
+# Poblar con datos iniciales (solo la primera vez)
+pnpm ts-node src/seed.ts
 
-# 7. Iniciar el servidor en modo desarrollo (puerto 3000)
-npm run dev
-
-# ⚠️ Actualización de la BD (Si hay cambios en el esquema)
-npx prisma migrate dev --name descripcion_del_cambio
+# Iniciar en modo desarrollo (puerto 3000)
+pnpm dev
 ```
 
-> ✅ El servidor queda corriendo en **http://localhost:3000**
+> El servidor queda disponible en **http://localhost:3000**
 
 ---
 
-### 🌐 Terminal 2 — Frontend (React)
+### Terminal 2 — Frontend
 
 ```bash
-# 1. Entrar a la carpeta del frontend
 cd project_final
 
-# 2. Instalar dependencias
-npm install
+pnpm install
 
-# 3. Iniciar el servidor de desarrollo (puerto 5173)
-npm run dev
+pnpm dev
 ```
 
-> ✅ La aplicación queda disponible en **http://localhost:5173**
+> La aplicación queda disponible en **http://localhost:5173**
 
 ---
 
-## 🏗️ Arquitectura
+## Arquitectura
 
 ### Frontend (`project_final/`)
 
-- **Framework**: React 18 + TypeScript
-- **Bundler**: Vite
-- **Estilos**: TailwindCSS
-- **Estado global**: React Context API
-  - `AuthContext` — Manejo de sesión y JWT
-  - `StoreContext` — Especialistas, citas, eventos, recursos
+| Capa | Tecnología |
+|------|-----------|
+| Framework | React 18 + TypeScript |
+| Bundler | Vite |
+| Estilos | TailwindCSS |
+| Componentes | shadcn/ui (Radix UI) |
+| Estado global | React Context + custom stores |
+| Gráficas | Recharts |
+| Exportación | jsPDF + html2canvas |
 
 ### Backend (`server/`)
 
-- **Runtime**: Node.js
-- **Framework**: Express.js
-- **ORM**: Prisma (conexión a SQLite en desarrollo)
-- **Auth**: JSON Web Tokens (JWT)
-- **Contraseñas**: bcryptjs (hash + salt)
-
-### API REST — Endpoints Disponibles
-
-| Método | Ruta                                          | Descripción                        |
-|--------|-----------------------------------------------|------------------------------------|
-| POST   | `/api/auth/login`                             | Iniciar sesión                     |
-| POST   | `/api/auth/register`                          | Registrar usuario nuevo            |
-| GET    | `/api/specialists`                            | Listar especialistas               |
-| GET    | `/api/specialists/:id/available-slots?date=`  | Slots disponibles en una fecha     |
-| POST   | `/api/specialists/:id/schedules`              | Agregar horario a especialista     |
-| DELETE | `/api/specialists/:id/schedules/:slotId`      | Eliminar horario                   |
-| GET    | `/api/appointments`                           | Listar citas (con filtros opcionales) |
-| POST   | `/api/appointments`                           | Crear cita                         |
-| PATCH  | `/api/appointments/:id/status`                | Actualizar estado de cita          |
-| PATCH  | `/api/appointments/:id/reschedule`            | Reagendar cita                     |
-| GET    | `/api/events`                                 | Listar eventos                     |
-| POST   | `/api/events`                                 | Crear evento                       |
-| GET    | `/api/resources`                              | Listar recursos                    |
-| POST   | `/api/resources`                              | Crear recurso                      |
-| GET    | `/api/users`                                  | Listar usuarios (admin)            |
+| Capa | Tecnología |
+|------|-----------|
+| Runtime | Node.js |
+| Framework | Express.js |
+| ORM | Prisma |
+| Base de datos | SQLite (desarrollo) / PostgreSQL (producción) |
+| Auth | JSON Web Tokens (JWT) |
+| Archivos | Multer |
+| Correo | Nodemailer |
 
 ---
 
-## 🗄️ Modelos de Base de Datos
+## API REST
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| POST | `/api/auth/login` | Iniciar sesión |
+| POST | `/api/auth/register` | Registrar usuario |
+| GET | `/api/specialists` | Listar especialistas |
+| GET | `/api/specialists/:id/available-slots?date=` | Horarios disponibles |
+| POST | `/api/specialists/:id/schedules` | Agregar horario |
+| DELETE | `/api/specialists/:id/schedules/:slotId` | Eliminar horario |
+| GET | `/api/appointments` | Listar citas |
+| POST | `/api/appointments` | Crear cita |
+| PATCH | `/api/appointments/:id/status` | Cambiar estado de cita |
+| PATCH | `/api/appointments/:id/reschedule` | Reagendar cita |
+| GET | `/api/events` | Listar eventos |
+| POST | `/api/events` | Crear evento |
+| GET | `/api/resources` | Listar recursos |
+| POST | `/api/resources` | Crear recurso |
+| GET | `/api/notifications` | Notificaciones del usuario |
+| GET | `/api/stats` | Estadísticas globales |
+| GET | `/api/periods` | Períodos de reporte |
+
+---
+
+## Modelos de base de datos
 
 ```
 User          → Alumno, Especialista o Admin
 Specialist    → Perfil del especialista, vinculado a User
-ScheduleSlot  → Días y horas disponibles por especialista
+ScheduleSlot  → Bloques de disponibilidad por especialista
 Appointment   → Cita entre alumno y especialista
 AppEvent      → Evento o taller publicado
-Resource      → Material de apoyo (infografías, videos)
+Resource      → Material de apoyo (infografías, videos, enlaces)
 Notification  → Alertas internas del sistema
+ReportPeriod  → Períodos para corte y reporte de atención
 ```
 
 ---
 
-## 🛠️ Scripts Disponibles
+## Scripts
 
 ### Backend
-| Comando            | Descripción                            |
-|--------------------|----------------------------------------|
-| `npm run dev`      | Inicia servidor con nodemon            |
-| `npm run build`    | Compila TypeScript a JavaScript        |
-| `npm start`        | Inicia el servidor de producción       |
-| `npx prisma studio`| Abre interfaz visual de la base de datos |
-| `npx ts-node src/seed.ts` | Re-pobla la BD con datos iniciales |
+| Comando | Descripción |
+|---------|-------------|
+| `npm run dev` | Servidor de desarrollo con hot-reload |
+| `npm run build` | Compila TypeScript a JavaScript |
+| `npm start` | Servidor de producción |
+| `npx prisma studio` | Interfaz visual de la base de datos |
+| `npx ts-node src/seed.ts` | Poblar BD con datos iniciales |
 
 ### Frontend
-| Comando            | Descripción                            |
-|--------------------|----------------------------------------|
-| `npm run dev`      | Inicia servidor de desarrollo          |
-| `npm run build`    | Genera el build de producción          |
-| `npm run preview`  | Previsualiza el build de producción    |
+| Comando | Descripción |
+|---------|-------------|
+| `npm run dev` | Servidor de desarrollo |
+| `npm run build` | Build de producción |
+| `npm run preview` | Previsualizar el build |
 
 ---
 
-## ⚙️ Variables de Entorno
+## Variables de entorno
 
-Crea un archivo `.env` dentro de `server/` con el siguiente contenido:
+Crea `server/.env` con el siguiente contenido:
 
 ```env
 DATABASE_URL=file:./prisma/dev.db
-JWT_SECRET=super-secret-key-123
+JWT_SECRET=cambia-esto-por-una-clave-segura
 PORT=3000
+
+# Opcional: dominio permitido para correos institucionales
+ALLOWED_EMAIL_DOMAIN=tuinstitucion.edu.mx
+
+# Opcional: URL del frontend (para CORS)
+FRONTEND_URL=http://localhost:5173
+
+# Opcional: configuración SMTP para envío de correos
+SMTP_HOST=smtp.tuproveedor.com
+SMTP_PORT=587
+SMTP_USER=no-reply@tudominio.com
+SMTP_PASS=tu-contrasena
 ```
 
-> ⚠️ Para producción, agregar este archivo a `.gitignore` y cambiar `JWT_SECRET` por una cadena aleatoria y segura.
+> Para producción, asegúrate de que `.env` esté en `.gitignore` y usa una `JWT_SECRET` aleatoria y larga.
 
 ---
 
-## 🚀 Despliegue en VPS
+## Despliegue en producción
 
-Una vez en producción en el servidor Ubuntu/Debian:
-
-1. **Base de datos**: Cambiar SQLite → PostgreSQL (actualizar `DATABASE_URL` y `schema.prisma`)
-2. **Frontend**: Correr `npm run build` y servir la carpeta `dist/` con Nginx
-3. **Backend**: Usar PM2 para mantener el proceso activo (`pm2 start dist/index.js`)
-4. **Proxy**: Configurar Nginx para enrutar `/api/*` al backend y el resto al frontend estático
+1. **Base de datos** — Migrar de SQLite a PostgreSQL: actualizar `DATABASE_URL` y el provider en `schema.prisma`
+2. **Backend** — Compilar con `npm run build` y levantar con PM2: `pm2 start dist/index.js --name synkros-api`
+3. **Frontend** — Compilar con `npm run build` y servir la carpeta `dist/` con Nginx
+4. **Proxy inverso** — Configurar Nginx para enrutar `/api/*` al backend y el resto al frontend estático
+5. **Archivos subidos** — Montar la carpeta `uploads/` en almacenamiento persistente (volumen o S3)

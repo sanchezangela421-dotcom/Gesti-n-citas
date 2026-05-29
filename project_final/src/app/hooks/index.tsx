@@ -63,8 +63,8 @@ export function useAppointmentWizard() {
         getAvailableSlots(selSpecId, localISODate(selDate)).then(setSlotsForDate);
     }, [selDate, selSpecId]);
 
-    const confirm = () => {
-        createAppointment({
+    const confirm = async () => {
+        const ok = await createAppointment({
             studentId: user!.id,
             studentName: user!.name,
             specialistId: selSpecId!,
@@ -74,7 +74,7 @@ export function useAppointmentWizard() {
             preferredDate: localISODate(selDate!),
             preferredTime: selSlot!,
         });
-        setStep(4);
+        if (ok) setStep(4);
     };
 
     const deptSpecialists = selDept ? getSpecialists(selDept) : [];
@@ -159,7 +159,10 @@ export function useReschedule(role: "student" | "specialist") {
     }, [date, apptId]);
 
     const open = (id: string) => {
-        setApptId(id); setDate(null); setSlot(null); setShow(true);
+        const appt = appointments.find(a => a.id === id);
+        setApptId(id); setDate(null); setSlot(null);
+        setSelModality(appt?.modality ?? "Presencial");
+        setShow(true);
     };
 
     const confirm = () => {

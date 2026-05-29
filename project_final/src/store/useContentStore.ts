@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { API, authHeaders, getImageUrl } from "../lib/api";
+import { API, authHeaders, authOnlyHeaders, getImageUrl } from "../lib/api";
 import type { AppEvent, AppNotification, Resource, User } from "../types";
 import { toast } from "sonner";
 
@@ -40,12 +40,13 @@ export function useContentStore({ users, addNotification }: ContentStoreDeps) {
 
       const res = await fetch(`${API}/events`, {
         method: "POST",
-        headers: authHeaders(),
+        headers: authOnlyHeaders(),
         body: formData,
       });
       if (!res.ok) throw new Error(await res.text());
       const newEv = await res.json();
       setEvents(p => [{ ...newEv, imageUrl: getImageUrl(newEv.imageUrl) }, ...p]);
+      toast.success("Evento publicado exitosamente");
 
       // Notify all students about the new event
       const dateStr = new Date(ev.date + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "long" });
@@ -74,7 +75,7 @@ export function useContentStore({ users, addNotification }: ContentStoreDeps) {
 
       const res = await fetch(`${API}/resources`, {
         method: "POST",
-        headers: authHeaders(),
+        headers: authOnlyHeaders(),
         body: formData,
       });
       if (!res.ok) throw new Error(await res.text());
@@ -84,6 +85,7 @@ export function useContentStore({ users, addNotification }: ContentStoreDeps) {
         imageUrl: getImageUrl(newRes.imageUrl),
         fileUrl: getImageUrl(newRes.fileUrl),
       }]);
+      toast.success("Material educativo publicado");
     } catch (err) {
       console.error("Error adding resource:", err);
       toast.error("No se pudo publicar el recurso.");
@@ -100,7 +102,7 @@ export function useContentStore({ users, addNotification }: ContentStoreDeps) {
 
       const res = await fetch(`${API}/events/${id}`, {
         method: "PATCH",
-        headers: authHeaders(),
+        headers: authOnlyHeaders(),
         body: formData,
       });
       if (!res.ok) throw new Error(await res.text());
@@ -122,7 +124,7 @@ export function useContentStore({ users, addNotification }: ContentStoreDeps) {
 
       const res = await fetch(`${API}/resources/${id}`, {
         method: "PATCH",
-        headers: authHeaders(),
+        headers: authOnlyHeaders(),
         body: formData,
       });
       if (!res.ok) throw new Error(await res.text());

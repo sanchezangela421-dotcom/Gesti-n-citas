@@ -25,7 +25,7 @@ router.get('/', async (req, res) => {
 
 // POST /api/events
 router.post('/', verifyToken as any, upload.single('image'), async (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista') {
     return res.status(403).json({ error: 'Sin permisos' });
   }
   try {
@@ -63,7 +63,7 @@ router.post('/', verifyToken as any, upload.single('image'), async (req: AuthReq
 
 // PATCH /api/events/:id
 router.patch('/:id', verifyToken as any, upload.single('image'), async (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista') {
     return res.status(403).json({ error: 'Sin permisos' });
   }
   try {
@@ -89,7 +89,7 @@ router.patch('/:id', verifyToken as any, upload.single('image'), async (req: Aut
 
 // DELETE /api/events/:id
 router.delete('/:id', verifyToken as any, async (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista') {
     return res.status(403).json({ error: 'Sin permisos' });
   }
   try {

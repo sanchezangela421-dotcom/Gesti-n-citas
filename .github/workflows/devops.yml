@@ -50,36 +50,41 @@ jobs:
           head: HEAD
           extra_args: --json
 
+      - name: Configurar pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - name: Configurar Node.js (v22)
         # actions/setup-node@v4
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 22
-          cache: 'npm'
+          cache: 'pnpm'
           cache-dependency-path: |
-            server/package-lock.json
-            project_final/package-lock.json
+            server/pnpm-lock.yaml
+            project_final/pnpm-lock.yaml
 
       # ─── BACKEND (server/) ─────────────────────────────────────────────────
 
       - name: "[Backend] Instalar Dependencias"
         working-directory: server
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: "[Backend] Verificar Estilo (Lint)"
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_quality_check == true }}
         working-directory: server
-        run: npx eslint src/ --format json --output-file ../eslint-server-report.json || echo "LINT_SERVER_FAILED=true" >> $GITHUB_ENV
+        run: pnpm exec eslint src/ --format json --output-file ../eslint-server-report.json || echo "LINT_SERVER_FAILED=true" >> $GITHUB_ENV
 
       - name: "[Backend] Auditar Dependencias"
         id: audit_server
         working-directory: server
-        run: npm audit --audit-level=high --json > ../npm-audit-server.json 2>&1 || echo "AUDIT_SERVER_FAILED=true" >> $GITHUB_ENV
+        run: pnpm audit --audit-level=high --json > ../npm-audit-server.json 2>&1 || echo "AUDIT_SERVER_FAILED=true" >> $GITHUB_ENV
 
       - name: "[Backend] Validar Construcción (tsc)"
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_quality_check == true }}
         working-directory: server
-        run: npm run build 2> ../build_server_error.log || echo "BUILD_SERVER_FAILED=true" >> $GITHUB_ENV
+        run: pnpm run build 2> ../build_server_error.log || echo "BUILD_SERVER_FAILED=true" >> $GITHUB_ENV
         env:
           DATABASE_URL: "postgres://dummy:dummy@localhost:5432/dummy"
           JWT_SECRET: "ci_test_secret_key_only"
@@ -89,22 +94,22 @@ jobs:
 
       - name: "[Frontend] Instalar Dependencias"
         working-directory: project_final
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: "[Frontend] Verificar Estilo (Lint)"
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_quality_check == true }}
         working-directory: project_final
-        run: npx eslint src/ --format json --output-file ../eslint-frontend-report.json || echo "LINT_FRONTEND_FAILED=true" >> $GITHUB_ENV
+        run: pnpm exec eslint src/ --format json --output-file ../eslint-frontend-report.json || echo "LINT_FRONTEND_FAILED=true" >> $GITHUB_ENV
 
       - name: "[Frontend] Auditar Dependencias"
         id: audit_frontend
         working-directory: project_final
-        run: npm audit --audit-level=high --json > ../npm-audit-frontend.json 2>&1 || echo "AUDIT_FRONTEND_FAILED=true" >> $GITHUB_ENV
+        run: pnpm audit --audit-level=high --json > ../npm-audit-frontend.json 2>&1 || echo "AUDIT_FRONTEND_FAILED=true" >> $GITHUB_ENV
 
       - name: "[Frontend] Validar Construcción (vite build)"
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_quality_check == true }}
         working-directory: project_final
-        run: npm run build 2> ../build_frontend_error.log || echo "BUILD_FRONTEND_FAILED=true" >> $GITHUB_ENV
+        run: pnpm run build 2> ../build_frontend_error.log || echo "BUILD_FRONTEND_FAILED=true" >> $GITHUB_ENV
         env:
           NEXT_PUBLIC_APP_URL: "http://localhost:3000"
 

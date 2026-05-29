@@ -1,14 +1,21 @@
 {
-  "name": "@figma/my-make-file",
+  "name": "synkros-frontend",
   "private": true,
   "version": "0.0.1",
   "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=18",
+    "pnpm": ">=9"
+  },
   "scripts": {
     "build": "vite build",
     "dev": "vite",
     "lint": "eslint src/"
   },
   "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
     "@mui/icons-material": "7.3.5",
@@ -69,7 +76,8 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.1.12",
-    "@types/react-dom": "^19.2.3",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "4.7.0",
     "tailwindcss": "4.1.12",
     "vite": "^6.4.2",
@@ -79,21 +87,11 @@
     "eslint-plugin-react-hooks": "^5.0.0",
     "typescript-eslint": "^8.0.0"
   },
-  "peerDependencies": {
-    "react": "18.3.1",
-    "react-dom": "18.3.1"
-  },
-  "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    },
-    "react-dom": {
-      "optional": true
-    }
-  },
   "pnpm": {
-    "overrides": {
-      "vite": "6.3.5"
-    }
+    "onlyBuiltDependencies": [
+      "@tailwindcss/oxide",
+      "esbuild",
+      "core-js"
+    ]
   }
 }

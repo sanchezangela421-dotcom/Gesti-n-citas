@@ -41,13 +41,14 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
     return r.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [resolvedAppointments]);
 
-  const createAppointment = useCallback((req: {
+  const createAppointment = useCallback(async (req: {
     studentId: string; studentName?: string; specialistId: string;
     department: string; motivo: string; modality: string;
     preferredDate: string; preferredTime: string;
     isFollowUp?: boolean; parentId?: string;
-  }): Appointment => {
+  }): Promise<boolean> => {
     const spec = specialists.find(s => s.id === req.specialistId);
+    const specUserId = spec?.userId;
     const student = users.find(u => u.id === req.studentId);
     const payload = {
       studentId: req.studentId,
@@ -67,30 +68,34 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
 
     setAppointments(p => [tempAppt, ...p]);
 
-    fetch(`${API}/appointments`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify(payload),
-    })
-      .then(async res => {
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || "Error al crear la cita");
-        }
-        return res.json();
-      })
-      .then(newAppt => {
-        setAppointments(p => [newAppt, ...p.filter(a => a.id !== tempId)]);
-        toast.success("Cita creada exitosamente");
-      })
-      .catch(err => {
-        console.error("Error creating appointment:", err);
-        setAppointments(p => p.filter(a => a.id !== tempId));
-        toast.error(err.message || "No se pudo crear la cita. Intenta de nuevo.");
+    try {
+      const res = await fetch(`${API}/appointments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify(payload),
       });
-
-    return tempAppt;
-  }, [specialists, users]);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Error al crear la cita");
+      }
+      const newAppt = await res.json();
+      setAppointments(p => [newAppt, ...p.filter(a => a.id !== tempId)]);
+      toast.success("Cita creada exitosamente");
+      if (specUserId) {
+        addNotification(specUserId, {
+          title: "Nueva cita pendiente de confirmación",
+          message: `${newAppt.studentName} ha agendado una cita para el ${new Date(newAppt.date + "T12:00:00").toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" })} a las ${newAppt.time}. Motivo: ${newAppt.motivo || "No especificado"}.`,
+          type: "confirmed",
+        });
+      }
+      return true;
+    } catch (err: any) {
+      console.error("Error creating appointment:", err);
+      setAppointments(p => p.filter(a => a.id !== tempId));
+      toast.error(err.message || "No se pudo crear la cita. Intenta de nuevo.");
+      return false;
+    }
+  }, [specialists, users, addNotification]);
 
   const updateAppointmentStatus = useCallback((id: string, status: string, notes?: string, byStudent?: boolean, meetingUrl?: string) => {
     let originalStatus: string | null = null;

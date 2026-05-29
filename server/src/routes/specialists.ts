@@ -245,13 +245,23 @@ router.get('/:id/available-slots', verifyToken as any, async (req: AuthRequest, 
     });
 
     const occupiedTimes = new Set(appointmentsOnDate.map((a: any) => a.time));
+    const nowTime = new Date();
+    const todayISO = nowTime.toISOString().split('T')[0];
+    const isToday = date === todayISO;
+
     const seen = new Set<string>();
     const results: { start: string; end: string }[] = [];
     activeSlotsForDay.forEach((slot: any) => {
-      if (!occupiedTimes.has(slot.startTime) && !seen.has(slot.startTime)) {
-        seen.add(slot.startTime);
-        results.push({ start: slot.startTime, end: slot.endTime });
+      if (occupiedTimes.has(slot.startTime) || seen.has(slot.startTime)) return;
+      // Si la fecha solicitada es hoy, omitir horarios que ya pasaron
+      if (isToday) {
+        const [sh, sm] = slot.startTime.split(':').map(Number);
+        const slotTime = new Date();
+        slotTime.setHours(sh, sm, 0, 0);
+        if (slotTime <= nowTime) return;
       }
+      seen.add(slot.startTime);
+      results.push({ start: slot.startTime, end: slot.endTime });
     });
 
     res.json(results.sort((a, b) => a.start.localeCompare(b.start)));

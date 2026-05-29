@@ -79,6 +79,14 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
     }
 
+    // Rechazar citas en fecha/hora pasada
+    const [h, m] = data.time.split(':').map(Number);
+    const apptDateTime = new Date(`${data.date}T00:00:00`);
+    apptDateTime.setHours(h, m, 0, 0);
+    if (apptDateTime <= new Date()) {
+      return res.status(422).json({ error: 'No puedes agendar una cita en una fecha u hora que ya pasó.' });
+    }
+
     // Obtener período activo para etiquetar la cita (fuera de la tx para no bloquear)
     const activePeriod = await prisma.reportPeriod.findFirst({
       where: { status: 'activo' },
@@ -215,7 +223,7 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
 
     // Resolver meetingUrl antes del update para guardarlo en la cita
     let resolvedMeetingUrl: string | undefined;
-    if (status === 'Confirmada') {
+    if (status === 'Confirmada' && current.modality === 'Virtual') {
       resolvedMeetingUrl = bodyMeetingUrl
         || (await prisma.specialist.findUnique({ where: { id: current.specialistId } }))?.meetingUrl
         || undefined;

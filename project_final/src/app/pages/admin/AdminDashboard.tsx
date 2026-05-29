@@ -863,14 +863,12 @@ export function AdminDashboard() {
 
     const handlePublishEvent = () => {
         if (!evTitle || !evDate) { toast.error("Título y fecha son obligatorios"); return; }
-        const finalImg = selectedEventImg ? URL.createObjectURL(selectedEventImg) : (evImg || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=400&q=80");
         addEvent({
             title: evTitle, description: evDesc, department: evDept,
             date: evDate, time: evTime, type: evType,
-            imageUrl: finalImg,
+            imageUrl: selectedEventImg ? undefined : (evImg || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=400&q=80"),
             registrationUrl: evType === "taller" ? evRegUrl : undefined,
         }, selectedEventImg || undefined);
-        toast.success("Evento publicado exitosamente");
         setEvTitle(""); setEvDesc(""); setEvDate(""); setEvTime(""); setEvImg(""); setEvRegUrl(""); setSelectedEventImg(null);
     };
 
@@ -883,7 +881,6 @@ export function AdminDashboard() {
             title: ctitle, description: cdesc, type: ctype,
             url: curl || "#", imageUrl: cimgUrl || undefined, department: cdept,
         }, selectedFile || undefined);
-        toast.success("Material educativo publicado");
         setCtitle(""); setCdesc(""); setCurl(""); setCimgUrl(""); setSelectedFile(null);
     };
 
