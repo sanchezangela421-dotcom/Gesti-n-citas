@@ -108,16 +108,27 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
         const isSpecificDate = newWeek === "date";
         const weekVal = newWeek === "both" || newWeek === "date" ? undefined : parseInt(String(newWeek));
 
+        // Calcular a qué weekOffset (0 o 1) pertenece selectedBaseDate
+        let weekOffsetForDate: number | undefined;
+        if (isSpecificDate && selectedBaseDate) {
+            const baseDate = new Date(selectedBaseDate + 'T12:00:00');
+            const todayW = new Date(); todayW.setHours(0, 0, 0, 0);
+            const shift = todayW.getDay() === 0 ? 1 : 1 - todayW.getDay();
+            const monCurrent = new Date(todayW); monCurrent.setDate(todayW.getDate() + shift);
+            const monNext = new Date(monCurrent); monNext.setDate(monCurrent.getDate() + 7);
+            const friCurrent = new Date(monCurrent); friCurrent.setDate(monCurrent.getDate() + 4);
+            const friNext = new Date(monNext); friNext.setDate(monNext.getDate() + 4);
+            if (baseDate >= monCurrent && baseDate <= friCurrent) weekOffsetForDate = 0;
+            else if (baseDate >= monNext && baseDate <= friNext) weekOffsetForDate = 1;
+        }
+
         const hasOverlap = schedule.some(s => {
             if (editingSlotId && s.id === editingSlotId) return false;
-            const sWeek = s.week === null ? undefined : s.week;
             return (
                 s.dayOfWeek === dayInt &&
-                (sWeek === undefined || weekVal === undefined || sWeek === weekVal) &&
-                // "Solo este día" choca con la misma fecha exacta O con slots permanentes (week=null)
-                // pero NO con slots de semana específica (week=0/1) de otra semana
                 (isSpecificDate
-                    ? (s.specificDate === selectedBaseDate || (s.specificDate === null && s.week === null))
+                    ? (s.specificDate === selectedBaseDate ||
+                       (s.specificDate === null && (s.week === null || s.week === weekOffsetForDate)))
                     : (s.specificDate == null)) &&
                 newStart < s.endTime && newEnd > s.startTime
             );
