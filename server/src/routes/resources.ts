@@ -22,7 +22,7 @@ router.get('/', async (req, res) => {
 
 // POST /api/resources
 router.post('/', verifyToken as any, upload.single('file'), async (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista') {
     return res.status(403).json({ error: 'Sin permisos' });
   }
   try {
@@ -70,7 +70,7 @@ router.post('/', verifyToken as any, upload.single('file'), async (req: AuthRequ
 
 // PATCH /api/resources/:id
 router.patch('/:id', verifyToken as any, upload.single('file'), async (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista') {
     return res.status(403).json({ error: 'Sin permisos' });
   }
   try {
@@ -103,7 +103,7 @@ router.patch('/:id', verifyToken as any, upload.single('file'), async (req: Auth
 
 // DELETE /api/resources/:id
 router.delete('/:id', verifyToken as any, async (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista') {
     return res.status(403).json({ error: 'Sin permisos' });
   }
   try {

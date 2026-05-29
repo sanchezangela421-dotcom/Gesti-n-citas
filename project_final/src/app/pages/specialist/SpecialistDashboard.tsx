@@ -65,12 +65,15 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
                 dayDate.setDate(mondayOfWeek.getDate() + i);
                 if (weekOffset === 0 && dayDate < todayM) continue; // saltar días pasados de esta semana
                 const dow = i + 1; // 1=Lun … 5=Vie
+                const dayDate2 = new Date(mondayOfWeek);
+                dayDate2.setDate(mondayOfWeek.getDate() + i);
+                const isoForDay = localISODate(dayDate2);
                 const hasOverlap = schedule.some(s => {
                     const sWeek = s.week === null ? undefined : s.week;
                     return (
                         s.dayOfWeek === dow &&
                         (sWeek === undefined || sWeek === weekOffset) &&
-                        s.specificDate === null &&
+                        (s.specificDate === null || s.specificDate === isoForDay) &&
                         newStart < s.endTime && newEnd > s.startTime
                     );
                 });
@@ -111,7 +114,11 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
             return (
                 s.dayOfWeek === dayInt &&
                 (sWeek === undefined || weekVal === undefined || sWeek === weekVal) &&
-                (isSpecificDate ? s.specificDate === selectedBaseDate : (s.specificDate == null)) &&
+                // "Solo este día" choca con la misma fecha exacta O con slots permanentes (week=null)
+                // pero NO con slots de semana específica (week=0/1) de otra semana
+                (isSpecificDate
+                    ? (s.specificDate === selectedBaseDate || (s.specificDate === null && s.week === null))
+                    : (s.specificDate == null)) &&
                 newStart < s.endTime && newEnd > s.startTime
             );
         });
@@ -233,7 +240,7 @@ export function SpecialistDashboard() {
         if (!seguimientoAppt || !seguimientoDate || !seguimientoSlot || !user) return;
         // Strip any previous "Seguimiento:" prefix to avoid nesting prefixes
         const baseMotivo = seguimientoAppt.motivo.replace(/^Seguimiento:\s*/i, "");
-        createAppointment({
+        void createAppointment({
             studentId: seguimientoAppt.studentId,
             studentName: seguimientoAppt.studentName,
             specialistId: seguimientoAppt.specialistId,
@@ -334,7 +341,6 @@ export function SpecialistDashboard() {
             url: curl || "#",
             imageUrl: cimgUrl || undefined,
         }, selectedFile || undefined);
-        toast.success("Contenido publicado exitosamente");
         setCtitle(""); setCdesc(""); setCurl(""); setCimgUrl(""); setSelectedFile(null);
     };
 
@@ -353,14 +359,13 @@ export function SpecialistDashboard() {
 
     const handlePublishEvent = () => {
         if (!evTitle || !evDate) { toast.error("Título y fecha son obligatorios"); return; }
-        const finalImg = selectedEventImg ? URL.createObjectURL(selectedEventImg) : (evImg || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=400&q=80");
         addEvent({
             title: evTitle, description: evDesc, department: dept,
             date: evDate, time: evTime, type: evType,
-            imageUrl: finalImg,
+            // Si hay archivo lo sube multer y el servidor pone la URL; si no, usar URL manual o default
+            imageUrl: selectedEventImg ? undefined : (evImg || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=400&q=80"),
             registrationUrl: evType === "taller" ? evRegUrl : undefined,
-        });
-        toast.success("Evento publicado exitosamente");
+        }, selectedEventImg || undefined);
         setEvTitle(""); setEvDesc(""); setEvDate(""); setEvTime(""); setEvImg(""); setEvRegUrl(""); setSelectedEventImg(null);
     };
 
@@ -1233,6 +1238,17 @@ export function SpecialistDashboard() {
                         <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl flex items-start gap-3">
                             <Info className="w-5 h-5 text-blue-600 mt-0.5" />
                             <p className="text-sm text-blue-700">El alumno recibirá una notificación con el nuevo horario.</p>
+                        </div>
+                        <div>
+                            <label className="block text-slate-700 font-bold text-sm mb-2">Modalidad</label>
+                            <div className="grid grid-cols-2 gap-2">
+                                {["Presencial", "Virtual"].map(m => (
+                                    <button key={m} type="button" onClick={() => resch.setSelModality(m)}
+                                        className={`py-2.5 rounded-xl border-2 font-bold text-sm transition-all cursor-pointer ${resch.selModality === m ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"}`}>
+                                        {m}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
