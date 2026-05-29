@@ -28,7 +28,12 @@ Synkros/
 
 ## Puesta en marcha
 
-Requisitos: **Node.js 18+** y **npm**.
+Requisitos: **Node.js 18+** y **pnpm 9+**.
+
+```bash
+# Instalar pnpm si no lo tienes
+npm install -g pnpm
+```
 
 Abre **dos terminales** simultáneas — una para el backend y otra para el frontend.
 
@@ -39,22 +44,22 @@ Abre **dos terminales** simultáneas — una para el backend y otra para el fron
 ```bash
 cd server
 
-npm install
+pnpm install
 
 # Crear archivo de variables de entorno (solo la primera vez)
 cp .env.example .env   # o crea el archivo manualmente (ver sección Variables de Entorno)
 
 # Generar el cliente de Prisma
-npx prisma generate
+pnpm prisma generate
 
 # Crear las tablas en la base de datos
-npx prisma migrate deploy
+pnpm prisma migrate deploy
 
 # Poblar con datos iniciales (solo la primera vez)
-npx ts-node src/seed.ts
+pnpm ts-node src/seed.ts
 
 # Iniciar en modo desarrollo (puerto 3000)
-npm run dev
+pnpm dev
 ```
 
 > El servidor queda disponible en **http://localhost:3000**
@@ -66,9 +71,9 @@ npm run dev
 ```bash
 cd project_final
 
-npm install
+pnpm install
 
-npm run dev
+pnpm dev
 ```
 
 > La aplicación queda disponible en **http://localhost:5173**

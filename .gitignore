@@ -4,6 +4,7 @@ project_final/.env
 project_final/*.log
 project_final/*.db
 project_final/*.db-journal
+project_final/package-lock.json
 
 server/node_modules/
 server/dist/
@@ -12,6 +13,7 @@ server/prisma/*.db
 server/prisma/*.db-journal
 server/*.log
 server/uploads/
+server/package-lock.json
 
 node_modules/
 dist/
@@ -21,6 +23,7 @@ dist/
 *.log
 *.txt
 uploads/
+package-lock.json
 
 .claude
 .claude/settings.local.json
