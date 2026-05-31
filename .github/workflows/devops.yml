@@ -84,7 +84,7 @@ jobs:
       - name: "[Backend] Validar Construcción (tsc)"
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_quality_check == true }}
         working-directory: server
-        run: pnpm run build 2> ../build_server_error.log || echo "BUILD_SERVER_FAILED=true" >> $GITHUB_ENV
+        run: pnpm run build > ../build_server_error.log 2>&1 || echo "BUILD_SERVER_FAILED=true" >> $GITHUB_ENV
         env:
           DATABASE_URL: "postgres://dummy:dummy@localhost:5432/dummy"
           JWT_SECRET: "ci_test_secret_key_only"
@@ -109,7 +109,7 @@ jobs:
       - name: "[Frontend] Validar Construcción (vite build)"
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_quality_check == true }}
         working-directory: project_final
-        run: pnpm run build 2> ../build_frontend_error.log || echo "BUILD_FRONTEND_FAILED=true" >> $GITHUB_ENV
+        run: pnpm run build > ../build_frontend_error.log 2>&1 || echo "BUILD_FRONTEND_FAILED=true" >> $GITHUB_ENV
         env:
           NEXT_PUBLIC_APP_URL: "http://localhost:3000"
 
@@ -185,31 +185,37 @@ jobs:
             fi
           done
 
-          # Construcción
+          # Construcción — tabla completa primero, detalles de error después
           echo "### 🏗️ Estado de la Construcción" >> $GITHUB_STEP_SUMMARY
           echo "| Proyecto | Estado |" >> $GITHUB_STEP_SUMMARY
           echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
-          if [ "$BUILD_SERVER_FAILED" == "true" ]; then
-            echo "| Backend (server) | ❌ FALLÓ |" >> $GITHUB_STEP_SUMMARY
-            echo "<details><summary>Error Backend</summary>" >> $GITHUB_STEP_SUMMARY
+          [ "$BUILD_SERVER_FAILED"   == "true" ] \
+            && echo "| Backend (server) | ❌ FALLÓ |"           >> $GITHUB_STEP_SUMMARY \
+            || echo "| Backend (server) | ✅ Exitosa |"         >> $GITHUB_STEP_SUMMARY
+          [ "$BUILD_FRONTEND_FAILED" == "true" ] \
+            && echo "| Frontend (project_final) | ❌ FALLÓ |"   >> $GITHUB_STEP_SUMMARY \
+            || echo "| Frontend (project_final) | ✅ Exitosa |" >> $GITHUB_STEP_SUMMARY
+
+          # Detalles de error fuera de la tabla para no romper el markdown
+          if [ "$BUILD_SERVER_FAILED" == "true" ] && [ -s build_server_error.log ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details><summary>Ver error del Backend</summary>" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            tail -n 15 build_server_error.log >> $GITHUB_STEP_SUMMARY
+            tail -n 20 build_server_error.log >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
             echo "</details>" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| Backend (server) | ✅ Exitosa |" >> $GITHUB_STEP_SUMMARY
           fi
-          if [ "$BUILD_FRONTEND_FAILED" == "true" ]; then
-            echo "| Frontend (project_final) | ❌ FALLÓ |" >> $GITHUB_STEP_SUMMARY
-            echo "<details><summary>Error Frontend</summary>" >> $GITHUB_STEP_SUMMARY
+          if [ "$BUILD_FRONTEND_FAILED" == "true" ] && [ -s build_frontend_error.log ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details><summary>Ver error del Frontend</summary>" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            tail -n 15 build_frontend_error.log >> $GITHUB_STEP_SUMMARY
+            tail -n 20 build_frontend_error.log >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
             echo "</details>" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| Frontend (project_final) | ✅ Exitosa |" >> $GITHUB_STEP_SUMMARY
           fi
 
           # CodeQL

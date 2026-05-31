@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import {
     CalendarCheck, Clock, CheckCircle2, BookOpen, RefreshCw,
@@ -82,26 +82,41 @@ export function StudentDashboard() {
     const [historialPage, setHistorialPage] = useState(0);
 
     // ── Derived data ──────────────────────────────────────
-    const appointments = getAppointments({ studentId: user?.id });
+    const appointments = useMemo(
+        () => getAppointments({ studentId: user?.id }),
+        [getAppointments, user?.id]
+    );
 
     // Próximas: si hay período activo, solo las del período actual
-    const proximas = appointments.filter(a => {
-        if (a.status !== "Pendiente" && a.status !== "Confirmada") return false;
-        if (activePeriod && a.periodId && a.periodId !== activePeriod.id) return false;
-        return true;
-    });
-    const historial = appointments.filter(a => a.status === "Completada" || a.status === "Cancelada");
+    const proximas = useMemo(
+        () => appointments.filter(a => {
+            if (a.status !== "Pendiente" && a.status !== "Confirmada") return false;
+            if (activePeriod && a.periodId && a.periodId !== activePeriod.id) return false;
+            return true;
+        }),
+        [appointments, activePeriod]
+    );
+    const historial = useMemo(
+        () => appointments.filter(a => a.status === "Completada" || a.status === "Cancelada"),
+        [appointments]
+    );
 
     const proximasTotalPages = Math.ceil(proximas.length / PROXIMAS_PAGE_SIZE);
-    const pagedProximas = proximas.slice(proximasPage * PROXIMAS_PAGE_SIZE, (proximasPage + 1) * PROXIMAS_PAGE_SIZE);
+    const pagedProximas = useMemo(
+        () => proximas.slice(proximasPage * PROXIMAS_PAGE_SIZE, (proximasPage + 1) * PROXIMAS_PAGE_SIZE),
+        [proximas, proximasPage]
+    );
     const historialTotalPages = Math.ceil(historial.length / HISTORIAL_PAGE_SIZE);
-    const pagedHistorial = historial.slice(historialPage * HISTORIAL_PAGE_SIZE, (historialPage + 1) * HISTORIAL_PAGE_SIZE);
+    const pagedHistorial = useMemo(
+        () => historial.slice(historialPage * HISTORIAL_PAGE_SIZE, (historialPage + 1) * HISTORIAL_PAGE_SIZE),
+        [historial, historialPage]
+    );
 
-    const stats = [
+    const stats = useMemo(() => [
         { label: "Pendientes", value: appointments.filter(a => a.status === "Pendiente").length, icon: Clock, bg: "bg-gradient-to-br from-[#EA580C] to-[#f97316]" },
         { label: "Confirmadas", value: appointments.filter(a => a.status === "Confirmada").length, icon: CheckCircle2, bg: "bg-gradient-to-br from-[#16A34A] to-[#22c55e]" },
         { label: "Completadas", value: appointments.filter(a => a.status === "Completada").length, icon: CalendarCheck, bg: "bg-gradient-to-br from-[#2563EB] to-[#3b82f6]" },
-    ];
+    ], [appointments]);
 
     // ── Hooks ─────────────────────────────────────────────
     const wizard = useAppointmentWizard();
@@ -109,10 +124,10 @@ export function StudentDashboard() {
     const cancel = useCancelAppointment();
 
     // ── Carousel slides (welcome always first; placeholder when no events) ──
-    const slides: CarouselSlide[] = [
-        WELCOME_SLIDE,
-        ...(events.length > 0 ? events : [PLACEHOLDER_SLIDE]),
-    ];
+    const slides: CarouselSlide[] = useMemo(
+        () => [WELCOME_SLIDE, ...(events.length > 0 ? events : [PLACEHOLDER_SLIDE])],
+        [events]
+    );
 
     // ── Banner auto-rotation ──────────────────────────────
     useEffect(() => {

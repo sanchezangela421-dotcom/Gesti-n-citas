@@ -3,6 +3,8 @@ import {
     AlertTriangle, CalendarCheck, ChevronLeft, ChevronRight, X,
 } from "lucide-react";
 
+const AVATAR_API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
+
 // ─── NotifIcon ───────────────────────────────────────────
 export function NotifIcon({ type }: { type: string }) {
     const props = { className: "w-4 h-4" };
@@ -53,8 +55,7 @@ export function Avatar({ name, size = "md", avatarUrl }: { name: string; size?: 
     const initials = name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase() || "?";
     const gradient = AVATAR_COLORS[name ? name.charCodeAt(0) % AVATAR_COLORS.length : 0];
     if (avatarUrl) {
-        const API_BASE: string = (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:3000';
-        const src = avatarUrl.startsWith('/uploads/') ? `${API_BASE}${avatarUrl}` : avatarUrl;
+        const src = avatarUrl.startsWith('/uploads/') ? `${AVATAR_API_BASE}${avatarUrl}` : avatarUrl;
         return (
             <div className={`shrink-0 rounded-full overflow-hidden shadow-sm ${AVATAR_SIZES[size]}`}>
                 <img src={src} alt={name} className="w-full h-full object-cover" />

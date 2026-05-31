@@ -13,8 +13,6 @@ import {
 } from "recharts";
 import type { DateRange } from "react-day-picker";
 import { es } from "date-fns/locale";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import { useStore } from "../../../context/StoreContext";
 import { AppShell } from "../../components/layout/AppShell";
 import { Btn, StatCard, Avatar, StatusBadge, Modal, inputCls, EmptyState } from "../../components/ui";
@@ -206,7 +204,11 @@ const AGE_RANGES = [
 ];
 
 // ─── PDF report (pure jsPDF + autoTable, no canvas capture) ──────────────────
-function generatePDFReport(deptReport: string, allAppts: Appointment[], users: { id: string; carrera?: string; genero?: string; semestre?: number; fechaNacimiento?: string }[], periodName?: string) {
+async function generatePDFReport(deptReport: string, allAppts: Appointment[], users: { id: string; carrera?: string; genero?: string; semestre?: number; fechaNacimiento?: string }[], periodName?: string) {
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+        import("jspdf"),
+        import("jspdf-autotable"),
+    ]);
     const doc = new jsPDF();
     const today = new Date().toLocaleDateString("es-MX");
 

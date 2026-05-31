@@ -138,7 +138,7 @@ export interface StoreContextType {
   removeSpecialist: (id: string) => Promise<void>;
   appointments: Appointment[];
   getAppointments: (filters?: AppointmentFilters) => Appointment[];
-  createAppointment: (req: { studentId: string; studentName?: string; specialistId: string; department: string; motivo: string; modality: string; preferredDate: string; preferredTime: string; isFollowUp?: boolean; parentId?: string }) => Appointment;
+  createAppointment: (req: { studentId: string; studentName?: string; specialistId: string; department: string; motivo: string; modality: string; preferredDate: string; preferredTime: string; isFollowUp?: boolean; parentId?: string }) => Promise<boolean>;
   updateAppointmentStatus: (id: string, status: string, notes?: string, byStudent?: boolean, meetingUrl?: string) => void;
   rescheduleAppointment: (id: string, newDate: string, newTime: string, byRole?: 'specialist' | 'student', modality?: string) => void;
   getAvailableSlots: (specialistId: string, dateStr: string) => Promise<AvailableSlot[]>;

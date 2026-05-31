@@ -19,4 +19,35 @@ export default defineConfig({
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
+
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+
+          // Charts — recharts pulls in d3-* and victory-* internally
+          if (id.includes('recharts') || id.includes('/d3-') || id.includes('d3/')) {
+            return 'vendor-charts';
+          }
+          // Animation
+          if (id.includes('/motion/') || id.includes('framer-motion')) {
+            return 'vendor-motion';
+          }
+          // Radix UI primitives (all @radix-ui/* packages)
+          if (id.includes('@radix-ui')) {
+            return 'vendor-radix';
+          }
+          // React core — keep separate so browsers can cache across deploys
+          if (id.includes('react-dom') || id.includes('/react/')) {
+            return 'vendor-react';
+          }
+          // Icon library
+          if (id.includes('lucide-react')) {
+            return 'vendor-icons';
+          }
+        },
+      },
+    },
+  },
 })
