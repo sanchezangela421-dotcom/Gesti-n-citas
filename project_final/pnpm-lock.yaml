@@ -165,8 +165,8 @@ importers:
         specifier: 2.7.1
         version: 2.7.1
       react-router:
-        specifier: 7.13.0
-        version: 7.13.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+        specifier: 7.15.0
+        version: 7.15.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       react-slick:
         specifier: 0.31.0
         version: 0.31.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -3062,8 +3062,8 @@ packages:
   react-responsive-masonry@2.7.1:
     resolution: {integrity: sha512-Q+u+nOH87PzjqGFd2PgTcmLpHPZnCmUPREHYoNBc8dwJv6fi51p9U6hqwG8g/T8MN86HrFjrU+uQU6yvETU7cA==}
 
-  react-router@7.13.0:
-    resolution: {integrity: sha512-PZgus8ETambRT17BUm/LL8lX3Of+oiLaPuVTRH3l1eLvSPpKO3AvhAEb5N7ihAFZQrYDqkvvWfFh9p0z9VsjLw==}
+  react-router@7.15.0:
+    resolution: {integrity: sha512-HW9vYwuM8f4yx66Izy8xfrzCM+SBJluoZcCbww9A1TySax11S5Vgw6fi3ZjMONw9J4gQwngL7PzkyIpJJpJ7RQ==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       react: '>=18'
@@ -6351,7 +6351,7 @@ snapshots:
 
   react-responsive-masonry@2.7.1: {}
 
-  react-router@7.13.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
+  react-router@7.15.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
     dependencies:
       cookie: 1.1.1
       react: 18.3.1
