@@ -34,7 +34,7 @@ jobs:
     steps:
       - name: Checkout Código
         # actions/checkout@v4
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           fetch-depth: 0
 
@@ -43,7 +43,7 @@ jobs:
         # Solo corre en push/PR — en workflow_dispatch y schedule no hay diff que escanear
         if: github.event_name == 'push' || github.event_name == 'pull_request'
         # trufflesecurity/trufflehog@v3.94.2
-        uses: trufflesecurity/trufflehog@17456f8c7d042d8c82c9a8ca9e937231f9f42e26
+        uses: trufflesecurity/trufflehog@d411fff7b8879a62509f3fa98c07f247ac089a51
         with:
           path: ./
           base: ${{ github.event.before != '0000000000000000000000000000000000000000' && github.event.before || github.event.repository.default_branch }}
@@ -51,7 +51,7 @@ jobs:
           extra_args: --json
 
       - name: Configurar pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
