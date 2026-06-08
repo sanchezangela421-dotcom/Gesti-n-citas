@@ -35,7 +35,7 @@ export function superAdminHeaders(): Record<string, string> {
  */
 export function getImageUrl(url?: string | null): string | undefined {
   if (!url) return undefined;
-  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('https://') || url.startsWith('http://')) return url;
   if (url.startsWith('/uploads/')) return `${API_BASE}${url}`;
-  return url;
+  return undefined;
 }

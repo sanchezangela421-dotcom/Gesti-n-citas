@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { sendAccountInvitation } from '../services/email';
 
-const EMAIL_REGEX = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/;
+const EMAIL_REGEX = /^[^\s@,;]+@[^\s@,;.]+(\.[^\s@,;.]+)+$/;
 
 const router = Router();
 

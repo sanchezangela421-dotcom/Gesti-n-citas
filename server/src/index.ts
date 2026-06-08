@@ -19,7 +19,16 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '1mb' }));
 
-// Rate limiting for auth endpoints
+// Rate limiting — general API (anti-DoS) y estricto para auth (anti-bruteforce)
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 500,
+  message: { error: 'Demasiadas peticiones. Intenta de nuevo en 15 minutos.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/', apiLimiter);
+
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,  // 15 minutos
   max: 15,                    // 15 intentos por ventana por IP

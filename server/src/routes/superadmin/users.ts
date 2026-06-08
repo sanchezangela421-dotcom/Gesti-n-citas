@@ -12,7 +12,7 @@ const INVITATION_EXPIRY_MS = 72 * 60 * 60 * 1000; // 72 horas
 
 const router = Router();
 
-const EMAIL_REGEX = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/;
+const EMAIL_REGEX = /^[^\s@,;]+@[^\s@,;.]+(\.[^\s@,;.]+)+$/;
 const PAGE_SIZE   = 50;
 const VALID_ROLES = Object.values(UserRole) as string[];
 
