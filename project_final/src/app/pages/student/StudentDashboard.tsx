@@ -18,17 +18,19 @@ import type { AppEvent } from "../../../types";
 function getVideoEmbedUrl(url: string): string | null {
     try {
         const u = new URL(url);
-        // YouTube
-        if (u.hostname.includes("youtube.com") || u.hostname.includes("youtu.be")) {
-            const id = u.hostname.includes("youtu.be")
+        // YouTube — exact hostname match to prevent subdomain spoofing
+        const isYouTube = u.hostname === "youtube.com" || u.hostname === "www.youtube.com";
+        const isYouTuBe = u.hostname === "youtu.be";
+        if (isYouTube || isYouTuBe) {
+            const id = isYouTuBe
                 ? u.pathname.slice(1)
                 : u.searchParams.get("v") || u.pathname.split("/").pop();
-            return id ? `https://www.youtube.com/embed/${id}` : null;
+            return id ? `https://www.youtube.com/embed/${encodeURIComponent(id)}` : null;
         }
-        // Vimeo
-        if (u.hostname.includes("vimeo.com")) {
+        // Vimeo — exact hostname match
+        if (u.hostname === "vimeo.com" || u.hostname === "www.vimeo.com") {
             const id = u.pathname.split("/").pop();
-            return id ? `https://player.vimeo.com/video/${id}` : null;
+            return id ? `https://player.vimeo.com/video/${encodeURIComponent(id)}` : null;
         }
         return null;
     } catch {

@@ -22,7 +22,7 @@ import { DEPT_CONFIG } from "../../../constants";
 import { PIE_COLORS } from "../../../data/mockData";
 import { useActionModal } from "../../hooks";
 import { useTheme } from "../../hooks/useTheme";
-import { API, authHeaders } from "../../../lib/api";
+import { API, authHeaders, getUploadUrl } from "../../../lib/api";
 import { calcularEdad } from "../../../utils/date";
 import type { Appointment, Specialist, AppEvent, Resource } from "../../../types";
 
@@ -1719,7 +1719,9 @@ export function AdminDashboard() {
                                             <input type="file" accept="image/*" onChange={e => setSelectedFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
                                             {selectedFile ? (
                                                 <>
-                                                    <img src={URL.createObjectURL(selectedFile)} alt="" className="w-16 h-16 rounded-xl object-cover border border-slate-200 shrink-0" />
+                                                    <div className="w-16 h-16 rounded-xl bg-emerald-100 flex items-center justify-center border border-emerald-200 shrink-0">
+                                                        <ImageIcon className="w-7 h-7 text-emerald-500" />
+                                                    </div>
                                                     <div>
                                                         <p className="text-sm font-bold text-slate-700">{selectedFile.name}</p>
                                                         <p className="text-xs text-slate-400">{(selectedFile.size / 1024).toFixed(1)} KB — haz clic para cambiar</p>
@@ -1878,8 +1880,8 @@ export function AdminDashboard() {
                                                 <input type="file" accept="image/*" onChange={e => setSelectedEventImg(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
                                                 <div className="w-20 h-20 rounded-xl bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-100">
                                                     {selectedEventImg
-                                                        ? <img src={URL.createObjectURL(selectedEventImg)} className="w-full h-full object-cover" alt="" />
-                                                        : (evImg ? <img src={evImg} className="w-full h-full object-cover" alt="" /> : <ImageIcon className="w-8 h-8 text-slate-400" />)}
+                                                        ? <ImageIcon className="w-8 h-8 text-violet-400" />
+                                                        : (getUploadUrl(evImg) ? <img src={getUploadUrl(evImg)!} className="w-full h-full object-cover" alt="" /> : <ImageIcon className="w-8 h-8 text-slate-400" />)}
                                                 </div>
                                                 <div className="flex-1">
                                                     <p className="text-sm font-bold text-slate-700">{selectedEventImg ? selectedEventImg.name : "Subir imagen de portada"}</p>

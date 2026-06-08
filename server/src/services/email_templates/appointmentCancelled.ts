@@ -1,4 +1,4 @@
-import { wrap, header, footer, appointmentBox, ctaButton, infoBanner } from './base';
+import { wrap, header, footer, appointmentBox, ctaButton, infoBanner, escapeHtml } from './base';
 
 interface CancelledData {
   date: string;
@@ -17,9 +17,9 @@ export function appointmentCancelledStudentTemplate(
   return wrap(`
     ${header('Tu cita fue cancelada', 'linear-gradient(135deg,#7f1d1d,#dc2626)')}
     <div style="padding:32px;">
-      <p style="color:#334155;font-size:15px;">Hola <strong>${studentName}</strong>,</p>
+      <p style="color:#334155;font-size:15px;">Hola <strong>${escapeHtml(studentName)}</strong>,</p>
       <p style="color:#475569;font-size:14px;line-height:1.6;">
-        Lamentablemente tu especialista <strong>${specialistName}</strong> ha cancelado
+        Lamentablemente tu especialista <strong>${escapeHtml(specialistName)}</strong> ha cancelado
         la siguiente cita en <strong>Synkros</strong>.
       </p>
       ${appointmentBox([
@@ -48,9 +48,9 @@ export function appointmentCancelledSpecialistTemplate(
   return wrap(`
     ${header('Un alumno canceló su cita', 'linear-gradient(135deg,#7f1d1d,#dc2626)')}
     <div style="padding:32px;">
-      <p style="color:#334155;font-size:15px;">Hola <strong>${specialistName}</strong>,</p>
+      <p style="color:#334155;font-size:15px;">Hola <strong>${escapeHtml(specialistName)}</strong>,</p>
       <p style="color:#475569;font-size:14px;line-height:1.6;">
-        El alumno <strong>${studentName}</strong> ha cancelado su cita en
+        El alumno <strong>${escapeHtml(studentName)}</strong> ha cancelado su cita en
         <strong>Synkros</strong>. El horario ha quedado libre en tu agenda.
       </p>
       ${appointmentBox([
