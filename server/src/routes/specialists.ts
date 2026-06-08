@@ -54,7 +54,7 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
     }
 
     const allowedDomain = process.env.ALLOWED_EMAIL_DOMAIN;
-    if (allowedDomain && email) {
+    if (allowedDomain) {
       const emailDomain = email.split('@')[1];
       if (emailDomain !== allowedDomain) {
         return res.status(400).json({ error: `Solo se permiten correos institucionales (@${allowedDomain})` });

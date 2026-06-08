@@ -1,4 +1,13 @@
 const YEAR = new Date().getFullYear();
+
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 // La imagen se envía como adjunto MIME (CID) para que funcione en todos los clientes
 // sin depender de una URL pública. Ver email.ts → LOGO_ATTACHMENT.
 const LOGO_CID = 'logo@synkros';
@@ -28,8 +37,8 @@ export const appointmentBox = (rows: { label: string; value: string }[]) => `
   <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:20px;margin:24px 0;">
     ${rows.map((r, i) => `
       <div style="padding:8px 0;${i < rows.length - 1 ? 'border-bottom:1px solid #e2e8f0;' : ''}">
-        <p style="color:#64748b;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 2px;">${r.label}</p>
-        <p style="color:#1e293b;font-size:14px;margin:0;font-weight:500;">${r.value}</p>
+        <p style="color:#64748b;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 2px;">${escapeHtml(r.label)}</p>
+        <p style="color:#1e293b;font-size:14px;margin:0;font-weight:500;">${escapeHtml(r.value)}</p>
       </div>
     `).join('')}
   </div>
