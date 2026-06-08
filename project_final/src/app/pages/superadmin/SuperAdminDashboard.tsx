@@ -1107,14 +1107,14 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                         <div>
                             <label className="block text-xs font-medium text-slate-400 mb-2">Logo de la organización</label>
                             <div className="flex items-center gap-3">
-                                {(logoFile ? URL.createObjectURL(logoFile) : getUploadUrl(editOrg.logoUrl)) ? (
+                                {getUploadUrl(editOrg.logoUrl) ? (
                                     <img
-                                        src={logoFile ? URL.createObjectURL(logoFile) : getUploadUrl(editOrg.logoUrl)!}
+                                        src={getUploadUrl(editOrg.logoUrl)!}
                                         alt="Logo"
                                         className="w-14 h-14 rounded-xl object-contain bg-slate-800 border border-slate-700 p-1"
                                     />
                                 ) : (
-                                    <div className="w-14 h-14 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500 text-xs">Sin logo</div>
+                                    <div className="w-14 h-14 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500 text-xs">{logoFile ? logoFile.name.slice(0, 8) + "…" : "Sin logo"}</div>
                                 )}
                                 <div className="flex-1 space-y-1.5">
                                     <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={e => setLogoFile(e.target.files?.[0] ?? null)} />
