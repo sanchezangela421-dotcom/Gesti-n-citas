@@ -348,12 +348,7 @@ export function LoginForm({ onSwitchToRegister }: { onSwitchToRegister: () => vo
                     </div>
                 </div>
 
-                {/* Stats row */}
-                <div className="relative z-10 grid grid-cols-3 gap-6 pt-10 border-t border-white/10 mt-12">
-                    <div><p className="text-3xl font-bold text-white mb-1">500+</p><p className="text-white/60 text-xs font-medium uppercase tracking-wider">Alumnos</p></div>
-                    <div><p className="text-3xl font-bold text-white mb-1">3</p><p className="text-white/60 text-xs font-medium uppercase tracking-wider">Departamentos</p></div>
-                    <div><p className="text-3xl font-bold text-white mb-1">98%</p><p className="text-white/60 text-xs font-medium uppercase tracking-wider">Satisfacción</p></div>
-                </div>
+
             </div>
 
             {/* ── Right panel ── */}

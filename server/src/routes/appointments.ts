@@ -12,6 +12,11 @@ import {
 
 const router = Router();
 
+function orgFilter(req: AuthRequest) {
+  if (req.user?.role === 'superadmin') return {};
+  return req.user?.organizationId ? { organizationId: req.user.organizationId } : {};
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatDate(dateStr: string): string {
@@ -51,7 +56,7 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const { studentId, specialistId, department, status } = req.query;
 
-    const where: any = {};
+    const where: any = { ...orgFilter(req) };
     if (studentId) where.studentId = studentId;
     if (specialistId) where.specialistId = specialistId;
     if (department) where.department = department;
@@ -131,6 +136,7 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
           isFollowUp: data.isFollowUp ?? false,
           parentId: data.parentId ?? null,
           periodId: activePeriod?.id ?? null,
+          organizationId: req.user?.organizationId ?? null,
         },
       });
     });
@@ -185,8 +191,8 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       return res.status(404).json({ error: 'Cita no encontrada' });
     }
 
-    // Validar propiedad: alumnos solo sus citas, especialistas solo las asignadas
-    if (req.user?.role === 'alumno' && current.studentId !== req.user.id) {
+    // Validar propiedad: end-users solo sus citas, especialistas solo las asignadas
+    if ((req.user?.role === 'alumno' || req.user?.role === 'usuario') && current.studentId !== req.user.id) {
       return res.status(403).json({ error: 'Sin permisos sobre esta cita' });
     }
     if (req.user?.role === 'especialista') {
@@ -203,7 +209,7 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       });
     }
 
-    if (status === 'Cancelada' && req.user?.role === 'alumno') {
+    if (status === 'Cancelada' && (req.user?.role === 'alumno' || req.user?.role === 'usuario')) {
       const [hours, minutes] = current.time.split(':').map(Number);
       const apptDateTime = new Date(`${current.date}T00:00:00`);
       apptDateTime.setHours(hours, minutes, 0, 0);
@@ -264,8 +270,8 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       }
 
       if (status === 'Cancelada') {
-        // El alumno canceló → avisa al especialista
-        if (actorRole === 'alumno' && specialistEmail) {
+        // El end-user canceló → avisa al especialista
+        if ((actorRole === 'alumno' || actorRole === 'usuario') && specialistEmail) {
           await sendCancelledByStudentEmail(specialistEmail, { ...base, reason: cancelReason });
         }
         // El especialista o admin canceló → avisa al alumno

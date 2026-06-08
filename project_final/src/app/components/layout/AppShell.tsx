@@ -26,9 +26,10 @@ interface AppShellProps {
 }
 
 const ROLE_LABELS: Record<string, string> = {
-    alumno: "Alumno",
+    alumno:      "Alumno",
+    usuario:     "Usuario",
     especialista: "Especialista",
-    admin: "Administrador",
+    admin:       "Administrador",
 };
 
 export function AppShell({ children, sidebar }: AppShellProps) {
@@ -64,7 +65,10 @@ export function AppShell({ children, sidebar }: AppShellProps) {
 
     if (!user) return null;
 
-    const roleLabel = ROLE_LABELS[user.role] ?? user.role;
+    // Para end-users (alumno/usuario), usar el userRoleLabel de la org cuando está disponible
+    const roleLabel = (user.role === 'alumno' || user.role === 'usuario') && user.organization?.userRoleLabel
+        ? user.organization.userRoleLabel
+        : (ROLE_LABELS[user.role] ?? user.role);
     const notifs = notifications[user.id] ?? [];
     const unread = notifs.filter(n => !n.read).length;
 

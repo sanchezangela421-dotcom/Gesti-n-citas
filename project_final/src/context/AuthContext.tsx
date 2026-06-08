@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
-import { AuthContextType, User } from "../types";
+import { AuthContextType, RegisterPayload, User } from "../types";
 import { API_BASE } from "../lib/api";
 
 export const AuthContext = createContext<AuthContextType | null>(null);
@@ -78,7 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const register = useCallback(async (data: Partial<User>): Promise<{ ok: boolean; error?: string }> => {
+  const register = useCallback(async (data: RegisterPayload): Promise<{ ok: boolean; error?: string }> => {
     try {
       const res = await fetch(`${API_BASE}/api/auth/register`, {
         method: 'POST',

@@ -1,18 +1,24 @@
 import { Router } from 'express';
 import { prisma } from '../db';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
-import { sendWelcomeEmail } from '../services/email';
+import { sendAccountInvitation } from '../services/email';
 
-const EMAIL_REGEX = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/;
+const EMAIL_REGEX = /^[^\s@,;]+@[^\s@,;.]+(\.[^\s@,;.]+)+$/;
 
 const router = Router();
+
+function orgFilter(req: AuthRequest) {
+  if (req.user?.role === 'superadmin') return {};
+  return req.user?.organizationId ? { organizationId: req.user.organizationId } : {};
+}
 
 // GET /api/specialists
 router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const department = req.query.department as string | undefined;
-    const where: any = {};
+    const where: any = { ...orgFilter(req) };
     if (department) where.department = department;
 
     const specialists = await prisma.specialist.findMany({
@@ -33,13 +39,13 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
 // POST /api/specialists — admin only
 router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
-    if (req.user?.role !== 'admin') {
+    if (req.user?.role !== 'admin' && req.user?.role !== 'superadmin') {
       return res.status(403).json({ error: 'Sin permisos' });
     }
 
-    const { name, department, email, password, shift } = req.body;
+    const { name, department, email, shift } = req.body;
 
-    if (!name || !email || !password || !department) {
+    if (!name || !email || !department) {
       return res.status(400).json({ error: 'Faltan campos obligatorios' });
     }
 
@@ -58,22 +64,37 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) return res.status(400).json({ error: 'El correo ya está registrado' });
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // Contraseña aleatoria bloqueante — el especialista la cambiará vía el link de activación
+    const tempPassword = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10);
+    const activationToken = crypto.randomBytes(32).toString('hex');
+    const activationExpiry = new Date(Date.now() + 72 * 60 * 60 * 1000); // 72 horas
+
+    const org = req.user?.organizationId
+      ? await prisma.organization.findUnique({ where: { id: req.user.organizationId } })
+      : null;
 
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
-        data: { email, password: hashedPassword, name, role: 'especialista', department, emailVerified: true }
+        data: {
+          email, password: tempPassword, name,
+          role: 'especialista', department,
+          emailVerified: true,
+          resetPasswordToken: activationToken,
+          resetPasswordTokenExpiresAt: activationExpiry,
+          organizationId: req.user?.organizationId ?? null,
+        }
       });
 
       return await tx.specialist.create({
-        data: { userId: user.id, name, department, email, active: true, shift: shift || 'Matutino' },
+        data: { userId: user.id, name, department, email, active: true, shift: shift || 'Matutino', organizationId: req.user?.organizationId ?? null },
         include: { schedules: true }
       });
     });
 
-    // Send welcome email with credentials (non-blocking)
-    sendWelcomeEmail(name, email, password, 'especialista').catch(err => {
-      console.error('Error sending welcome email:', err);
+    // Enviar invitación con link de activación (no se envían credenciales planas)
+    const activationUrl = `${process.env.FRONTEND_URL}/reset-password?token=${activationToken}`;
+    sendAccountInvitation(name, email, org?.name ?? 'la plataforma', 'especialista', activationUrl).catch(err => {
+      console.error('Error sending invitation email:', err);
     });
 
     res.status(201).json(result);
@@ -86,7 +107,7 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
 // PATCH /api/specialists/:id — admin only
 router.patch('/:id', verifyToken as any, async (req: AuthRequest, res) => {
   try {
-    if (req.user?.role !== 'admin') {
+    if (req.user?.role !== 'admin' && req.user?.role !== 'superadmin') {
       return res.status(403).json({ error: 'Sin permisos' });
     }
 
@@ -157,7 +178,7 @@ router.patch('/:id/meeting-url', verifyToken as any, async (req: AuthRequest, re
 // DELETE /api/specialists/:id — admin only
 router.delete('/:id', verifyToken as any, async (req: AuthRequest, res) => {
   try {
-    if (req.user?.role !== 'admin') {
+    if (req.user?.role !== 'admin' && req.user?.role !== 'superadmin') {
       return res.status(403).json({ error: 'Sin permisos' });
     }
 

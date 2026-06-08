@@ -5,11 +5,16 @@ import { upload } from '../middleware/upload';
 
 const router = Router();
 
+function orgFilter(req: AuthRequest) {
+  if (req.user?.role === 'superadmin') return {};
+  return req.user?.organizationId ? { organizationId: req.user.organizationId } : {};
+}
+
 // GET /api/events
-router.get('/', async (req, res) => {
+router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const { department } = req.query;
-    const where: any = {};
+    const where: any = { ...orgFilter(req) };
     if (department) where.department = department;
 
     const events = await prisma.appEvent.findMany({
@@ -25,7 +30,7 @@ router.get('/', async (req, res) => {
 
 // POST /api/events
 router.post('/', verifyToken as any, upload.single('image'), async (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista' && req.user?.role !== 'superadmin') {
     return res.status(403).json({ error: 'Sin permisos' });
   }
   try {
@@ -42,15 +47,16 @@ router.post('/', verifyToken as any, upload.single('image'), async (req: AuthReq
     }
 
     const event = await prisma.appEvent.create({
-      data: { 
-        title, 
-        description: description || '', 
-        department, 
-        date, 
-        time: time || '', 
-        type: type || 'conferencia', 
-        imageUrl: imageUrl || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=400&q=80', 
-        registrationUrl 
+      data: {
+        title,
+        description: description || '',
+        department,
+        date,
+        time: time || '',
+        type: type || 'conferencia',
+        imageUrl: imageUrl || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=400&q=80',
+        registrationUrl,
+        organizationId: req.user?.organizationId ?? null,
       }
     });
 
@@ -63,10 +69,16 @@ router.post('/', verifyToken as any, upload.single('image'), async (req: AuthReq
 
 // PATCH /api/events/:id
 router.patch('/:id', verifyToken as any, upload.single('image'), async (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista' && req.user?.role !== 'superadmin') {
     return res.status(403).json({ error: 'Sin permisos' });
   }
   try {
+    const existing = await prisma.appEvent.findUnique({ where: { id: req.params.id as string } });
+    if (!existing) return res.status(404).json({ error: 'No encontrado' });
+    if (req.user?.role !== 'superadmin' && existing.organizationId !== req.user?.organizationId) {
+      return res.status(403).json({ error: 'Sin permisos' });
+    }
+
     const { title, description, department, date, time, type, registrationUrl } = req.body;
     const data: any = {};
     if (title !== undefined)           data.title = title;
@@ -89,10 +101,15 @@ router.patch('/:id', verifyToken as any, upload.single('image'), async (req: Aut
 
 // DELETE /api/events/:id
 router.delete('/:id', verifyToken as any, async (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista' && req.user?.role !== 'superadmin') {
     return res.status(403).json({ error: 'Sin permisos' });
   }
   try {
+    const existing = await prisma.appEvent.findUnique({ where: { id: req.params.id as string } });
+    if (!existing) return res.status(404).json({ error: 'No encontrado' });
+    if (req.user?.role !== 'superadmin' && existing.organizationId !== req.user?.organizationId) {
+      return res.status(403).json({ error: 'Sin permisos' });
+    }
     await prisma.appEvent.delete({ where: { id: req.params.id as string } });
     res.json({ success: true });
   } catch {

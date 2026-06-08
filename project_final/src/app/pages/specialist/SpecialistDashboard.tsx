@@ -108,16 +108,27 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
         const isSpecificDate = newWeek === "date";
         const weekVal = newWeek === "both" || newWeek === "date" ? undefined : parseInt(String(newWeek));
 
+        // Calcular a qué weekOffset (0 o 1) pertenece selectedBaseDate
+        let weekOffsetForDate: number | undefined;
+        if (isSpecificDate && selectedBaseDate) {
+            const baseDate = new Date(selectedBaseDate + 'T12:00:00');
+            const todayW = new Date(); todayW.setHours(0, 0, 0, 0);
+            const shift = todayW.getDay() === 0 ? 1 : 1 - todayW.getDay();
+            const monCurrent = new Date(todayW); monCurrent.setDate(todayW.getDate() + shift);
+            const monNext = new Date(monCurrent); monNext.setDate(monCurrent.getDate() + 7);
+            const friCurrent = new Date(monCurrent); friCurrent.setDate(monCurrent.getDate() + 4);
+            const friNext = new Date(monNext); friNext.setDate(monNext.getDate() + 4);
+            if (baseDate >= monCurrent && baseDate <= friCurrent) weekOffsetForDate = 0;
+            else if (baseDate >= monNext && baseDate <= friNext) weekOffsetForDate = 1;
+        }
+
         const hasOverlap = schedule.some(s => {
             if (editingSlotId && s.id === editingSlotId) return false;
-            const sWeek = s.week === null ? undefined : s.week;
             return (
                 s.dayOfWeek === dayInt &&
-                (sWeek === undefined || weekVal === undefined || sWeek === weekVal) &&
-                // "Solo este día" choca con la misma fecha exacta O con slots permanentes (week=null)
-                // pero NO con slots de semana específica (week=0/1) de otra semana
                 (isSpecificDate
-                    ? (s.specificDate === selectedBaseDate || (s.specificDate === null && s.week === null))
+                    ? (s.specificDate === selectedBaseDate ||
+                       (s.specificDate === null && (s.week === null || s.week === weekOffsetForDate)))
                     : (s.specificDate == null)) &&
                 newStart < s.endTime && newEnd > s.startTime
             );
@@ -386,11 +397,14 @@ export function SpecialistDashboard() {
         </div>
     );
 
+    const endUserLabel = user.organization?.userRoleLabel ?? "Usuario";
+    const endUserTabLabel = `${endUserLabel}s`;
+
     const statsData = [
         { label: "Pendientes", value: pendientes.length, icon: Clock, gradient: "from-amber-500 to-amber-600" },
         { label: "Confirmadas", value: confirmadas.length, icon: CalendarCheck, gradient: "from-blue-600 to-indigo-600" },
         { label: "Completadas", value: completadas.length, icon: CheckCircle2, gradient: "from-emerald-500 to-emerald-600" },
-        { label: "Pacientes", value: totalPatients, icon: Users, gradient: "from-violet-500 to-violet-600" },
+        { label: endUserTabLabel, value: totalPatients, icon: Users, gradient: "from-violet-500 to-violet-600" },
     ];
 
     // Root appointments in history (Completada or Cancelada, no parentId)
@@ -899,7 +913,7 @@ export function SpecialistDashboard() {
                         {/* ── Form ── */}
                         <div>
                             <h3 className="text-2xl font-bold text-slate-900 mb-2">Publicar Material Educativo</h3>
-                            <p className="text-slate-500 font-medium mb-6">Comparte recursos con los estudiantes de la facultad.</p>
+                            <p className="text-slate-500 font-medium mb-6">Comparte recursos con los {endUserTabLabel} de tu organización.</p>
                             <div className="space-y-5 bg-slate-50 border border-slate-200 rounded-3xl p-6 shadow-sm">
                                 <div>
                                     <label className="block mb-2 text-slate-900 font-bold text-sm">Título <span className="text-rose-500">*</span></label>
@@ -948,7 +962,7 @@ export function SpecialistDashboard() {
                                     <div className="space-y-4">
                                         <div>
                                             <label className="block mb-1 text-slate-900 font-bold text-sm">Enlace del video <span className="text-rose-500">*</span></label>
-                                            <p className="text-xs text-slate-400 mb-2">Pega la URL de YouTube o Vimeo. Los alumnos verán el video integrado directamente en la plataforma.</p>
+                                            <p className="text-xs text-slate-400 mb-2">Pega la URL de YouTube o Vimeo. Los {endUserTabLabel} verán el video integrado directamente en la plataforma.</p>
                                             <input type="url" value={curl} onChange={e => setCurl(e.target.value)} placeholder="https://youtube.com/watch?v=... o https://vimeo.com/..." className={inputCls} />
                                         </div>
                                         <div>
@@ -1022,7 +1036,7 @@ export function SpecialistDashboard() {
                         {/* ── Form ── */}
                         <div>
                             <h3 className="text-2xl font-bold text-slate-900 mb-2">Publicar Evento o Taller</h3>
-                            <p className="text-slate-500 font-medium mb-6">Crea un banner que aparecerá en el carrusel principal de estudiantes.</p>
+                            <p className="text-slate-500 font-medium mb-6">Crea un banner que aparecerá en el carrusel principal de {endUserTabLabel}.</p>
                             <div className="space-y-5 bg-slate-50 border border-slate-200 rounded-3xl p-6 shadow-sm">
                                 <div>
                                     <label className="block mb-2 text-slate-900 font-bold text-sm">Formato</label>

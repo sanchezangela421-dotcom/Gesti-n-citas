@@ -1,5 +1,5 @@
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -7,45 +7,128 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// ── Enums ──────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  alumno      // usuario de org tipo escuela
+  usuario     // usuario de org tipo empresa u hospital
+  especialista
+  admin
+  superadmin
+}
+
+// ── Platform models ────────────────────────────────────────────────────────────
+
+model Organization {
+  id            String   @id @default(uuid())
+  name          String
+  slug          String   @unique
+  type          String   // "school" | "hospital" | "company"
+  plan          String   @default("free")
+  active        Boolean  @default(true)
+  userRoleLabel String   @default("Usuario") // "Alumno" | "Paciente" | "Empleado"
+  logoUrl       String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users              User[]
+  specialists        Specialist[]
+  appointments       Appointment[]
+  events             AppEvent[]
+  resources          Resource[]
+  periods            ReportPeriod[]
+  notifications      Notification[]
+  registrationFields RegistrationField[]
+}
+
+// Campos personalizados que cada org pide al registrarse
+model RegistrationField {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  key            String       // identificador interno: "matricula", "numero_empleado"
+  label          String       // etiqueta visible: "Número de Control", "No. Empleado"
+  type           String       // "text" | "number" | "select" | "date" | "radio"
+  required       Boolean      @default(false)
+  order          Int          @default(0)
+  options        Json?        // para "select" y "radio": ["ISC", "IEC", ...]
+  placeholder    String?
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, key])
+  @@index([organizationId, order])
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  actorId        String
+  actorRole      String
+  action         String
+  targetEntity   String
+  targetId       String
+  organizationId String?
+  metadata       Json?
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([actorId])
+}
+
+// ── Business models ────────────────────────────────────────────────────────────
+
 model User {
-  id                String   @id @default(uuid())
-  email             String   @unique
-  password          String
-  name              String
-  role              String   // "alumno", "especialista", "admin"
-  matricula         String?
-  carrera           String?
-  semestre          Int?
-  fechaNacimiento   String?   // YYYY-MM-DD
-  genero            String?
-  department        String?
-  avatarUrl         String?
-  emailVerified              Boolean   @default(false)
-  verificationToken          String?
-  verificationTokenExpiresAt DateTime?
-  resetPasswordToken         String?
+  id                          String    @id @default(uuid())
+  email                       String    @unique
+  password                    String
+  name                        String
+  role                        UserRole
+  matricula                   String?
+  carrera                     String?
+  semestre                    Int?
+  fechaNacimiento             String?
+  genero                      String?
+  department                  String?
+  avatarUrl                   String?
+  metadata                    Json?     // campos dinámicos definidos por la org (RegistrationField)
+  emailVerified               Boolean   @default(false)
+  verificationToken           String?
+  verificationTokenExpiresAt  DateTime?
+  resetPasswordToken          String?
   resetPasswordTokenExpiresAt DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  
-  specialist Specialist?
-  studentAppointments Appointment[] @relation("StudentAppointments")
+  organizationId              String?
+  organization                Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+
+  specialist          Specialist?
+  studentAppointments Appointment[]  @relation("StudentAppointments")
   notifications       Notification[]
+
+  @@index([organizationId, role])
+  @@index([organizationId, email])
 }
 
 model Specialist {
-  id         String   @id @default(uuid())
-  userId     String   @unique
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name       String
-  department String
-  email      String
-  active      Boolean  @default(true)
-  shift       String?  // "Matutino", "Vespertino"
-  meetingUrl  String?  // Enlace de videoconferencia para citas virtuales
+  id             String        @id @default(uuid())
+  userId         String        @unique
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  department     String
+  email          String
+  active         Boolean       @default(true)
+  shift          String?
+  meetingUrl     String?
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   schedules    ScheduleSlot[]
-  appointments Appointment[] @relation("SpecialistAppointments")
+  appointments Appointment[]  @relation("SpecialistAppointments")
+
+  @@index([organizationId, active])
+  @@index([organizationId, department])
 }
 
 model ScheduleSlot {
@@ -56,19 +139,26 @@ model ScheduleSlot {
   startTime    String
   endTime      String
   available    Boolean    @default(true)
-  week         Int?       // 0: current, 1: next, null: both
-  specificDate String?    // YYYY-MM-DD para disponibilidad en fecha única
+  week         Int?
+  specificDate String?
 }
 
 model ReportPeriod {
-  id           String        @id @default(uuid())
-  name         String
-  startDate    String        // YYYY-MM-DD
-  endDate      String?       // YYYY-MM-DD — estimado al crear, null hasta que se defina
-  status       String        @default("activo") // "activo" | "cerrado"
-  closedAt     DateTime?
-  createdAt    DateTime      @default(now())
+  id             String        @id @default(uuid())
+  name           String
+  startDate      String
+  endDate        String?
+  status         String        @default("activo")
+  closedAt       DateTime?
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
   appointments Appointment[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt])
 }
 
 model Appointment {
@@ -86,19 +176,26 @@ model Appointment {
   modality       String
   motivo         String
   notes          String?
-  meetingUrl     String?       // Enlace único de videollamada para esta cita
+  meetingUrl     String?
   isFollowUp     Boolean       @default(false)
   parentId       String?
   parent         Appointment?  @relation("AppointmentFollowUps", fields: [parentId], references: [id], onDelete: SetNull)
   followUps      Appointment[] @relation("AppointmentFollowUps")
   periodId       String?
   period         ReportPeriod? @relation(fields: [periodId], references: [id], onDelete: SetNull)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
+
+  @@index([organizationId, status])
+  @@index([organizationId, studentId])
+  @@index([organizationId, specialistId])
+  @@index([organizationId, createdAt])
 }
 
 model AppEvent {
-  id              String   @id @default(uuid())
+  id              String        @id @default(uuid())
   title           String
   description     String
   department      String
@@ -107,30 +204,48 @@ model AppEvent {
   type            String
   imageUrl        String?
   registrationUrl String?
-  createdAt       DateTime @default(now())
+  organizationId  String?
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([organizationId, date])
+  @@index([organizationId, type])
 }
 
 model Resource {
-  id          String   @id @default(uuid())
-  department  String
-  type        String
-  title       String
-  description String
-  url         String
-  imageUrl    String?
-  fileUrl     String?
-  fileName    String?
-  createdAt   DateTime @default(now())
+  id             String        @id @default(uuid())
+  department     String
+  type           String
+  title          String
+  description    String
+  url            String
+  imageUrl       String?
+  fileUrl        String?
+  fileName       String?
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([organizationId, type])
+  @@index([organizationId, department])
 }
 
 model Notification {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title     String
-  message   String
-  time      String
-  read      Boolean  @default(false)
-  type      String
-  createdAt DateTime @default(now())
+  id             String        @id @default(uuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  message        String
+  time           String
+  read           Boolean       @default(false)
+  type           String
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([organizationId, userId])
+  @@index([organizationId, read])
 }

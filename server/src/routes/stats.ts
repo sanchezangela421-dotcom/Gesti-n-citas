@@ -4,17 +4,23 @@ import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 
 const router = Router();
 
+function orgFilter(req: AuthRequest) {
+  if (req.user?.role === 'superadmin') return {};
+  return req.user?.organizationId ? { organizationId: req.user.organizationId } : {};
+}
+
 // GET /api/stats?periodId=<id>
 // Si se pasa periodId, filtra las citas de ese período.
 // Si no se pasa, devuelve estadísticas globales (todos los períodos).
 router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const { periodId } = req.query;
+    const orgScope = orgFilter(req);
     const where: any = periodId === 'unassigned'
-      ? { periodId: null }
+      ? { ...orgScope, periodId: null }
       : periodId
-        ? { periodId: periodId as string }
-        : {};
+        ? { ...orgScope, periodId: periodId as string }
+        : { ...orgScope };
 
     const [totalAppointments, pendientes, confirmadas, completadas, canceladas] =
       await Promise.all([

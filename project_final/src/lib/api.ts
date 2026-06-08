@@ -21,13 +21,32 @@ export function authOnlyHeaders(): Record<string, string> {
   return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
 
+// SuperAdmin usa token separado para aislamiento completo de sesión
+export function superAdminHeaders(): Record<string, string> {
+  const token = localStorage.getItem('sa_token');
+  const base: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) base['Authorization'] = `Bearer ${token}`;
+  return base;
+}
+
 /**
  * Convierte una ruta relativa de upload (/uploads/...) a URL absoluta.
  * URLs externas (http/https) se devuelven tal cual.
  */
 export function getImageUrl(url?: string | null): string | undefined {
   if (!url) return undefined;
-  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('https://') || url.startsWith('http://')) return url;
   if (url.startsWith('/uploads/')) return `${API_BASE}${url}`;
-  return url;
+  return undefined;
+}
+
+/**
+ * Construye una URL segura para archivos subidos al servidor.
+ * Solo acepta rutas /uploads/...; codifica cada segmento con encodeURIComponent
+ * para prevenir inyección de protocolos (javascript:, data:) en atributos src/href.
+ */
+export function getUploadUrl(path?: string | null): string | undefined {
+  if (!path?.startsWith('/uploads/')) return undefined;
+  const safePath = path.split('/').map(encodeURIComponent).join('/');
+  return `${API_BASE}${safePath}`;
 }

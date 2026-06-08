@@ -13,6 +13,15 @@ export interface ScheduleSlot {
   specificDate?: string;
 }
 
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  type: string;
+  userRoleLabel?: string;
+  logoUrl?: string | null;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -26,6 +35,23 @@ export interface User {
   genero?: string;
   department?: string;
   avatarUrl?: string | null;
+  organizationId?: string | null;
+  organization?: Organization | null;
+  metadata?: Record<string, string> | null;
+}
+
+export interface RegisterPayload {
+  name: string;
+  email: string;
+  password: string;
+  organizationId?: string;
+  metadata?: Record<string, string>;
+  // Legacy — solo TECNL los usa, se populan desde metadata
+  carrera?: string;
+  semestre?: number;
+  fechaNacimiento?: string;
+  matricula?: string;
+  genero?: string;
 }
 
 export interface Specialist {
@@ -138,7 +164,7 @@ export interface StoreContextType {
   removeSpecialist: (id: string) => Promise<void>;
   appointments: Appointment[];
   getAppointments: (filters?: AppointmentFilters) => Appointment[];
-  createAppointment: (req: { studentId: string; studentName?: string; specialistId: string; department: string; motivo: string; modality: string; preferredDate: string; preferredTime: string; isFollowUp?: boolean; parentId?: string }) => Appointment;
+  createAppointment: (req: { studentId: string; studentName?: string; specialistId: string; department: string; motivo: string; modality: string; preferredDate: string; preferredTime: string; isFollowUp?: boolean; parentId?: string }) => Promise<boolean>;
   updateAppointmentStatus: (id: string, status: string, notes?: string, byStudent?: boolean, meetingUrl?: string) => void;
   rescheduleAppointment: (id: string, newDate: string, newTime: string, byRole?: 'specialist' | 'student', modality?: string) => void;
   getAvailableSlots: (specialistId: string, dateStr: string) => Promise<AvailableSlot[]>;
@@ -179,7 +205,7 @@ export interface AuthContextType {
   isAuthenticated: boolean;
   loading: boolean;
   login: (email: string, password: string) => Promise<{ ok: boolean; unverified?: boolean; error?: string }>;
-  register: (data: Partial<User>) => Promise<{ ok: boolean; error?: string }>;
+  register: (data: RegisterPayload) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }

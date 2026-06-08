@@ -21,27 +21,23 @@ on:
         type: boolean
         default: true
 
-
 jobs:
-  pipeline:
-    name: Pipeline de Calidad y Seguridad
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-      contents: read
-      security-events: write
 
+  # ─── SECRETS ────────────────────────────────────────────────────────────────
+  secrets:
+    name: "🔑 Secrets (TruffleHog)"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    permissions:
+      contents: read
     steps:
-      - name: Checkout Código
+      - name: Checkout
         # actions/checkout@v4
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
 
-      - name: Detectar Secrets (TruffleHog)
-        id: trufflehog
-        # Solo corre en push/PR — en workflow_dispatch y schedule no hay diff que escanear
-        if: github.event_name == 'push' || github.event_name == 'pull_request'
+      - name: Detectar Secrets
         # trufflesecurity/trufflehog@v3.94.2
         uses: trufflesecurity/trufflehog@17456f8c7d042d8c82c9a8ca9e937231f9f42e26
         with:
@@ -50,252 +46,282 @@ jobs:
           head: HEAD
           extra_args: --json
 
+  # ─── BACKEND ────────────────────────────────────────────────────────────────
+  backend:
+    name: "🔧 Backend"
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_quality_check == true }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
       - name: Configurar pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - name: Configurar Node.js (v22)
+      - name: Configurar Node.js
         # actions/setup-node@v4
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 22
           cache: 'pnpm'
-          cache-dependency-path: |
-            server/pnpm-lock.yaml
-            project_final/pnpm-lock.yaml
+          cache-dependency-path: server/pnpm-lock.yaml
 
-      # ─── BACKEND (server/) ─────────────────────────────────────────────────
-
-      - name: "[Backend] Instalar Dependencias"
+      - name: Instalar Dependencias
         working-directory: server
         run: pnpm install --frozen-lockfile
 
-      - name: "[Backend] Verificar Estilo (Lint)"
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_quality_check == true }}
+      - name: Lint
         working-directory: server
-        run: pnpm exec eslint src/ --format json --output-file ../eslint-server-report.json || echo "LINT_SERVER_FAILED=true" >> $GITHUB_ENV
+        run: pnpm exec eslint src/ --format json --output-file eslint-report.json || true
 
-      - name: "[Backend] Auditar Dependencias"
-        id: audit_server
+      - name: Auditar Dependencias
         working-directory: server
-        run: pnpm audit --audit-level=high --json > ../npm-audit-server.json 2>&1 || echo "AUDIT_SERVER_FAILED=true" >> $GITHUB_ENV
+        run: pnpm audit --audit-level=high --json > npm-audit.json 2>&1 || true
 
-      - name: "[Backend] Validar Construcción (tsc)"
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_quality_check == true }}
+      - name: Build
         working-directory: server
-        run: pnpm run build 2> ../build_server_error.log || echo "BUILD_SERVER_FAILED=true" >> $GITHUB_ENV
+        run: pnpm run build > build-error.log 2>&1
         env:
           DATABASE_URL: "postgres://dummy:dummy@localhost:5432/dummy"
           JWT_SECRET: "ci_test_secret_key_only"
           SESSION_SECRET: "ci_test_session_secret_key_only"
 
-      # ─── FRONTEND (project_final/) ─────────────────────────────────────────
+      - name: Subir Reportes
+        if: always()
+        # actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: backend-reports-${{ github.run_number }}
+          path: |
+            server/eslint-report.json
+            server/npm-audit.json
+            server/build-error.log
+          if-no-files-found: ignore
 
-      - name: "[Frontend] Instalar Dependencias"
+  # ─── FRONTEND ───────────────────────────────────────────────────────────────
+  frontend:
+    name: "🎨 Frontend"
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_quality_check == true }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Configurar pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 22
+          cache: 'pnpm'
+          cache-dependency-path: project_final/pnpm-lock.yaml
+
+      - name: Instalar Dependencias
         working-directory: project_final
         run: pnpm install --frozen-lockfile
 
-      - name: "[Frontend] Verificar Estilo (Lint)"
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_quality_check == true }}
+      - name: Lint
         working-directory: project_final
-        run: pnpm exec eslint src/ --format json --output-file ../eslint-frontend-report.json || echo "LINT_FRONTEND_FAILED=true" >> $GITHUB_ENV
+        run: pnpm exec eslint src/ --format json --output-file eslint-report.json || true
 
-      - name: "[Frontend] Auditar Dependencias"
-        id: audit_frontend
+      - name: Auditar Dependencias
         working-directory: project_final
-        run: pnpm audit --audit-level=high --json > ../npm-audit-frontend.json 2>&1 || echo "AUDIT_FRONTEND_FAILED=true" >> $GITHUB_ENV
+        run: pnpm audit --audit-level=high --json > npm-audit.json 2>&1 || true
 
-      - name: "[Frontend] Validar Construcción (vite build)"
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_quality_check == true }}
+      - name: Build
         working-directory: project_final
-        run: pnpm run build 2> ../build_frontend_error.log || echo "BUILD_FRONTEND_FAILED=true" >> $GITHUB_ENV
+        run: pnpm run build > build-error.log 2>&1
         env:
           NEXT_PUBLIC_APP_URL: "http://localhost:3000"
 
-      # ─── SEGURIDAD (CodeQL) ────────────────────────────────────────────────
+      - name: Subir Reportes
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: frontend-reports-${{ github.run_number }}
+          path: |
+            project_final/eslint-report.json
+            project_final/npm-audit.json
+            project_final/build-error.log
+          if-no-files-found: ignore
+
+  # ─── CODEQL ─────────────────────────────────────────────────────────────────
+  codeql:
+    name: "🛡️ CodeQL"
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_security_scan == true }}
+    permissions:
+      actions: write
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
 
       - name: Inicializar CodeQL
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_security_scan == true }}
         # github/codeql-action@v3
         uses: github/codeql-action/init@3b1a19a80ab047f35cbb237b5bd9bdc1e14f166c
         with:
           languages: 'javascript-typescript'
           queries: security-extended,security-and-quality
 
-      - name: Analizar Vulnerabilidades (CodeQL)
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_security_scan == true }}
-        # github/codeql-action@v3
+      - name: Analizar Vulnerabilidades
         uses: github/codeql-action/analyze@3b1a19a80ab047f35cbb237b5bd9bdc1e14f166c
         with:
           category: "/language:javascript-typescript"
 
-      # ─── RESUMEN ───────────────────────────────────────────────────────────
+  # ─── RESUMEN ────────────────────────────────────────────────────────────────
+  summary:
+    name: "📋 Resumen"
+    runs-on: ubuntu-latest
+    needs: [secrets, backend, frontend, codeql]
+    if: always()
+    permissions:
+      actions: write
+    steps:
+      - name: Descargar Reportes Backend
+        # actions/download-artifact@v4
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-reports-${{ github.run_number }}
+          path: backend
+        continue-on-error: true
 
-      - name: Generar Resumen Ejecutivo Final
-        if: always()
+      - name: Descargar Reportes Frontend
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-reports-${{ github.run_number }}
+          path: frontend
+        continue-on-error: true
+
+      - name: Generar Resumen
         run: |
-          echo "## 📋 Reporte Ejecutivo de Calidad y Seguridad" >> $GITHUB_STEP_SUMMARY
+          BACKEND_RESULT="${{ needs.backend.result }}"
+          FRONTEND_RESULT="${{ needs.frontend.result }}"
+          SECRETS_RESULT="${{ needs.secrets.result }}"
+          CODEQL_RESULT="${{ needs.codeql.result }}"
 
-          # Secrets
+          echo "## 📋 Reporte Ejecutivo de Calidad y Seguridad" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # ── Secrets ──────────────────────────────────────────────────────
           echo "### 🔑 Detección de Secrets (TruffleHog)" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ steps.trufflehog.outcome }}" == "failure" ]; then
+          if   [ "$SECRETS_RESULT" == "failure" ]; then
             echo "❌ **SECRETS DETECTADOS**: TruffleHog encontró secrets expuestos en el código." >> $GITHUB_STEP_SUMMARY
-          elif [ "${{ steps.trufflehog.outcome }}" == "success" ]; then
+          elif [ "$SECRETS_RESULT" == "success" ]; then
             echo "✅ **SIN SECRETS**: No se detectaron secrets expuestos." >> $GITHUB_STEP_SUMMARY
           else
-            echo "⚠️ **OMITIDO O FALLIDO**: No se pudo completar el escaneo de secrets." >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **OMITIDO**: No aplica para este tipo de trigger." >> $GITHUB_STEP_SUMMARY
           fi
+          echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Auditoría de dependencias
+          # ── Auditoría de dependencias ─────────────────────────────────────
           echo "### 📦 Vulnerabilidades en Dependencias (npm audit)" >> $GITHUB_STEP_SUMMARY
           echo "| Proyecto | Estado |" >> $GITHUB_STEP_SUMMARY
           echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
-          if [ "$AUDIT_SERVER_FAILED" == "true" ]; then
-            CRIT_S=$(python3 -c "import json,sys; d=json.load(open('npm-audit-server.json')); print(d.get('metadata',{}).get('vulnerabilities',{}).get('critical',0))" 2>/dev/null || echo "?")
-            HIGH_S=$(python3 -c "import json,sys; d=json.load(open('npm-audit-server.json')); print(d.get('metadata',{}).get('vulnerabilities',{}).get('high',0))" 2>/dev/null || echo "?")
-            echo "| Backend (server) | ❌ Críticas: ${CRIT_S}, Altas: ${HIGH_S} |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| Backend (server) | ✅ Sin vulnerabilidades altas o críticas |" >> $GITHUB_STEP_SUMMARY
-          fi
-          if [ "$AUDIT_FRONTEND_FAILED" == "true" ]; then
-            CRIT_F=$(python3 -c "import json,sys; d=json.load(open('npm-audit-frontend.json')); print(d.get('metadata',{}).get('vulnerabilities',{}).get('critical',0))" 2>/dev/null || echo "?")
-            HIGH_F=$(python3 -c "import json,sys; d=json.load(open('npm-audit-frontend.json')); print(d.get('metadata',{}).get('vulnerabilities',{}).get('high',0))" 2>/dev/null || echo "?")
-            echo "| Frontend (project_final) | ❌ Críticas: ${CRIT_F}, Altas: ${HIGH_F} |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| Frontend (project_final) | ✅ Sin vulnerabilidades altas o críticas |" >> $GITHUB_STEP_SUMMARY
-          fi
+          for proj in backend frontend; do
+            label="Backend (server)"; [ "$proj" == "frontend" ] && label="Frontend (project_final)"
+            if [ -f "$proj/npm-audit.json" ]; then
+              CRIT=$(python3 -c "import json; d=json.load(open('$proj/npm-audit.json')); print(d.get('metadata',{}).get('vulnerabilities',{}).get('critical',0))" 2>/dev/null || echo "0")
+              HIGH=$(python3 -c "import json; d=json.load(open('$proj/npm-audit.json')); print(d.get('metadata',{}).get('vulnerabilities',{}).get('high',0))" 2>/dev/null || echo "0")
+              if [ "$CRIT" != "0" ] || [ "$HIGH" != "0" ]; then
+                echo "| $label | ❌ Críticas: $CRIT, Altas: $HIGH |" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "| $label | ✅ Sin vulnerabilidades altas o críticas |" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "| $label | ⚠️ Reporte no disponible |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Lint
+          # ── Lint ──────────────────────────────────────────────────────────
           echo "### 🎨 Estilo y Estándares (ESLint)" >> $GITHUB_STEP_SUMMARY
           echo "| Proyecto | Errores | Avisos |" >> $GITHUB_STEP_SUMMARY
           echo "| --- | --- | --- |" >> $GITHUB_STEP_SUMMARY
-          for proj in server frontend; do
-            report="eslint-${proj}-report.json"
-            label="Backend (server)"
-            [ "$proj" == "frontend" ] && label="Frontend (project_final)"
-            if [ -f "$report" ]; then
-              ERR=$(python3 -c "import json; d=json.load(open('$report')); print(sum(f['errorCount'] for f in d))" 2>/dev/null || echo "?")
-              WARN=$(python3 -c "import json; d=json.load(open('$report')); print(sum(f['warningCount'] for f in d))" 2>/dev/null || echo "?")
-              ICON="✅"
-              [ "${ERR}" != "0" ] && [ "${ERR}" != "?" ] && ICON="❌"
-              echo "| ${label} | ${ICON} ${ERR} | ${WARN} |" >> $GITHUB_STEP_SUMMARY
+          for proj in backend frontend; do
+            label="Backend (server)"; [ "$proj" == "frontend" ] && label="Frontend (project_final)"
+            if [ -f "$proj/eslint-report.json" ]; then
+              ERR=$(python3 -c "import json; d=json.load(open('$proj/eslint-report.json')); print(sum(f['errorCount'] for f in d))" 2>/dev/null || echo "?")
+              WARN=$(python3 -c "import json; d=json.load(open('$proj/eslint-report.json')); print(sum(f['warningCount'] for f in d))" 2>/dev/null || echo "?")
+              ICON="✅"; [ "${ERR}" != "0" ] && [ "${ERR}" != "?" ] && ICON="❌"
+              echo "| $label | ${ICON} ${ERR} | ${WARN} |" >> $GITHUB_STEP_SUMMARY
             else
-              echo "| ${label} | ⚠️ Omitido | - |" >> $GITHUB_STEP_SUMMARY
+              echo "| $label | ⚠️ Omitido | - |" >> $GITHUB_STEP_SUMMARY
             fi
           done
+          echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Construcción
+          # ── Build ─────────────────────────────────────────────────────────
           echo "### 🏗️ Estado de la Construcción" >> $GITHUB_STEP_SUMMARY
           echo "| Proyecto | Estado |" >> $GITHUB_STEP_SUMMARY
           echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
-          if [ "$BUILD_SERVER_FAILED" == "true" ]; then
-            echo "| Backend (server) | ❌ FALLÓ |" >> $GITHUB_STEP_SUMMARY
-            echo "<details><summary>Error Backend</summary>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            tail -n 15 build_server_error.log >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            echo "</details>" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| Backend (server) | ✅ Exitosa |" >> $GITHUB_STEP_SUMMARY
-          fi
-          if [ "$BUILD_FRONTEND_FAILED" == "true" ]; then
-            echo "| Frontend (project_final) | ❌ FALLÓ |" >> $GITHUB_STEP_SUMMARY
-            echo "<details><summary>Error Frontend</summary>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            tail -n 15 build_frontend_error.log >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            echo "</details>" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| Frontend (project_final) | ✅ Exitosa |" >> $GITHUB_STEP_SUMMARY
-          fi
+          [ "$BACKEND_RESULT"  == "failure" ] \
+            && echo "| Backend (server) | ❌ FALLÓ |"           >> $GITHUB_STEP_SUMMARY \
+            || echo "| Backend (server) | ✅ Exitosa |"         >> $GITHUB_STEP_SUMMARY
+          [ "$FRONTEND_RESULT" == "failure" ] \
+            && echo "| Frontend (project_final) | ❌ FALLÓ |"   >> $GITHUB_STEP_SUMMARY \
+            || echo "| Frontend (project_final) | ✅ Exitosa |" >> $GITHUB_STEP_SUMMARY
 
-          # CodeQL
+          if [ "$BACKEND_RESULT" == "failure" ] && [ -s backend/build-error.log ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details><summary>Ver error del Backend</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            tail -n 20 backend/build-error.log >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "$FRONTEND_RESULT" == "failure" ] && [ -s frontend/build-error.log ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details><summary>Ver error del Frontend</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            tail -n 20 frontend/build-error.log >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # ── CodeQL ────────────────────────────────────────────────────────
           echo "### 🛡️ Escaneo de Seguridad (CodeQL)" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **ANÁLISIS COMPLETADO**: Revisa la pestaña 'Security > Code scanning' en GitHub para ver resultados detallados." >> $GITHUB_STEP_SUMMARY
-
-          # ── Generar reporte de texto descargable ──────────────────
-          REPORT="reporte-pipeline.txt"
-          echo "============================================" >> $REPORT
-          echo " REPORTE DE CALIDAD Y SEGURIDAD" >> $REPORT
-          echo " Rama   : ${{ github.ref_name }}" >> $REPORT
-          echo " Commit : ${{ github.sha }}" >> $REPORT
-          echo " Fecha  : $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $REPORT
-          echo "============================================" >> $REPORT
-
-          echo "" >> $REPORT
-          echo "[ SECRETS (TruffleHog) ]" >> $REPORT
-          if [ "${{ steps.trufflehog.outcome }}" == "failure" ]; then
-            echo "  ESTADO : SECRETS DETECTADOS" >> $REPORT
-          elif [ "${{ steps.trufflehog.outcome }}" == "success" ]; then
-            echo "  ESTADO : Sin secrets expuestos" >> $REPORT
+          if   [ "$CODEQL_RESULT" == "success" ]; then
+            echo "✅ **ANÁLISIS COMPLETADO**: Revisa la pestaña 'Security > Code scanning' en GitHub." >> $GITHUB_STEP_SUMMARY
+          elif [ "$CODEQL_RESULT" == "skipped" ]; then
+            echo "⚠️ **OMITIDO**: No aplica para este trigger." >> $GITHUB_STEP_SUMMARY
           else
-            echo "  ESTADO : Omitido (trigger manual)" >> $REPORT
+            echo "❌ **FALLÓ**: Revisa el job de CodeQL para más detalles." >> $GITHUB_STEP_SUMMARY
           fi
 
-          echo "" >> $REPORT
-          echo "[ VULNERABILIDADES EN DEPENDENCIAS (npm audit) ]" >> $REPORT
-          for proj in server frontend; do
-            label="Backend (server)"; [ "$proj" == "frontend" ] && label="Frontend (project_final)"
-            echo "  $label:" >> $REPORT
-            if [ "${proj}" == "server" ] && [ "$AUDIT_SERVER_FAILED" == "true" ]; then
-              python3 -c "import json; d=json.load(open('npm-audit-server.json')); v=d.get('metadata',{}).get('vulnerabilities',{}); print('    ESTADO  : VULNERABILIDADES ENCONTRADAS'); print('    Criticas: ' + str(v.get('critical',0))); print('    Altas   : ' + str(v.get('high',0)))" 2>/dev/null >> $REPORT || echo "    ESTADO  : No se pudo parsear el reporte" >> $REPORT
-            elif [ "${proj}" == "frontend" ] && [ "$AUDIT_FRONTEND_FAILED" == "true" ]; then
-              python3 -c "import json; d=json.load(open('npm-audit-frontend.json')); v=d.get('metadata',{}).get('vulnerabilities',{}); print('    ESTADO  : VULNERABILIDADES ENCONTRADAS'); print('    Criticas: ' + str(v.get('critical',0))); print('    Altas   : ' + str(v.get('high',0)))" 2>/dev/null >> $REPORT || echo "    ESTADO  : No se pudo parsear el reporte" >> $REPORT
-            else
-              echo "    ESTADO  : Sin vulnerabilidades altas o criticas" >> $REPORT
-            fi
-          done
-
-          echo "" >> $REPORT
-          echo "[ LINT (ESLint) ]" >> $REPORT
-          for proj in server frontend; do
-            label="Backend (server)"; [ "$proj" == "frontend" ] && label="Frontend (project_final)"
-            report="eslint-${proj}-report.json"
-            echo "  $label:" >> $REPORT
-            if [ -f "$report" ]; then
-              python3 -c "import json; d=json.load(open('$report')); errs=sum(f['errorCount'] for f in d); warns=sum(f['warningCount'] for f in d); bad=[f['filePath'] for f in d if f['errorCount']>0]; print('    Errores : '+str(errs)); print('    Avisos  : '+str(warns)); [print('    - '+fp) for fp in bad[:10]]; bad[10:] and print('    ... y '+str(len(bad)-10)+' mas')" 2>/dev/null >> $REPORT || echo "    No se pudo parsear el reporte" >> $REPORT
-            else
-              echo "    ESTADO  : Reporte no generado" >> $REPORT
-            fi
-          done
-
-          echo "" >> $REPORT
-          echo "[ CONSTRUCCION (Build) ]" >> $REPORT
-          echo "  Backend (server)        : $([ "$BUILD_SERVER_FAILED" == "true" ] && echo "FALLO" || echo "Exitosa")" >> $REPORT
-          echo "  Frontend (project_final): $([ "$BUILD_FRONTEND_FAILED" == "true" ] && echo "FALLO" || echo "Exitosa")" >> $REPORT
-          if [ "$BUILD_SERVER_FAILED" == "true" ] && [ -f build_server_error.log ]; then
-            echo "  -- Error Backend --" >> $REPORT
-            tail -n 15 build_server_error.log >> $REPORT
-          fi
-          if [ "$BUILD_FRONTEND_FAILED" == "true" ] && [ -f build_frontend_error.log ]; then
-            echo "  -- Error Frontend --" >> $REPORT
-            tail -n 15 build_frontend_error.log >> $REPORT
-          fi
-
-          echo "" >> $REPORT
-          echo "[ CODEQL ]" >> $REPORT
-          echo "  Ver resultados en: Security > Code scanning en GitHub" >> $REPORT
-          echo "============================================" >> $REPORT
-
-          # Fallo del pipeline si hay problemas críticos
-          if [ "$BUILD_SERVER_FAILED" == "true" ] || [ "$BUILD_FRONTEND_FAILED" == "true" ] || [ "$AUDIT_SERVER_FAILED" == "true" ] || [ "$AUDIT_FRONTEND_FAILED" == "true" ] || [ "$LINT_SERVER_FAILED" == "true" ] || [ "$LINT_FRONTEND_FAILED" == "true" ]; then
+          # ── Fallo del pipeline si hay problemas críticos ──────────────────
+          if [ "$BACKEND_RESULT" == "failure" ] || [ "$FRONTEND_RESULT" == "failure" ] || [ "$SECRETS_RESULT" == "failure" ]; then
             exit 1
           fi
 
-      - name: Subir Reporte como Artefacto
+      - name: Subir Reporte Combinado
         if: always()
-        # actions/upload-artifact@v4
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: reporte-pipeline-${{ github.run_number }}
           path: |
-            reporte-pipeline.txt
-            eslint-server-report.json
-            eslint-frontend-report.json
-            npm-audit-server.json
-            npm-audit-frontend.json
+            backend/eslint-report.json
+            backend/npm-audit.json
+            backend/build-error.log
+            frontend/eslint-report.json
+            frontend/npm-audit.json
+            frontend/build-error.log
           if-no-files-found: ignore
           retention-days: 30

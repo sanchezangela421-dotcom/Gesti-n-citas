@@ -1,4 +1,4 @@
-import React, { useState, useCallback, createContext, useContext } from "react";
+import React, { useState, useCallback, useMemo, createContext, useContext } from "react";
 import { localISODate } from "../utils/date";
 import { API, API_BASE, authHeaders, getImageUrl } from "../lib/api";
 import type { StoreContextType, ReportPeriod } from "../types";
@@ -51,8 +51,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     } catch { /* use local fallback */ }
   }, []);
 
-  React.useEffect(() => { fetchStats(); }, [appointmentsStore.appointments, fetchStats]);
-
   const getStats = useCallback(() => {
     if (realStats) return realStats;
     const a = appointmentsStore.appointments;
@@ -90,7 +88,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const specificDates = [...new Set(spec.schedule.filter(s => s.available && s.specificDate).map(s => s.specificDate as string))];
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const dayChecks: { date: Date; promise: Promise<string[]> }[] = [];
+    const dayChecks: { date: Date; promise: Promise<{ start: string; end: string }[]> }[] = [];
 
     for (let m = 0; m < 2; m++) {
       const targetMonth = month + m;
@@ -109,12 +107,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    const days: Date[] = [];
-    for (const check of dayChecks) {
-      const slots = await check.promise;
-      if (slots.length > 0) days.push(check.date);
-    }
-    return days;
+    const results = await Promise.all(
+      dayChecks.map(async ({ date, promise }) => {
+        const slots = await promise;
+        return slots.length > 0 ? date : null;
+      })
+    );
+    return results.filter((d): d is Date => d !== null);
   }, [specialistsStore.getSpecialistById, getAvailableSlots]);
 
   // ── #25 Smart polling ──────────────────────────────────
@@ -130,6 +129,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       contentStore.loadResources(headers),
       notificationsStore.loadNotifications(headers),
       fetchActivePeriod(),
+      fetchStats(),
     ]);
   }, [
     specialistsStore.loadSpecialists,
@@ -139,6 +139,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     contentStore.loadResources,
     notificationsStore.loadNotifications,
     fetchActivePeriod,
+    fetchStats,
   ]);
 
   // fetchVolatile: only appointments + notifications (runs on the fast 30s poll)
@@ -186,53 +187,73 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
   }, [fetchAll]);
 
+  const storeValue = useMemo(() => ({
+    // users
+    users: usersStore.users,
+    getUserById: usersStore.getUserById,
+    deleteUser: usersStore.deleteUser,
+    // specialists
+    specialists: specialistsStore.specialists,
+    specialistsLoaded: specialistsStore.specialistsLoaded,
+    getSpecialists: specialistsStore.getSpecialists,
+    getSpecialistById: specialistsStore.getSpecialistById,
+    addSpecialist: specialistsStore.addSpecialist,
+    updateSpecialist: specialistsStore.updateSpecialist,
+    removeSpecialist: specialistsStore.removeSpecialist,
+    addScheduleSlot: specialistsStore.addScheduleSlot,
+    removeScheduleSlot: specialistsStore.removeScheduleSlot,
+    updateMeetingUrl: specialistsStore.updateMeetingUrl,
+    // appointments
+    appointments: appointmentsStore.appointments,
+    getAppointments: appointmentsStore.getAppointments,
+    createAppointment: appointmentsStore.createAppointment,
+    updateAppointmentStatus: appointmentsStore.updateAppointmentStatus,
+    rescheduleAppointment: appointmentsStore.rescheduleAppointment,
+    getAvailableSlots,
+    getAvailableDays,
+    // content
+    events: contentStore.events,
+    addEvent: contentStore.addEvent,
+    updateEvent: contentStore.updateEvent,
+    deleteEvent: contentStore.deleteEvent,
+    resources: contentStore.resources,
+    addResource: contentStore.addResource,
+    updateResource: contentStore.updateResource,
+    deleteResource: contentStore.deleteResource,
+    // stats
+    getStats,
+    activePeriod,
+    // notifications
+    notifications: notificationsStore.notifications,
+    addNotification: notificationsStore.addNotification,
+    markNotificationsRead: notificationsStore.markNotificationsRead,
+    deleteNotification: notificationsStore.deleteNotification,
+    clearAllNotifications: notificationsStore.clearAllNotifications,
+    // global
+    fetchAll,
+    isOnline,
+  }), [
+    usersStore.users, usersStore.getUserById, usersStore.deleteUser,
+    specialistsStore.specialists, specialistsStore.specialistsLoaded,
+    specialistsStore.getSpecialists, specialistsStore.getSpecialistById,
+    specialistsStore.addSpecialist, specialistsStore.updateSpecialist,
+    specialistsStore.removeSpecialist, specialistsStore.addScheduleSlot,
+    specialistsStore.removeScheduleSlot, specialistsStore.updateMeetingUrl,
+    appointmentsStore.appointments, appointmentsStore.getAppointments,
+    appointmentsStore.createAppointment, appointmentsStore.updateAppointmentStatus,
+    appointmentsStore.rescheduleAppointment,
+    getAvailableSlots, getAvailableDays,
+    contentStore.events, contentStore.addEvent, contentStore.updateEvent, contentStore.deleteEvent,
+    contentStore.resources, contentStore.addResource, contentStore.updateResource, contentStore.deleteResource,
+    getStats, activePeriod,
+    notificationsStore.notifications, notificationsStore.addNotification,
+    notificationsStore.markNotificationsRead, notificationsStore.deleteNotification,
+    notificationsStore.clearAllNotifications,
+    fetchAll, isOnline,
+  ]);
+
   return (
-    <StoreContext.Provider value={{
-      // users
-      users: usersStore.users,
-      getUserById: usersStore.getUserById,
-      deleteUser: usersStore.deleteUser,
-      // specialists
-      specialists: specialistsStore.specialists,
-      specialistsLoaded: specialistsStore.specialistsLoaded,
-      getSpecialists: specialistsStore.getSpecialists,
-      getSpecialistById: specialistsStore.getSpecialistById,
-      addSpecialist: specialistsStore.addSpecialist,
-      updateSpecialist: specialistsStore.updateSpecialist,
-      removeSpecialist: specialistsStore.removeSpecialist,
-      addScheduleSlot: specialistsStore.addScheduleSlot,
-      removeScheduleSlot: specialistsStore.removeScheduleSlot,
-      updateMeetingUrl: specialistsStore.updateMeetingUrl,
-      // appointments
-      appointments: appointmentsStore.appointments,
-      getAppointments: appointmentsStore.getAppointments,
-      createAppointment: appointmentsStore.createAppointment,
-      updateAppointmentStatus: appointmentsStore.updateAppointmentStatus,
-      rescheduleAppointment: appointmentsStore.rescheduleAppointment,
-      getAvailableSlots,
-      getAvailableDays,
-      // content
-      events: contentStore.events,
-      addEvent: contentStore.addEvent,
-      updateEvent: contentStore.updateEvent,
-      deleteEvent: contentStore.deleteEvent,
-      resources: contentStore.resources,
-      addResource: contentStore.addResource,
-      updateResource: contentStore.updateResource,
-      deleteResource: contentStore.deleteResource,
-      // stats
-      getStats,
-      activePeriod,
-      // notifications
-      notifications: notificationsStore.notifications,
-      addNotification: notificationsStore.addNotification,
-      markNotificationsRead: notificationsStore.markNotificationsRead,
-      deleteNotification: notificationsStore.deleteNotification,
-      clearAllNotifications: notificationsStore.clearAllNotifications,
-      // global
-      fetchAll,
-      isOnline,
-    }}>
+    <StoreContext.Provider value={storeValue}>
       {children}
     </StoreContext.Provider>
   );

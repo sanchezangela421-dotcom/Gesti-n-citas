@@ -13,9 +13,8 @@ import {
 } from "recharts";
 import type { DateRange } from "react-day-picker";
 import { es } from "date-fns/locale";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import { useStore } from "../../../context/StoreContext";
+import { useAuth } from "../../../context/AuthContext";
 import { AppShell } from "../../components/layout/AppShell";
 import { Btn, StatCard, Avatar, StatusBadge, Modal, inputCls, EmptyState } from "../../components/ui";
 import { Calendar } from "../../components/ui/calendar";
@@ -206,7 +205,11 @@ const AGE_RANGES = [
 ];
 
 // ─── PDF report (pure jsPDF + autoTable, no canvas capture) ──────────────────
-function generatePDFReport(deptReport: string, allAppts: Appointment[], users: { id: string; carrera?: string; genero?: string; semestre?: number; fechaNacimiento?: string }[], periodName?: string) {
+async function generatePDFReport(deptReport: string, allAppts: Appointment[], users: { id: string; carrera?: string; genero?: string; semestre?: number; fechaNacimiento?: string }[], periodName?: string, isSchool?: boolean, userRoleLabel?: string) {
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+        import("jspdf"),
+        import("jspdf-autotable"),
+    ]);
     const doc = new jsPDF();
     const today = new Date().toLocaleDateString("es-MX");
 
@@ -319,53 +322,77 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[], users: {
 
         const demoY = Math.max(motivosEndY, modalidadEndY) + 12;
         doc.setFontSize(12); doc.setTextColor(30, 41, 59);
-        doc.text("Perfil Demográfico de Alumnos Atendidos", 20, demoY);
+        const demoLabel = `${userRoleLabel ?? "Usuario"}s`;
+        doc.text(`Perfil Demográfico de ${demoLabel} Atendidos`, 20, demoY);
 
-        autoTable(doc, {
-            startY: demoY + 5,
-            head: [["Carrera", "Citas"]],
-            body: stats.topCarreras,
-            theme: "striped",
-            headStyles: { fillColor: [109, 40, 217] },
-            margin: { left: 20, right: 105 },
-        });
-        const carreraEndY = (doc as any).lastAutoTable.finalY;
+        let finalNoteY: number;
+        if (isSchool !== false) {
+            autoTable(doc, {
+                startY: demoY + 5,
+                head: [["Carrera", "Citas"]],
+                body: stats.topCarreras,
+                theme: "striped",
+                headStyles: { fillColor: [109, 40, 217] },
+                margin: { left: 20, right: 105 },
+            });
+            const carreraEndY = (doc as any).lastAutoTable.finalY;
 
-        autoTable(doc, {
-            startY: demoY + 5,
-            head: [["Género", "Citas"]],
-            body: stats.genero,
-            theme: "striped",
-            headStyles: { fillColor: [109, 40, 217] },
-            margin: { left: 110, right: 20 },
-        });
-        const generoEndY = (doc as any).lastAutoTable.finalY;
+            autoTable(doc, {
+                startY: demoY + 5,
+                head: [["Género", "Citas"]],
+                body: stats.genero,
+                theme: "striped",
+                headStyles: { fillColor: [109, 40, 217] },
+                margin: { left: 110, right: 20 },
+            });
+            const generoEndY = (doc as any).lastAutoTable.finalY;
 
-        const semY = Math.max(carreraEndY, generoEndY) + 10;
-        autoTable(doc, {
-            startY: semY,
-            head: [["Semestre", "Citas"]],
-            body: stats.semestre,
-            theme: "striped",
-            headStyles: { fillColor: [109, 40, 217] },
-            margin: { left: 20, right: 105 },
-        });
-        const semestreEndY = (doc as any).lastAutoTable.finalY;
+            const semY = Math.max(carreraEndY, generoEndY) + 10;
+            autoTable(doc, {
+                startY: semY,
+                head: [["Semestre", "Citas"]],
+                body: stats.semestre,
+                theme: "striped",
+                headStyles: { fillColor: [109, 40, 217] },
+                margin: { left: 20, right: 105 },
+            });
+            const semestreEndY = (doc as any).lastAutoTable.finalY;
 
-        autoTable(doc, {
-            startY: semY,
-            head: [["Edad", "Citas"]],
-            body: stats.edad.length > 0 ? stats.edad : [["Sin datos", "—"]],
-            theme: "striped",
-            headStyles: { fillColor: [109, 40, 217] },
-            margin: { left: 110, right: 20 },
-        });
-        const edadEndY = (doc as any).lastAutoTable.finalY;
+            autoTable(doc, {
+                startY: semY,
+                head: [["Edad", "Citas"]],
+                body: stats.edad.length > 0 ? stats.edad : [["Sin datos", "—"]],
+                theme: "striped",
+                headStyles: { fillColor: [109, 40, 217] },
+                margin: { left: 110, right: 20 },
+            });
+            finalNoteY = Math.max(semestreEndY, (doc as any).lastAutoTable.finalY);
+        } else {
+            autoTable(doc, {
+                startY: demoY + 5,
+                head: [["Género", "Citas"]],
+                body: stats.genero,
+                theme: "striped",
+                headStyles: { fillColor: [109, 40, 217] },
+                margin: { left: 20, right: 105 },
+            });
+            const generoEndY = (doc as any).lastAutoTable.finalY;
+
+            autoTable(doc, {
+                startY: demoY + 5,
+                head: [["Edad", "Citas"]],
+                body: stats.edad.length > 0 ? stats.edad : [["Sin datos", "—"]],
+                theme: "striped",
+                headStyles: { fillColor: [109, 40, 217] },
+                margin: { left: 110, right: 20 },
+            });
+            finalNoteY = Math.max(generoEndY, (doc as any).lastAutoTable.finalY);
+        }
 
         doc.setFontSize(10); doc.setTextColor(100, 116, 139);
         doc.text(
             "* Las gráficas están disponibles para descarga en la sección de Estadísticas.",
-            20, Math.max(semestreEndY, edadEndY) + 12
+            20, finalNoteY + 12
         );
     };
 
@@ -440,6 +467,7 @@ function generatePDFReport(deptReport: string, allAppts: Appointment[], users: {
 // ─── Component ───────────────────────────────────────────
 export function AdminDashboard() {
     const { dark } = useTheme();
+    const { user: authUser } = useAuth();
     const tooltipStyle = dark
         ? { borderRadius: "12px", border: "1px solid #334155", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.4)", backgroundColor: "#1e293b", color: "#f1f5f9" }
         : { borderRadius: "12px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" };
@@ -617,8 +645,7 @@ export function AdminDashboard() {
     const [newName, setNewName] = useState("");
     const [newDept, setNewDept] = useState("Psicología");
     const [newEmail, setNewEmail] = useState("");
-    const [newPass, setNewPass] = useState("");
-    const [newSched, setNewSched] = useState("");
+    const [, setNewSched] = useState("");
     const [newShift, setNewShift] = useState("Matutino");
     const [editingSpec, setEditingSpec] = useState<Specialist | null>(null);
     const [editPass, setEditPass] = useState("");
@@ -844,10 +871,10 @@ export function AdminDashboard() {
     const pagedAppts = filteredAppts.slice(apptPage * APPT_PAGE_SIZE, (apptPage + 1) * APPT_PAGE_SIZE);
 
     const handleAddSpec = async () => {
-        if (!newName || !newEmail || !newPass) { toast.error("Nombre, correo y contraseña son obligatorios"); return; }
-        await addSpecialist({ name: newName, department: newDept, email: newEmail, password: newPass, shift: newShift });
-        toast.success(`${newName} registrado correctamente`);
-        setNewName(""); setNewEmail(""); setNewPass(""); setNewSched("");
+        if (!newName || !newEmail) { toast.error("Nombre y correo son obligatorios"); return; }
+        await addSpecialist({ name: newName, department: newDept, email: newEmail, shift: newShift });
+        toast.success(`Invitación enviada a ${newEmail}`);
+        setNewName(""); setNewEmail(""); setNewSched("");
     };
 
     const handleUpdateSpec = async () => {
@@ -892,10 +919,14 @@ export function AdminDashboard() {
         { label: "Canceladas / Faltas", value: summary.canceladas, icon: XCircle, gradient: "from-rose-500 to-rose-600" },
     ];
 
+    const endUserTabLabel = `${authUser?.organization?.userRoleLabel ?? "Usuario"}s`;
+    const endUserLabel = authUser?.organization?.userRoleLabel ?? "Usuario";
+    const isSchool = authUser?.organization?.type === "school";
+
     const sidebarTabs = [
         { key: "citas", label: "Gestión de Citas", icon: CalendarDays },
         { key: "especialistas", label: "Especialistas", icon: Users },
-        { key: "estudiantes", label: "Estudiantes", icon: Users },
+        { key: "estudiantes", label: endUserTabLabel, icon: Users },
         { key: "estadisticas", label: "Estadísticas", icon: BarChart3 },
         { key: "reportes", label: "Reportes", icon: FileText },
         { key: "contenido", label: "Publicar Contenido", icon: FileText },
@@ -908,7 +939,15 @@ export function AdminDashboard() {
 
                 {/* Header */}
                 <div>
-                    <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Panel de Administración</h1>
+                    <div className="flex items-center gap-3 flex-wrap">
+                        <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Panel de Administración</h1>
+                        {authUser?.organization && (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700">
+                                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 inline-block" />
+                                {authUser.organization.name}
+                            </span>
+                        )}
+                    </div>
                     <p className="text-slate-500 mt-1 font-medium">Control global del sistema de citas institucionales y personal</p>
                 </div>
 
@@ -1125,45 +1164,38 @@ export function AdminDashboard() {
                                                 <input type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="correo@instituto.edu.mx" className={inputCls} />
                                             </div>
                                         </div>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                            <div>
-                                                <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Contraseña temporal</label>
-                                                <input type="text" value={newPass} onChange={e => setNewPass(e.target.value)} placeholder="Contraseña inicial" className={inputCls} />
-                                            </div>
-                                            <div>
-                                                <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Turno de Atención</label>
-                                                <select value={newShift} onChange={e => setNewShift(e.target.value)} className={inputCls}>
-                                                    <option value="Matutino">Turno Matutino</option>
-                                                    <option value="Vespertino">Turno Vespertino</option>
-                                                </select>
-                                            </div>
-                                        </div>
                                         <div>
-                                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Horarios presenciales (opcional)</label>
-                                            <input type="text" value={newSched} onChange={e => setNewSched(e.target.value)} placeholder="Ej. Lun-Vie 09:00-14:00" className={inputCls} />
+                                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Turno de Atención</label>
+                                            <select value={newShift} onChange={e => setNewShift(e.target.value)} className={inputCls}>
+                                                <option value="Matutino">Turno Matutino</option>
+                                                <option value="Vespertino">Turno Vespertino</option>
+                                            </select>
                                         </div>
-                                        <Btn onClick={handleAddSpec} size="lg" className="w-full"><Plus className="w-5 h-5 mr-2" /> Registrar Especialista</Btn>
+                                        <Btn onClick={handleAddSpec} size="lg" className="w-full"><Plus className="w-5 h-5 mr-2" /> Enviar Invitación</Btn>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* ─── Estudiantes Tab ─── */}
+                    {/* ─── Usuarios Tab ─── */}
                     {activeTab === "estudiantes" && (() => {
-                        const alumnosAll = users.filter((u: any) => u.role === "alumno");
+                        const alumnosAll = users.filter((u: any) => u.role === "alumno" || u.role === "usuario");
                         const alumnosTotalPages = Math.ceil(alumnosAll.length / STUDENTS_PAGE_SIZE);
                         const pagedAlumnos = alumnosAll.slice(studentsPage * STUDENTS_PAGE_SIZE, (studentsPage + 1) * STUDENTS_PAGE_SIZE);
+                        const tableHeaders = isSchool
+                            ? [endUserLabel, "Carrera", "Semestre", "Matrícula", "Correo", "Acción"]
+                            : [endUserLabel, "Datos de registro", "Correo", "Acción"];
                         return (
                         <div className="p-8">
                             <div className="flex items-center justify-between mb-6">
-                                <h3 className="text-2xl font-bold text-slate-900 dark:text-white">Alumnos Registrados <span className="text-slate-400 font-normal text-lg">({alumnosAll.length})</span></h3>
+                                <h3 className="text-2xl font-bold text-slate-900 dark:text-white">{endUserLabel}s Registrados <span className="text-slate-400 font-normal text-lg">({alumnosAll.length})</span></h3>
                             </div>
                             <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden overflow-x-auto">
                                 <table className="w-full min-w-[640px]">
                                     <thead>
                                         <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-700/30">
-                                            {["Alumno", "Carrera", "Semestre", "Matrícula", "Correo", "Acción"].map(h => (
+                                            {tableHeaders.map(h => (
                                                 <th key={h} className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">{h}</th>
                                             ))}
                                         </tr>
@@ -1177,12 +1209,26 @@ export function AdminDashboard() {
                                                         <p className="font-bold text-slate-900 dark:text-white text-sm">{u.name}</p>
                                                     </div>
                                                 </td>
-                                                <td className="px-6 py-4 text-slate-700 dark:text-slate-300 text-sm">{u.carrera || "—"}</td>
-                                                <td className="px-6 py-4 text-slate-700 dark:text-slate-300 text-sm">{u.semestre || "—"}</td>
-                                                <td className="px-6 py-4 text-slate-700 dark:text-slate-300 text-sm font-mono">{u.matricula || "—"}</td>
+                                                {isSchool ? (<>
+                                                    <td className="px-6 py-4 text-slate-700 dark:text-slate-300 text-sm">{u.carrera || "—"}</td>
+                                                    <td className="px-6 py-4 text-slate-700 dark:text-slate-300 text-sm">{u.semestre || "—"}</td>
+                                                    <td className="px-6 py-4 text-slate-700 dark:text-slate-300 text-sm font-mono">{u.matricula || "—"}</td>
+                                                </>) : (
+                                                    <td className="px-6 py-4 text-slate-700 dark:text-slate-300 text-sm">
+                                                        {u.metadata && Object.keys(u.metadata).length > 0
+                                                            ? Object.entries(u.metadata as Record<string, string>).slice(0, 3).map(([k, v]) => (
+                                                                <span key={k} className="inline-block mr-3">
+                                                                    <span className="text-slate-400 text-xs">{k.replace(/_/g, " ")}: </span>
+                                                                    <span className="font-medium">{v}</span>
+                                                                </span>
+                                                            ))
+                                                            : <span className="text-slate-400">—</span>
+                                                        }
+                                                    </td>
+                                                )}
                                                 <td className="px-6 py-4 text-slate-500 text-sm">{u.email}</td>
                                                 <td className="px-6 py-4">
-                                                    <button onClick={() => { if (confirm(`¿Eliminar a ${u.name}?`)) { deleteUser(u.id); toast.success("Alumno eliminado"); } }}
+                                                    <button onClick={() => { if (confirm(`¿Eliminar a ${u.name}?`)) { deleteUser(u.id); toast.success(`${endUserLabel} eliminado`); } }}
                                                         className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer">
                                                         <XCircle className="w-4 h-4" />
                                                     </button>
@@ -1324,7 +1370,7 @@ export function AdminDashboard() {
                                                 </div>
                                             </div>
 
-                                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                            <div className={`grid grid-cols-1 ${isSchool ? "lg:grid-cols-2" : ""} gap-6`}>
                                                 {/* Modalidad */}
                                                 <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
                                                     <div className="flex items-center justify-between mb-6">
@@ -1346,7 +1392,8 @@ export function AdminDashboard() {
                                                     </div>
                                                 </div>
 
-                                                {/* Por Carrera */}
+                                                {/* Por Carrera — school only */}
+                                                {isSchool && (
                                                 <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
                                                     <div className="flex items-center justify-between mb-6">
                                                         <h4 className="text-slate-900 dark:text-white font-bold text-lg">Distribución por Carrera</h4>
@@ -1367,6 +1414,7 @@ export function AdminDashboard() {
                                                         </ResponsiveContainer>
                                                     </div>
                                                 </div>
+                                                )}
                                             </div>
 
                                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1391,7 +1439,8 @@ export function AdminDashboard() {
                                                     </div>
                                                 </div>
 
-                                                {/* Por Semestre */}
+                                                {/* Por Semestre — school only */}
+                                                {isSchool && (
                                                 <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
                                                     <div className="flex items-center justify-between mb-6">
                                                         <h4 className="text-slate-900 dark:text-white font-bold text-lg">Distribución por Semestre</h4>
@@ -1412,13 +1461,14 @@ export function AdminDashboard() {
                                                         </ResponsiveContainer>
                                                     </div>
                                                 </div>
+                                                )}
 
                                                 {/* Histograma de Edad */}
                                                 <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
                                                     <div className="flex items-center justify-between mb-6">
                                                         <div>
                                                             <h4 className="text-slate-900 dark:text-white font-bold text-lg">Distribución de Edad</h4>
-                                                            <p className="text-slate-400 text-xs mt-0.5">Alumnos atendidos por rango de edad</p>
+                                                            <p className="text-slate-400 text-xs mt-0.5">{endUserLabel}s atendidos por rango de edad</p>
                                                         </div>
                                                         <button onClick={() => downloadChartAsImage(refs.edad, `Edad_${statsView}`, "Distribución de Edad", dark)}
                                                             className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all cursor-pointer" title="Descargar como imagen">
@@ -1600,7 +1650,7 @@ export function AdminDashboard() {
                                                         {pdfPeriodName ? `Período: ${pdfPeriodName}` : "Todos los períodos"}
                                                         {" · "}{(r.label === "Reporte Global" ? pdfAppts : pdfAppts.filter(a => a.department === r.label)).length} citas
                                                     </p>
-                                                    <Btn onClick={() => generatePDFReport(r.label, pdfAppts, users, pdfPeriodName)} variant="outline" className="w-full">
+                                                    <Btn onClick={() => generatePDFReport(r.label, pdfAppts, users, pdfPeriodName, isSchool, endUserLabel)} variant="outline" className="w-full">
                                                         <Download className="w-4 h-4 mr-2" /> PDF Export
                                                     </Btn>
                                                 </div>
@@ -1785,7 +1835,7 @@ export function AdminDashboard() {
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                 <div>
                                     <h3 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Difusión Institucional</h3>
-                                    <p className="text-slate-500 font-medium mb-8">Publica eventos, conferencias y talleres. Aparecerán en el carrusel principal de todos los estudiantes.</p>
+                                    <p className="text-slate-500 font-medium mb-8">Publica eventos, conferencias y talleres. Aparecerán en el carrusel principal de todos los {endUserTabLabel}.</p>
                                     <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 shadow-sm space-y-5">
                                         <div>
                                             <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Formato del evento</label>
