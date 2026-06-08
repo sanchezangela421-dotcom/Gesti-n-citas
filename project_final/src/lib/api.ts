@@ -39,3 +39,14 @@ export function getImageUrl(url?: string | null): string | undefined {
   if (url.startsWith('/uploads/')) return `${API_BASE}${url}`;
   return undefined;
 }
+
+/**
+ * Construye una URL segura para archivos subidos al servidor.
+ * Solo acepta rutas /uploads/...; codifica cada segmento con encodeURIComponent
+ * para prevenir inyección de protocolos (javascript:, data:) en atributos src/href.
+ */
+export function getUploadUrl(path?: string | null): string | undefined {
+  if (!path?.startsWith('/uploads/')) return undefined;
+  const safePath = path.split('/').map(encodeURIComponent).join('/');
+  return `${API_BASE}${safePath}`;
+}

@@ -6,7 +6,7 @@ import {
     Globe, Stethoscope, GraduationCap, Briefcase,
     AlertTriangle, Clock, LogOut,
 } from "lucide-react";
-import { API, superAdminHeaders, getImageUrl } from "../../../lib/api";
+import { API, superAdminHeaders, getUploadUrl } from "../../../lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1107,20 +1107,15 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                         <div>
                             <label className="block text-xs font-medium text-slate-400 mb-2">Logo de la organización</label>
                             <div className="flex items-center gap-3">
-                                {(() => {
-                                    const logoSrc = logoFile
-                                        ? URL.createObjectURL(logoFile)
-                                        : getImageUrl(editOrg.logoUrl?.startsWith('/uploads/') ? editOrg.logoUrl : undefined);
-                                    return logoSrc ? (
-                                        <img
-                                            src={logoSrc}
-                                            alt="Logo"
-                                            className="w-14 h-14 rounded-xl object-contain bg-slate-800 border border-slate-700 p-1"
-                                        />
-                                    ) : (
-                                        <div className="w-14 h-14 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500 text-xs">Sin logo</div>
-                                    );
-                                })()}
+                                {(logoFile ? URL.createObjectURL(logoFile) : getUploadUrl(editOrg.logoUrl)) ? (
+                                    <img
+                                        src={logoFile ? URL.createObjectURL(logoFile) : getUploadUrl(editOrg.logoUrl)!}
+                                        alt="Logo"
+                                        className="w-14 h-14 rounded-xl object-contain bg-slate-800 border border-slate-700 p-1"
+                                    />
+                                ) : (
+                                    <div className="w-14 h-14 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500 text-xs">Sin logo</div>
+                                )}
                                 <div className="flex-1 space-y-1.5">
                                     <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={e => setLogoFile(e.target.files?.[0] ?? null)} />
                                     <button onClick={() => logoInputRef.current?.click()} className="w-full px-3 py-1.5 rounded-lg text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors">
