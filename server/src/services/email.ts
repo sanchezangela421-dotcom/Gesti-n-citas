@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import path from 'path';
 import { verificationTemplate } from './email_templates/verification';
 import { passwordResetTemplate } from './email_templates/passwordReset';
 import { welcomeTemplate } from './email_templates/welcome';
@@ -19,6 +20,7 @@ import {
   appointmentReminderStudentTemplate,
   appointmentReminderSpecialistTemplate,
 } from './email_templates/appointmentReminder';
+import { accountInvitationTemplate } from './email_templates/accountInvitation';
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
@@ -32,6 +34,14 @@ const transporter = nodemailer.createTransport({
 const FROM = `"Synkros" <${process.env.SMTP_FROM}>`;
 const APP_URL = process.env.FRONTEND_URL ?? '';
 
+// Adjunto inline CID — el logo viaja con el correo sin depender de URL pública.
+// El template usa src="cid:logo@synkros" en el <img>.
+const LOGO_ATTACHMENT = {
+  filename: 'logo.png',
+  path: path.join(__dirname, 'email_templates', 'logo-light.png'),
+  cid: 'logo@synkros',
+};
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 export async function sendVerificationEmail(name: string, email: string, token: string) {
@@ -41,6 +51,7 @@ export async function sendVerificationEmail(name: string, email: string, token: 
     to: email,
     subject: 'Verifica tu correo — Synkros',
     html: verificationTemplate(name, verifyUrl),
+    attachments: [LOGO_ATTACHMENT],
   });
 }
 
@@ -51,6 +62,7 @@ export async function sendPasswordResetEmail(name: string, email: string, token:
     to: email,
     subject: 'Recupera tu contraseña — Synkros',
     html: passwordResetTemplate(name, resetUrl),
+    attachments: [LOGO_ATTACHMENT],
   });
 }
 
@@ -61,6 +73,19 @@ export async function sendWelcomeEmail(name: string, email: string, password: st
     to: email,
     subject: `Bienvenido/a a Synkros — ${roleLabel}`,
     html: welcomeTemplate(name, email, password, role, APP_URL),
+    attachments: [LOGO_ATTACHMENT],
+  });
+}
+
+export async function sendAccountInvitation(
+  name: string, email: string, orgName: string, role: string, activationUrl: string
+) {
+  await transporter.sendMail({
+    from: FROM,
+    to: email,
+    subject: `Activa tu cuenta en Synkros — ${orgName}`,
+    html: accountInvitationTemplate(name, orgName, role, activationUrl),
+    attachments: [LOGO_ATTACHMENT],
   });
 }
 
@@ -90,6 +115,7 @@ export async function sendAppointmentNewEmails(
     to: studentEmail,
     subject: 'Solicitud de cita recibida — Synkros',
     html: appointmentNewStudentTemplate(data.studentName, { ...data, appUrl: APP_URL }),
+    attachments: [LOGO_ATTACHMENT],
   });
   await delay(1100);
   await transporter.sendMail({
@@ -97,6 +123,7 @@ export async function sendAppointmentNewEmails(
     to: specialistEmail,
     subject: `Nueva solicitud de cita de ${data.studentName} — Synkros`,
     html: appointmentNewSpecialistTemplate(data.specialistName, { ...data, appUrl: APP_URL }),
+    attachments: [LOGO_ATTACHMENT],
   });
 }
 
@@ -110,6 +137,7 @@ export async function sendAppointmentConfirmedEmail(
     to: studentEmail,
     subject: '¡Tu cita está confirmada! — Synkros',
     html: appointmentConfirmedTemplate(data.studentName, { ...data, appUrl: APP_URL }),
+    attachments: [LOGO_ATTACHMENT],
   });
 }
 
@@ -130,6 +158,7 @@ export async function sendRescheduledBySpecialistEmail(
       modality: data.modality,
       appUrl: APP_URL,
     }),
+    attachments: [LOGO_ATTACHMENT],
   });
 }
 
@@ -150,6 +179,7 @@ export async function sendRescheduledByStudentEmail(
       modality: data.modality,
       appUrl: APP_URL,
     }),
+    attachments: [LOGO_ATTACHMENT],
   });
 }
 
@@ -169,6 +199,7 @@ export async function sendCancelledBySpecialistEmail(
       reason: data.reason,
       appUrl: APP_URL,
     }),
+    attachments: [LOGO_ATTACHMENT],
   });
 }
 
@@ -188,6 +219,7 @@ export async function sendCancelledByStudentEmail(
       reason: data.reason,
       appUrl: APP_URL,
     }),
+    attachments: [LOGO_ATTACHMENT],
   });
 }
 
@@ -209,6 +241,7 @@ export async function sendAppointmentReminderEmails(
       meetingUrl: data.meetingUrl,
       appUrl: APP_URL,
     }),
+    attachments: [LOGO_ATTACHMENT],
   });
   await delay(1100);
   await transporter.sendMail({
@@ -221,5 +254,6 @@ export async function sendAppointmentReminderEmails(
       modality: data.modality,
       appUrl: APP_URL,
     }),
+    attachments: [LOGO_ATTACHMENT],
   });
 }

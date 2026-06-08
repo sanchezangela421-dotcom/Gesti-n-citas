@@ -40,8 +40,8 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
       }
     }
 
-    if (actorRole === 'alumno') {
-      // El alumno notifica al especialista: verificar que existe una cita entre ellos.
+    if (actorRole === 'alumno' || actorRole === 'usuario') {
+      // El end-user notifica al especialista: verificar que existe una cita entre ellos.
       // userId aquí es el User.id del especialista (no el Specialist.id).
       const spec = await prisma.specialist.findFirst({ where: { userId } });
       if (!spec) {

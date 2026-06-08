@@ -13,7 +13,11 @@
     "dev": "nodemon src/index.ts",
     "build": "prisma generate && tsc",
     "lint": "eslint src/",
+    "db:seed": "ts-node prisma/seed.ts",
     "db:cleanup": "ts-node src/scripts/cleanup.ts"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   },
   "keywords": [],
   "author": "",

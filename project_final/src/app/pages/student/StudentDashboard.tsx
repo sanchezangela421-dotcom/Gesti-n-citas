@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
+import { API_BASE } from "../../../lib/api";
 import { AppShell } from "../../components/layout/AppShell";
 import { Btn, StatCard, TabNav, Modal, MiniCalendar, StatusBadge, Avatar, EmptyState } from "../../components/ui";
 import { DEPT_CONFIG, DEPT_REASONS } from "../../../constants";
@@ -75,6 +76,9 @@ export function StudentDashboard() {
     const [showConfModal, setShowConfModal] = useState(false);
     const [selConf, setSelConf] = useState<AppEvent | null>(null);
 
+    // Labels de campos dinámicos de la org (para mostrar en el header cuando no es escuela)
+    const [orgFields, setOrgFields] = useState<Array<{ key: string; label: string }>>([]);
+
     // Paginación
     const PROXIMAS_PAGE_SIZE = 5;
     const HISTORIAL_PAGE_SIZE = 8;
@@ -137,6 +141,16 @@ export function StudentDashboard() {
      
     }, [slides.length]);
 
+    // Carga los campos de registro de la org para mostrar sus labels en el header
+    useEffect(() => {
+        const slug = user?.organization?.slug;
+        if (!slug || user?.organization?.type === 'school') return;
+        fetch(`${API_BASE}/api/public/organizations/${slug}/fields`)
+            .then(r => r.json())
+            .then(data => setOrgFields((data.registrationFields ?? []).map((f: { key: string; label: string }) => ({ key: f.key, label: f.label }))))
+            .catch(() => {});
+    }, [user?.organization?.slug]);
+
     if (!user) return null;
 
     return (
@@ -145,14 +159,50 @@ export function StudentDashboard() {
 
                 {/* ── Page Header ── */}
                 <div className="mb-8">
+                    {/* Org identity banner */}
+                    {user.organization && (
+                        <div className="flex items-center gap-3 mb-4">
+                            {user.organization.logoUrl ? (
+                                <img
+                                    src={`${API_BASE}${user.organization.logoUrl}`}
+                                    alt={user.organization.name}
+                                    className="h-10 w-10 rounded-lg object-contain bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-0.5"
+                                />
+                            ) : (
+                                <div className="h-10 w-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 flex items-center justify-center text-blue-700 dark:text-blue-300 font-bold text-sm">
+                                    {user.organization.name.charAt(0).toUpperCase()}
+                                </div>
+                            )}
+                            <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">{user.organization.name}</span>
+                        </div>
+                    )}
                     <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">
                         Bienvenido(a), <span className="text-blue-600">{user.name?.split(" ")[0]}</span>
                     </h1>
-                    <p className="text-slate-500 mt-1 font-medium">
-                        {user.carrera || "Estudiante"}
-                        <span className="mx-2 text-slate-300 dark:text-slate-600">•</span> Semestre {user.semestre || "—"}
-                        <span className="mx-2 text-slate-300 dark:text-slate-600">•</span> No. Control: {user.matricula || "—"}
-                    </p>
+                    {user.organization?.type === 'school' ? (
+                        <p className="text-slate-500 mt-1 font-medium">
+                            {user.carrera || "Estudiante"}
+                            <span className="mx-2 text-slate-300 dark:text-slate-600">•</span> Semestre {user.semestre || "—"}
+                            <span className="mx-2 text-slate-300 dark:text-slate-600">•</span> No. Control: {user.matricula || "—"}
+                        </p>
+                    ) : user.metadata && Object.keys(user.metadata).length > 0 ? (
+                        <p className="text-slate-500 mt-1 font-medium">
+                            {orgFields
+                                .filter(f => user.metadata![f.key])
+                                .slice(0, 3)
+                                .map((f, i, arr) => (
+                                    <span key={f.key}>
+                                        {f.label}: {user.metadata![f.key]}
+                                        {i < arr.length - 1 && <span className="mx-2 text-slate-300 dark:text-slate-600">•</span>}
+                                    </span>
+                                ))
+                            }
+                        </p>
+                    ) : (
+                        <p className="text-slate-500 mt-1 font-medium">
+                            {user.organization?.userRoleLabel ?? "Usuario"} — {user.organization?.name ?? ""}
+                        </p>
+                    )}
                 </div>
 
                 {/* ── Banner Carousel ── */}

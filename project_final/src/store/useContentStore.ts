@@ -51,7 +51,7 @@ export function useContentStore({ users, addNotification }: ContentStoreDeps) {
       // Notify all students about the new event
       const dateStr = new Date(ev.date + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "long" });
       users
-        .filter(u => u.role === "alumno")
+        .filter(u => u.role === "alumno" || u.role === "usuario")
         .forEach(student => {
           addNotification(student.id, {
             title: `Nuevo evento: ${ev.title}`,

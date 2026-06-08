@@ -21,6 +21,14 @@ export function authOnlyHeaders(): Record<string, string> {
   return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
 
+// SuperAdmin usa token separado para aislamiento completo de sesión
+export function superAdminHeaders(): Record<string, string> {
+  const token = localStorage.getItem('sa_token');
+  const base: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) base['Authorization'] = `Bearer ${token}`;
+  return base;
+}
+
 /**
  * Convierte una ruta relativa de upload (/uploads/...) a URL absoluta.
  * URLs externas (http/https) se devuelven tal cual.

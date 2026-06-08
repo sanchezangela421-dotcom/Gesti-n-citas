@@ -1,0 +1,58 @@
+services:
+
+  # ── PostgreSQL ────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB:       gestion_citas
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Backend (Node / Express / Prisma) ─────────────────────────
+  backend:
+    build:
+      context: ./server
+    restart: unless-stopped
+    environment:
+      DATABASE_URL:            postgresql://postgres:postgres@db:5432/gestion_citas
+      JWT_SECRET:              ${JWT_SECRET}
+      FRONTEND_URL:            ${FRONTEND_URL:-http://localhost}
+      BACKEND_URL:             ${BACKEND_URL:-http://localhost/api}
+      ALLOWED_EMAIL_DOMAIN:    ${ALLOWED_EMAIL_DOMAIN:-mail.com}
+      SUPERADMIN_ALLOWED_IPS:  ${SUPERADMIN_ALLOWED_IPS:-}
+      SMTP_HOST:               ${SMTP_HOST}
+      SMTP_PORT:               ${SMTP_PORT:-587}
+      SMTP_USER:               ${SMTP_USER}
+      SMTP_PASS:               ${SMTP_PASS}
+      SMTP_FROM:               ${SMTP_FROM}
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ── Frontend (React + nginx reverse proxy) ────────────────────
+  frontend:
+    build:
+      context: ./project_final
+      # VITE_API_URL vacío: el frontend llama a /api/* en el mismo origen.
+      # nginx redirige esas llamadas al backend internamente.
+      args:
+        VITE_API_URL: ""
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  uploads_data:

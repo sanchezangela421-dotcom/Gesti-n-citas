@@ -5,6 +5,11 @@ import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 
 const router = Router();
 
+function orgFilter(req: AuthRequest) {
+  if (req.user?.role === 'superadmin') return {};
+  return req.user?.organizationId ? { organizationId: req.user.organizationId } : {};
+}
+
 const readLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 60,
@@ -23,9 +28,10 @@ const writeLimiter = rateLimit({
 
 // ── GET /api/periods ──────────────────────────────────────────────────────────
 // Devuelve todos los períodos ordenados por fecha de creación desc
-router.get('/', readLimiter, verifyToken as any, async (_req: AuthRequest, res) => {
+router.get('/', readLimiter, verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const periods = await prisma.reportPeriod.findMany({
+      where: { ...orgFilter(req) },
       orderBy: { createdAt: 'desc' },
       include: { _count: { select: { appointments: true } } },
     });
@@ -39,10 +45,10 @@ router.get('/', readLimiter, verifyToken as any, async (_req: AuthRequest, res) 
 // ── GET /api/periods/active ───────────────────────────────────────────────────
 // Devuelve el período activo actual (o null si no hay ninguno).
 // Si el período activo tiene endDate vencida, lo cierra automáticamente.
-router.get('/active', readLimiter, verifyToken as any, async (_req: AuthRequest, res) => {
+router.get('/active', readLimiter, verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const active = await prisma.reportPeriod.findFirst({
-      where: { status: 'activo' },
+      where: { status: 'activo', ...orgFilter(req) },
       include: { _count: { select: { appointments: true } } },
     });
 
@@ -67,7 +73,7 @@ router.get('/active', readLimiter, verifyToken as any, async (_req: AuthRequest,
 // ── POST /api/periods ─────────────────────────────────────────────────────────
 // Crea un nuevo período activo. Solo puede haber uno activo a la vez.
 router.post('/', writeLimiter, verifyToken as any, async (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'superadmin') {
     return res.status(403).json({ error: 'Solo el administrador puede crear períodos' });
   }
 
@@ -79,7 +85,7 @@ router.post('/', writeLimiter, verifyToken as any, async (req: AuthRequest, res)
 
   try {
     const existingActive = await prisma.reportPeriod.findFirst({
-      where: { status: 'activo' },
+      where: { status: 'activo', ...orgFilter(req) },
     });
 
     if (existingActive) {
@@ -95,6 +101,7 @@ router.post('/', writeLimiter, verifyToken as any, async (req: AuthRequest, res)
         startDate,
         endDate: endDate ?? null,
         status: 'activo',
+        organizationId: req.user?.organizationId ?? null,
       },
     });
 
@@ -119,7 +126,7 @@ router.post('/', writeLimiter, verifyToken as any, async (req: AuthRequest, res)
 // - Activo: se puede editar nombre, startDate y endDate
 // - Cerrado: solo se puede editar el nombre
 router.patch('/:id', writeLimiter, verifyToken as any, async (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'superadmin') {
     return res.status(403).json({ error: 'Solo el administrador puede editar períodos' });
   }
 
@@ -162,7 +169,7 @@ router.patch('/:id', writeLimiter, verifyToken as any, async (req: AuthRequest, 
 // Realiza el "corte de datos": cierra el período activo.
 // Opcionalmente crea el siguiente período en la misma transacción.
 router.post('/:id/close', writeLimiter, verifyToken as any, async (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'superadmin') {
     return res.status(403).json({ error: 'Solo el administrador puede realizar un corte' });
   }
 

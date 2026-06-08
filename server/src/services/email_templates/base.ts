@@ -1,5 +1,7 @@
 const YEAR = new Date().getFullYear();
-const LOGO_URL = `${process.env.FRONTEND_URL}/logo-light.png`;
+// La imagen se envía como adjunto MIME (CID) para que funcione en todos los clientes
+// sin depender de una URL pública. Ver email.ts → LOGO_ATTACHMENT.
+const LOGO_CID = 'logo@synkros';
 
 export const footer = `
   <div style="background:#f1f5f9;padding:24px 32px;text-align:center;border-top:2px solid #e2e8f0;">
@@ -16,7 +18,7 @@ export const footer = `
 
 export const header = (subtitle: string, accentGradient = 'linear-gradient(135deg,#1e3a5f,#0f766e)') => `
   <div style="background:${accentGradient};padding:28px 32px;text-align:center;">
-    <img src="${LOGO_URL}" alt="Synkros" style="height:44px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;" />
+    <img src="cid:${LOGO_CID}" alt="Synkros" style="height:44px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto;" />
     <p style="color:rgba(255,255,255,0.75);margin:0;font-size:13px;">${subtitle}</p>
   </div>
 `;

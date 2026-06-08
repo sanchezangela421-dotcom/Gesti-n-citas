@@ -4,19 +4,24 @@ import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 
 const router = Router();
 
+function orgFilter(req: AuthRequest) {
+  if (req.user?.role === 'superadmin') return {};
+  return req.user?.organizationId ? { organizationId: req.user.organizationId } : {};
+}
+
 // GET /api/users — role-based filtering
 router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const caller = req.user!;
-    const where: any = {};
+    const where: any = { ...orgFilter(req) };
 
-    if (caller.role === 'admin') {
-      // Admin sees all; optional ?role= filter
+    if (caller.role === 'admin' || caller.role === 'superadmin') {
+      // Admin/superadmin sees all within their scope; optional ?role= filter
       const role = req.query.role as string | undefined;
       if (role) where.role = role;
     } else if (caller.role === 'especialista') {
-      // Specialists only need student data
-      where.role = 'alumno';
+      // Specialists only need end-user data (alumno o usuario según el tipo de org)
+      where.role = { in: ['alumno', 'usuario'] };
     } else {
       // Students only see themselves
       where.id = caller.id;
@@ -28,6 +33,7 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
         id: true, email: true, name: true, role: true,
         matricula: true, carrera: true, semestre: true,
         fechaNacimiento: true, genero: true, department: true,
+        metadata: true,
         createdAt: true,
         specialist: { select: { id: true, department: true, active: true } }
       },
@@ -48,7 +54,7 @@ router.get('/:id', verifyToken as any, async (req: AuthRequest, res) => {
     const caller = req.user!;
 
     // Non-admin can only fetch their own record
-    if (caller.role !== 'admin' && caller.id !== id) {
+    if (caller.role !== 'admin' && caller.role !== 'superadmin' && caller.id !== id) {
       return res.status(403).json({ error: 'Sin permisos' });
     }
 
@@ -71,7 +77,7 @@ router.get('/:id', verifyToken as any, async (req: AuthRequest, res) => {
 // DELETE /api/users/:id — admin only
 router.delete('/:id', verifyToken as any, async (req: AuthRequest, res) => {
   try {
-    if (req.user?.role !== 'admin') {
+    if (req.user?.role !== 'admin' && req.user?.role !== 'superadmin') {
       return res.status(403).json({ error: 'Sin permisos' });
     }
 

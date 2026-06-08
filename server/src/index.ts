@@ -44,6 +44,8 @@ import usersRoutes from './routes/users';
 import statsRoutes from './routes/stats';
 import notificationsRoutes from './routes/notifications';
 import periodsRoutes from './routes/periods';
+import superadminRoutes from './routes/superadmin/index';
+import publicRoutes from './routes/public';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/appointments', appointmentsRoutes);
@@ -54,6 +56,8 @@ app.use('/api/users', usersRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/periods', periodsRoutes);
+app.use('/api/superadmin', superadminRoutes);
+app.use('/api/public', publicRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'API is running' });

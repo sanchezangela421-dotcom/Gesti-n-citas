@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import { UserRole } from '@prisma/client';
 import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../services/email';
@@ -21,7 +22,7 @@ router.post('/login', async (req, res) => {
     // Find user
     const user = await prisma.user.findUnique({
       where: { email },
-      include: { specialist: true } // Include specialist data if they are one
+      include: { specialist: true, organization: true }
     });
     
     if (!user) {
@@ -34,14 +35,14 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
-    // Block unverified alumni
-    if (user.role === 'alumno' && !user.emailVerified) {
+    // Block unverified end-users (alumno y usuario)
+    if ((user.role === 'alumno' || user.role === 'usuario') && !user.emailVerified) {
       return res.status(403).json({ code: 'EMAIL_NOT_VERIFIED', error: 'Debes verificar tu correo antes de iniciar sesión.' });
     }
 
     // Generate token
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
+      { id: user.id, email: user.email, role: user.role, organizationId: user.organizationId ?? null },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -93,17 +94,31 @@ router.post('/register', async (req, res) => {
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const verificationTokenExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
+    // Validar que la organización existe y determinar el rol según su tipo
+    let userRole: UserRole = UserRole.alumno;
+    if (data.organizationId) {
+      const org = await prisma.organization.findUnique({ where: { id: data.organizationId } });
+      if (!org || !org.active) {
+        return res.status(400).json({ error: 'Organización no válida o inactiva' });
+      }
+      // Escuelas → alumno  |  empresas y hospitales → usuario
+      userRole = org.type === 'school' ? UserRole.alumno : UserRole.usuario;
+    }
+
     const user = await prisma.user.create({
       data: {
         email: data.email,
         password: hashedPassword,
         name: data.name,
-        role: 'alumno', // Siempre alumno en registro público — admins/especialistas se crean por admin
-        matricula: data.matricula || null,
-        carrera: data.carrera || null,
-        semestre: data.semestre ? Number(data.semestre) : null,
-        fechaNacimiento: data.fechaNacimiento ?? null,
-        genero: data.genero || null,
+        role: userRole,
+        organizationId: data.organizationId || null,
+        metadata: data.metadata || null,
+        // Campos legacy para compatibilidad con TECNL — se poblan desde metadata si existen
+        matricula: data.metadata?.matricula || data.matricula || null,
+        carrera: data.metadata?.carrera || data.carrera || null,
+        semestre: data.metadata?.semestre ? Number(data.metadata.semestre) : (data.semestre ? Number(data.semestre) : null),
+        fechaNacimiento: data.metadata?.fechaNacimiento || data.fechaNacimiento || null,
+        genero: data.metadata?.genero || data.genero || null,
         emailVerified: false,
         verificationToken,
         verificationTokenExpiresAt,
@@ -235,7 +250,13 @@ router.post('/reset-password', async (req, res) => {
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { password: hashedPassword, resetPasswordToken: null, resetPasswordTokenExpiresAt: null }
+      data: {
+        password: hashedPassword,
+        resetPasswordToken: null,
+        resetPasswordTokenExpiresAt: null,
+        // Si el usuario nunca verificó su email (creado por SuperAdmin), lo marca al activar
+        ...(user.emailVerified ? {} : { emailVerified: true }),
+      }
     });
 
     res.json({ message: 'Contraseña actualizada correctamente.' });
@@ -293,7 +314,7 @@ router.get('/me', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
-      include: { specialist: true }
+      include: { specialist: true, organization: true }
     });
 
     if (!user) {

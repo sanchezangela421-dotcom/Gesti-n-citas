@@ -5,11 +5,16 @@ import { upload } from '../middleware/upload';
 
 const router = Router();
 
+function orgFilter(req: AuthRequest) {
+  if (req.user?.role === 'superadmin') return {};
+  return req.user?.organizationId ? { organizationId: req.user.organizationId } : {};
+}
+
 // GET /api/resources
-router.get('/', async (req, res) => {
+router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const { department } = req.query;
-    const where: any = {};
+    const where: any = { ...orgFilter(req) };
     if (department) where.department = department;
 
     const resources = await prisma.resource.findMany({ where });
@@ -22,7 +27,7 @@ router.get('/', async (req, res) => {
 
 // POST /api/resources
 router.post('/', verifyToken as any, upload.single('file'), async (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista' && req.user?.role !== 'superadmin') {
     return res.status(403).json({ error: 'Sin permisos' });
   }
   try {
@@ -57,7 +62,8 @@ router.post('/', verifyToken as any, upload.single('file'), async (req: AuthRequ
         url: url || '#',
         imageUrl,
         fileUrl,
-        fileName
+        fileName,
+        organizationId: req.user?.organizationId ?? null,
       }
     });
 
@@ -70,10 +76,16 @@ router.post('/', verifyToken as any, upload.single('file'), async (req: AuthRequ
 
 // PATCH /api/resources/:id
 router.patch('/:id', verifyToken as any, upload.single('file'), async (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista' && req.user?.role !== 'superadmin') {
     return res.status(403).json({ error: 'Sin permisos' });
   }
   try {
+    const existing = await prisma.resource.findUnique({ where: { id: req.params.id as string } });
+    if (!existing) return res.status(404).json({ error: 'No encontrado' });
+    if (req.user?.role !== 'superadmin' && existing.organizationId !== req.user?.organizationId) {
+      return res.status(403).json({ error: 'Sin permisos' });
+    }
+
     const { department, type, title, description, url } = req.body;
     const data: any = {};
     if (department !== undefined)   data.department = department;
@@ -103,10 +115,15 @@ router.patch('/:id', verifyToken as any, upload.single('file'), async (req: Auth
 
 // DELETE /api/resources/:id
 router.delete('/:id', verifyToken as any, async (req: AuthRequest, res) => {
-  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'especialista' && req.user?.role !== 'superadmin') {
     return res.status(403).json({ error: 'Sin permisos' });
   }
   try {
+    const existing = await prisma.resource.findUnique({ where: { id: req.params.id as string } });
+    if (!existing) return res.status(404).json({ error: 'No encontrado' });
+    if (req.user?.role !== 'superadmin' && existing.organizationId !== req.user?.organizationId) {
+      return res.status(403).json({ error: 'Sin permisos' });
+    }
     await prisma.resource.delete({ where: { id: req.params.id as string } });
     res.json({ success: true });
   } catch {

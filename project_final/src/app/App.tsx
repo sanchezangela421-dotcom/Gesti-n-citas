@@ -45,9 +45,15 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 // ─── Lazy chunks — cada rol descarga solo su dashboard ───
 const LoginForm           = lazy(() => import("./pages/auth/LoginForm").then(m => ({ default: m.LoginForm })));
 const RegisterForm        = lazy(() => import("./pages/auth/RegisterForm").then(m => ({ default: m.RegisterForm })));
+const ResetPasswordPage   = lazy(() => import("./pages/auth/ResetPasswordPage").then(m => ({ default: m.ResetPasswordPage })));
 const StudentDashboard    = lazy(() => import("./pages/student/StudentDashboard").then(m => ({ default: m.StudentDashboard })));
 const SpecialistDashboard = lazy(() => import("./pages/specialist/SpecialistDashboard").then(m => ({ default: m.SpecialistDashboard })));
 const AdminDashboard      = lazy(() => import("./pages/admin/AdminDashboard").then(m => ({ default: m.AdminDashboard })));
+
+function getResetToken(): string | null {
+  if (window.location.pathname !== "/reset-password") return null;
+  return new URLSearchParams(window.location.search).get("token");
+}
 
 // ─── Spinner compartido para Suspense y loading de auth ──
 function LoadingScreen() {
@@ -71,8 +77,18 @@ function AppRouter() {
   }, [isAuthenticated, fetchAll]);
 
   const [view, setView] = useState<"login" | "register">("login");
+  const [resetToken, setResetToken] = useState<string | null>(() => getResetToken());
 
   if (loading) return <LoadingScreen />;
+
+  // Flujo de activación / recuperación de contraseña — tiene prioridad sobre todo
+  if (resetToken) {
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <ResetPasswordPage token={resetToken} onDone={() => { setResetToken(null); setView("login"); }} />
+      </Suspense>
+    );
+  }
 
   if (!isAuthenticated || !user) {
     return (
@@ -86,7 +102,7 @@ function AppRouter() {
 
   return (
     <Suspense fallback={<LoadingScreen />}>
-      {user.role === "alumno"       && <StudentDashboard />}
+      {(user.role === "alumno" || user.role === "usuario") && <StudentDashboard />}
       {user.role === "especialista" && <SpecialistDashboard />}
       {user.role === "admin"        && <AdminDashboard />}
     </Suspense>

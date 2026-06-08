@@ -397,11 +397,14 @@ export function SpecialistDashboard() {
         </div>
     );
 
+    const endUserLabel = user.organization?.userRoleLabel ?? "Usuario";
+    const endUserTabLabel = `${endUserLabel}s`;
+
     const statsData = [
         { label: "Pendientes", value: pendientes.length, icon: Clock, gradient: "from-amber-500 to-amber-600" },
         { label: "Confirmadas", value: confirmadas.length, icon: CalendarCheck, gradient: "from-blue-600 to-indigo-600" },
         { label: "Completadas", value: completadas.length, icon: CheckCircle2, gradient: "from-emerald-500 to-emerald-600" },
-        { label: "Pacientes", value: totalPatients, icon: Users, gradient: "from-violet-500 to-violet-600" },
+        { label: endUserTabLabel, value: totalPatients, icon: Users, gradient: "from-violet-500 to-violet-600" },
     ];
 
     // Root appointments in history (Completada or Cancelada, no parentId)
@@ -910,7 +913,7 @@ export function SpecialistDashboard() {
                         {/* ── Form ── */}
                         <div>
                             <h3 className="text-2xl font-bold text-slate-900 mb-2">Publicar Material Educativo</h3>
-                            <p className="text-slate-500 font-medium mb-6">Comparte recursos con los estudiantes de la facultad.</p>
+                            <p className="text-slate-500 font-medium mb-6">Comparte recursos con los {endUserTabLabel} de tu organización.</p>
                             <div className="space-y-5 bg-slate-50 border border-slate-200 rounded-3xl p-6 shadow-sm">
                                 <div>
                                     <label className="block mb-2 text-slate-900 font-bold text-sm">Título <span className="text-rose-500">*</span></label>
@@ -959,7 +962,7 @@ export function SpecialistDashboard() {
                                     <div className="space-y-4">
                                         <div>
                                             <label className="block mb-1 text-slate-900 font-bold text-sm">Enlace del video <span className="text-rose-500">*</span></label>
-                                            <p className="text-xs text-slate-400 mb-2">Pega la URL de YouTube o Vimeo. Los alumnos verán el video integrado directamente en la plataforma.</p>
+                                            <p className="text-xs text-slate-400 mb-2">Pega la URL de YouTube o Vimeo. Los {endUserTabLabel} verán el video integrado directamente en la plataforma.</p>
                                             <input type="url" value={curl} onChange={e => setCurl(e.target.value)} placeholder="https://youtube.com/watch?v=... o https://vimeo.com/..." className={inputCls} />
                                         </div>
                                         <div>
@@ -1033,7 +1036,7 @@ export function SpecialistDashboard() {
                         {/* ── Form ── */}
                         <div>
                             <h3 className="text-2xl font-bold text-slate-900 mb-2">Publicar Evento o Taller</h3>
-                            <p className="text-slate-500 font-medium mb-6">Crea un banner que aparecerá en el carrusel principal de estudiantes.</p>
+                            <p className="text-slate-500 font-medium mb-6">Crea un banner que aparecerá en el carrusel principal de {endUserTabLabel}.</p>
                             <div className="space-y-5 bg-slate-50 border border-slate-200 rounded-3xl p-6 shadow-sm">
                                 <div>
                                     <label className="block mb-2 text-slate-900 font-bold text-sm">Formato</label>
