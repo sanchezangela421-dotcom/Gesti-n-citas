@@ -645,7 +645,7 @@ export function AdminDashboard() {
     const [newName, setNewName] = useState("");
     const [newDept, setNewDept] = useState("Psicología");
     const [newEmail, setNewEmail] = useState("");
-    const [newSched, setNewSched] = useState("");
+    const [, setNewSched] = useState("");
     const [newShift, setNewShift] = useState("Matutino");
     const [editingSpec, setEditingSpec] = useState<Specialist | null>(null);
     const [editPass, setEditPass] = useState("");
