@@ -35,6 +35,11 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
+    // Superadmin must use the dedicated /api/superadmin/login endpoint
+    if (user.role === 'superadmin') {
+      return res.status(403).json({ error: 'Credenciales inválidas' });
+    }
+
     // Block unverified end-users (alumno y usuario)
     if ((user.role === 'alumno' || user.role === 'usuario') && !user.emailVerified) {
       return res.status(403).json({ code: 'EMAIL_NOT_VERIFIED', error: 'Debes verificar tu correo antes de iniciar sesión.' });
