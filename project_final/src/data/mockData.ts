@@ -26,7 +26,7 @@ export const SEED_SPECIALISTS: Specialist[] = [
 export const SEED_APPOINTMENTS: Appointment[] = [
   { id: "a1", studentId: "u2", studentName: "María García López", specialistId: "s1", specialistName: "Dr. Carlos Mendoza", department: "Psicología", date: "2026-03-16", time: "09:00", status: "Confirmada", modality: "Presencial", motivo: "Estrés académico y ansiedad", createdAt: "2026-03-01T10:00:00Z" },
   { id: "a2", studentId: "u2", studentName: "María García López", specialistId: "s2", specialistName: "Mtra. Ana Ruiz", department: "Tutorías", date: "2026-03-18", time: "09:00", status: "Pendiente", modality: "Virtual", motivo: "Asesoría en materias de programación", createdAt: "2026-03-02T14:00:00Z" },
-  { id: "a3", studentId: "u2", studentName: "María García López", specialistId: "s1", specialistName: "Dr. Carlos Mendoza", department: "Psicología", date: "2026-02-10", time: "10:00", status: "Completada", modality: "Presencial", motivo: "Orientación vocacional", notes: "Seguimiento en 2 semanas.", createdAt: "2026-02-01T08:00:00Z" },
+  { id: "a3", studentId: "u2", studentName: "María García López", specialistId: "s1", specialistName: "Dr. Carlos Mendoza", department: "Psicología", date: "2026-02-10", time: "10:00", status: "Completada", modality: "Presencial", motivo: "Orientación vocacional", createdAt: "2026-02-01T08:00:00Z" },
   { id: "a4", studentId: "u2", studentName: "María García López", specialistId: "s2", specialistName: "Mtra. Ana Ruiz", department: "Tutorías", date: "2026-01-22", time: "10:00", status: "Completada", modality: "Virtual", motivo: "Planificación académica", createdAt: "2026-01-15T08:00:00Z" },
 ];
 

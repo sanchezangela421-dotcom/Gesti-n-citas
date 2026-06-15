@@ -3,22 +3,18 @@ import { prisma } from '../db';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
+import { orgScope } from '../lib/orgScope';
 import { sendAccountInvitation } from '../services/email';
 
 const EMAIL_REGEX = /^[^\s@,;]+@[^\s@,;.]+(\.[^\s@,;.]+)+$/;
 
 const router = Router();
 
-function orgFilter(req: AuthRequest) {
-  if (req.user?.role === 'superadmin') return {};
-  return req.user?.organizationId ? { organizationId: req.user.organizationId } : {};
-}
-
 // GET /api/specialists
 router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const department = req.query.department as string | undefined;
-    const where: any = { ...orgFilter(req) };
+    const where: any = { ...orgScope(req.user) };
     if (department) where.department = department;
 
     const specialists = await prisma.specialist.findMany({
@@ -114,7 +110,7 @@ router.patch('/:id', verifyToken as any, async (req: AuthRequest, res) => {
     const id = req.params.id as string;
     const { name, department, email, password, active, shift } = req.body;
 
-    const specialist = await prisma.specialist.findUnique({ where: { id } });
+    const specialist = await prisma.specialist.findFirst({ where: { id, ...orgScope(req.user) } });
     if (!specialist) return res.status(404).json({ error: 'No encontrado' });
 
     const hashedPassword = password ? await bcrypt.hash(password, 10) : undefined;
@@ -154,10 +150,11 @@ router.patch('/:id', verifyToken as any, async (req: AuthRequest, res) => {
 router.patch('/:id/meeting-url', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
-    const specialist = await prisma.specialist.findUnique({ where: { id } });
+    const specialist = await prisma.specialist.findFirst({ where: { id, ...orgScope(req.user) } });
     if (!specialist) return res.status(404).json({ error: 'No encontrado' });
 
-    if (req.user?.role !== 'admin' && req.user?.id !== specialist.userId) {
+    const isManager = req.user?.role === 'admin' || req.user?.role === 'superadmin';
+    if (!isManager && req.user?.id !== specialist.userId) {
       return res.status(403).json({ error: 'Sin permisos' });
     }
 
@@ -183,7 +180,7 @@ router.delete('/:id', verifyToken as any, async (req: AuthRequest, res) => {
     }
 
     const id = req.params.id as string;
-    const specialist = await prisma.specialist.findUnique({ where: { id } });
+    const specialist = await prisma.specialist.findFirst({ where: { id, ...orgScope(req.user) } });
     if (!specialist) return res.status(404).json({ error: 'No encontrado' });
 
     await prisma.$transaction(async (tx) => {
@@ -203,8 +200,8 @@ router.get('/:id', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
 
-    const specialist = await prisma.specialist.findUnique({
-      where: { id },
+    const specialist = await prisma.specialist.findFirst({
+      where: { id, ...orgScope(req.user) },
       include: { schedules: true }
     });
 
@@ -239,8 +236,8 @@ router.get('/:id/available-slots', verifyToken as any, async (req: AuthRequest, 
     const diffWeeks = Math.floor(diffMs / (7 * 24 * 3600 * 1000));
     const requestedWeek = Math.max(0, diffWeeks);
 
-    const specialist = await prisma.specialist.findUnique({
-      where: { id },
+    const specialist = await prisma.specialist.findFirst({
+      where: { id, ...orgScope(req.user) },
       include: { schedules: true }
     });
 
@@ -298,11 +295,12 @@ router.post('/:id/schedules', verifyToken as any, async (req: AuthRequest, res) 
     const id = req.params.id as string;
     const caller = req.user!;
 
-    if (caller.role !== 'admin') {
-      const spec = await prisma.specialist.findUnique({ where: { id } });
-      if (!spec || spec.userId !== caller.id) {
-        return res.status(403).json({ error: 'Sin permisos' });
-      }
+    // Cargar el especialista dentro del scope de la organización antes de validar permisos
+    const spec = await prisma.specialist.findFirst({ where: { id, ...orgScope(caller) } });
+    if (!spec) return res.status(404).json({ error: 'No encontrado' });
+    const isManager = caller.role === 'admin' || caller.role === 'superadmin';
+    if (!isManager && spec.userId !== caller.id) {
+      return res.status(403).json({ error: 'Sin permisos' });
     }
 
     const { dayOfWeek, startTime, endTime, week, specificDate } = req.body;
@@ -332,11 +330,12 @@ router.delete('/:id/schedules/:slotId', verifyToken as any, async (req: AuthRequ
     const slotId = req.params.slotId as string;
     const caller = req.user!;
 
-    if (caller.role !== 'admin') {
-      const spec = await prisma.specialist.findUnique({ where: { id } });
-      if (!spec || spec.userId !== caller.id) {
-        return res.status(403).json({ error: 'Sin permisos' });
-      }
+    // Cargar el especialista dentro del scope de la organización antes de validar permisos
+    const spec = await prisma.specialist.findFirst({ where: { id, ...orgScope(caller) } });
+    if (!spec) return res.status(404).json({ error: 'No encontrado' });
+    const isManager = caller.role === 'admin' || caller.role === 'superadmin';
+    if (!isManager && spec.userId !== caller.id) {
+      return res.status(403).json({ error: 'Sin permisos' });
     }
 
     await prisma.scheduleSlot.delete({ where: { id: slotId } });

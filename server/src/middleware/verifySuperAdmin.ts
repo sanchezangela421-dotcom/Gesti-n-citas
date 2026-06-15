@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { prisma } from '../db';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error('JWT_SECRET no está configurado');
@@ -28,7 +29,7 @@ function getClientIp(req: Request): string {
   );
 }
 
-export const verifySuperAdmin = (req: SuperAdminRequest, res: Response, next: NextFunction) => {
+export const verifySuperAdmin = async (req: SuperAdminRequest, res: Response, next: NextFunction) => {
   // Capa 1: IP allowlist (solo si está configurada)
   if (ALLOWED_IPS.length > 0) {
     const clientIp = getClientIp(req);
@@ -61,6 +62,21 @@ export const verifySuperAdmin = (req: SuperAdminRequest, res: Response, next: Ne
     return res.status(403).json({ error: 'Acceso denegado.' });
   }
 
-  req.actor = decoded;
-  next();
+  // Capa 5: revalidación contra la BD — el usuario sigue siendo superadmin y el
+  // token no fue revocado (tokenVersion). Cierra la sesión si cambió la contraseña.
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      select: { id: true, email: true, role: true, tokenVersion: true },
+    });
+
+    if (!user || user.role !== 'superadmin' || user.tokenVersion !== (decoded.tokenVersion ?? 0)) {
+      return res.status(403).json({ error: 'Acceso denegado.' });
+    }
+
+    req.actor = { id: user.id, email: user.email, role: user.role, organizationId: null };
+    next();
+  } catch {
+    return res.status(500).json({ error: 'Error de autenticación.' });
+  }
 };

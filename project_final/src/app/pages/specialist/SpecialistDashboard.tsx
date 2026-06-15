@@ -13,6 +13,7 @@ import { Btn, StatCard, Modal, MiniCalendar, StatusBadge, inputCls, EmptyState }
 import { DAYS_FULL } from "../../../constants";
 import { useReschedule, useActionModal } from "../../hooks";
 import { localISODate } from "../../../utils/date";
+import { PatientRecords } from "./PatientRecords";
 import type { Appointment } from "../../../types";
 
 // ─── Schedule slot management hook ───────────────────────
@@ -432,6 +433,7 @@ export function SpecialistDashboard() {
     const sidebarTabs = [
         { key: "calendar", label: "Mi Calendario", icon: CalendarDays },
         { key: "historial", label: "Historial", icon: History },
+        { key: "expedientes", label: "Expedientes", icon: ClipboardList },
         { key: "schedules", label: "Mis Horarios", icon: Clock },
         { key: "content", label: "Publicar Contenido", icon: FileText },
         { key: "event", label: "Publicar Evento", icon: Megaphone },
@@ -451,6 +453,11 @@ export function SpecialistDashboard() {
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     {statsData.map(s => <StatCard key={s.label} {...s} />)}
                 </div>
+
+                {/* Expedientes Tab */}
+                {activeTab === "expedientes" && (
+                    <PatientRecords mySpecialistId={spec.id} endUserLabel={endUserLabel} />
+                )}
 
                 {/* Calendar Tab */}
                 {activeTab === "calendar" && (
@@ -547,7 +554,8 @@ export function SpecialistDashboard() {
                                         appt.updatedAt &&
                                         appt.updatedAt.split("T")[0] > appt.date;
                                     const apptFollowUps = followUpsByParent[appt.id] ?? [];
-                                    const hasActiveFollowUp = apptFollowUps.some(f => f.status !== "Cancelada");
+                                    // "Activo" = hay un seguimiento ABIERTO; los completados liberan el botón para la siguiente sesión
+                                    const hasActiveFollowUp = apptFollowUps.some(f => f.status === "Pendiente" || f.status === "Confirmada");
                                     return (
                                         <div key={appt.id} className="space-y-2">
                                             {/* Root appointment */}
@@ -566,21 +574,12 @@ export function SpecialistDashboard() {
                                                         {new Date(appt.date + "T12:00:00").toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} — {appt.time}
                                                     </p>
                                                     <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">{appt.modality} · {appt.motivo}</p>
-                                                    {appt.status === "Completada" && appt.notes && (
-                                                        <div className="mt-2 flex items-start gap-2 p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl border border-indigo-100 dark:border-indigo-800">
-                                                            <ClipboardList className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
-                                                            <div>
-                                                                <p className="text-[0.65rem] font-bold text-indigo-400 uppercase tracking-wider mb-0.5">Notas clínicas</p>
-                                                                <p className="text-slate-600 dark:text-slate-300 text-xs leading-relaxed whitespace-pre-wrap">{appt.notes}</p>
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                    {appt.status === "Cancelada" && appt.notes && (
+                                                    {appt.status === "Cancelada" && appt.cancellationReason && (
                                                         <div className="mt-2 flex items-start gap-2 p-3 bg-rose-50 dark:bg-rose-900/20 rounded-xl border border-rose-100 dark:border-rose-800">
                                                             <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
                                                             <div>
                                                                 <p className="text-[0.65rem] font-bold text-rose-400 uppercase tracking-wider mb-0.5">Motivo de cancelación</p>
-                                                                <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed">{appt.notes}</p>
+                                                                <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed">{appt.cancellationReason}</p>
                                                             </div>
                                                         </div>
                                                     )}
@@ -619,21 +618,7 @@ export function SpecialistDashboard() {
                                                                         {new Date(fu.date + "T12:00:00").toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} — {fu.time}
                                                                     </p>
                                                                     <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">{fu.modality} · {fu.motivo}</p>
-                                                                    {fu.status === "Completada" && fu.notes && (
-                                                                        <div className="mt-2 flex items-start gap-2 p-2 bg-white dark:bg-slate-800 rounded-lg border border-indigo-100 dark:border-indigo-800">
-                                                                            <ClipboardList className="w-3 h-3 text-indigo-400 shrink-0 mt-0.5" />
-                                                                            <p className="text-slate-600 dark:text-slate-300 text-xs leading-relaxed whitespace-pre-wrap">{fu.notes}</p>
-                                                                        </div>
-                                                                    )}
                                                                 </div>
-                                                                {fu.status === "Completada" && !followUpsByParent[fu.id]?.some(f => f.status !== "Cancelada") && (
-                                                                    <button
-                                                                        onClick={() => openSeguimiento(fu)}
-                                                                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-bold transition-all hover:opacity-80 cursor-pointer shrink-0 self-start bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700"
-                                                                    >
-                                                                        <ArrowRight className="w-3 h-3" /> Seguimiento
-                                                                    </button>
-                                                                )}
                                                             </div>
                                                         ))
                                                     }
@@ -1490,21 +1475,12 @@ function AppointmentCard({
                         Motivo: {appt.motivo.replace(/^Seguimiento:\s*/i, "")}
                     </p>
                 )}
-                {appt.status === "Completada" && appt.notes && (
-                    <div className="mt-2 flex items-start gap-2 p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl border border-indigo-100 dark:border-indigo-800">
-                        <ClipboardList className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
-                        <div>
-                            <p className="text-[0.65rem] font-bold text-indigo-400 uppercase tracking-wider mb-0.5">Notas clínicas</p>
-                            <p className="text-slate-600 dark:text-slate-300 text-xs leading-relaxed whitespace-pre-wrap">{appt.notes}</p>
-                        </div>
-                    </div>
-                )}
-                {appt.status === "Cancelada" && appt.notes && (
+                {appt.status === "Cancelada" && appt.cancellationReason && (
                     <div className="mt-2 flex items-start gap-2 p-3 bg-rose-50 dark:bg-rose-900/20 rounded-xl border border-rose-100 dark:border-rose-800">
                         <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
                         <div>
                             <p className="text-[0.65rem] font-bold text-rose-400 uppercase tracking-wider mb-0.5">Motivo de cancelación</p>
-                            <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed">{appt.notes}</p>
+                            <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed">{appt.cancellationReason}</p>
                         </div>
                     </div>
                 )}

@@ -2,19 +2,15 @@ import { Router } from 'express';
 import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { upload } from '../middleware/upload';
+import { orgScope } from '../lib/orgScope';
 
 const router = Router();
-
-function orgFilter(req: AuthRequest) {
-  if (req.user?.role === 'superadmin') return {};
-  return req.user?.organizationId ? { organizationId: req.user.organizationId } : {};
-}
 
 // GET /api/events
 router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const { department } = req.query;
-    const where: any = { ...orgFilter(req) };
+    const where: any = { ...orgScope(req.user) };
     if (department) where.department = department;
 
     const events = await prisma.appEvent.findMany({

@@ -2,13 +2,9 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
+import { orgScope } from '../lib/orgScope';
 
 const router = Router();
-
-function orgFilter(req: AuthRequest) {
-  if (req.user?.role === 'superadmin') return {};
-  return req.user?.organizationId ? { organizationId: req.user.organizationId } : {};
-}
 
 const readLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -31,7 +27,7 @@ const writeLimiter = rateLimit({
 router.get('/', readLimiter, verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const periods = await prisma.reportPeriod.findMany({
-      where: { ...orgFilter(req) },
+      where: { ...orgScope(req.user) },
       orderBy: { createdAt: 'desc' },
       include: { _count: { select: { appointments: true } } },
     });
@@ -48,7 +44,7 @@ router.get('/', readLimiter, verifyToken as any, async (req: AuthRequest, res) =
 router.get('/active', readLimiter, verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const active = await prisma.reportPeriod.findFirst({
-      where: { status: 'activo', ...orgFilter(req) },
+      where: { status: 'activo', ...orgScope(req.user) },
       include: { _count: { select: { appointments: true } } },
     });
 
@@ -85,7 +81,7 @@ router.post('/', writeLimiter, verifyToken as any, async (req: AuthRequest, res)
 
   try {
     const existingActive = await prisma.reportPeriod.findFirst({
-      where: { status: 'activo', ...orgFilter(req) },
+      where: { status: 'activo', ...orgScope(req.user) },
     });
 
     if (existingActive) {

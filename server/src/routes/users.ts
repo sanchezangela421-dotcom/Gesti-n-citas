@@ -1,19 +1,15 @@
 import { Router } from 'express';
 import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
+import { orgScope } from '../lib/orgScope';
 
 const router = Router();
-
-function orgFilter(req: AuthRequest) {
-  if (req.user?.role === 'superadmin') return {};
-  return req.user?.organizationId ? { organizationId: req.user.organizationId } : {};
-}
 
 // GET /api/users — role-based filtering
 router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const caller = req.user!;
-    const where: any = { ...orgFilter(req) };
+    const where: any = { ...orgScope(req.user) };
 
     if (caller.role === 'admin' || caller.role === 'superadmin') {
       // Admin/superadmin sees all within their scope; optional ?role= filter
@@ -58,8 +54,9 @@ router.get('/:id', verifyToken as any, async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Sin permisos' });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id },
+    // El scope evita que un admin consulte usuarios de otra organización
+    const user = await prisma.user.findFirst({
+      where: { id, ...orgScope(caller) },
       select: {
         id: true, email: true, name: true, role: true,
         matricula: true, carrera: true, semestre: true,
@@ -82,7 +79,8 @@ router.delete('/:id', verifyToken as any, async (req: AuthRequest, res) => {
     }
 
     const id = req.params.id as string;
-    const user = await prisma.user.findUnique({ where: { id } });
+    // El scope evita que un admin elimine usuarios de otra organización
+    const user = await prisma.user.findFirst({ where: { id, ...orgScope(req.user) } });
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
 
     if (user.email === 'admin@instituto.edu.mx') {

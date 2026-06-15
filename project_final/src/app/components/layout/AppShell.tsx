@@ -120,6 +120,9 @@ export function AppShell({ children, sidebar }: AppShellProps) {
             if (!res.ok) {
                 toast.error(data.error || "No se pudo cambiar la contraseña.");
             } else {
+                // El backend reemite el token (nuevo tokenVersion); reemplazarlo evita
+                // que la sesión actual quede invalidada en la siguiente petición.
+                if (data.token) localStorage.setItem("token", data.token);
                 toast.success("Contraseña actualizada correctamente.");
                 closePwModal();
             }

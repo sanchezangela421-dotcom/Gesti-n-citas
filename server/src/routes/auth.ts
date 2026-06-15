@@ -47,9 +47,9 @@ router.post('/login', async (req, res) => {
 
     // Generate token
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, organizationId: user.organizationId ?? null },
+      { id: user.id, email: user.email, role: user.role, organizationId: user.organizationId ?? null, tokenVersion: user.tokenVersion },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '24h', algorithm: 'HS256' }
     );
     
     // Remove password from object before sending
@@ -259,6 +259,8 @@ router.post('/reset-password', async (req, res) => {
         password: hashedPassword,
         resetPasswordToken: null,
         resetPasswordTokenExpiresAt: null,
+        // Invalida cualquier sesión previa (clave para recuperar una cuenta comprometida)
+        tokenVersion: { increment: 1 },
         // Si el usuario nunca verificó su email (creado por SuperAdmin), lo marca al activar
         ...(user.emailVerified ? {} : { emailVerified: true }),
       }
@@ -302,12 +304,21 @@ router.post('/change-password', verifyToken as any, async (req: AuthRequest, res
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await prisma.user.update({
+    const updated = await prisma.user.update({
       where: { id: user.id },
-      data: { password: hashedPassword }
+      data: { password: hashedPassword, tokenVersion: { increment: 1 } },
+      select: { id: true, email: true, role: true, organizationId: true, tokenVersion: true },
     });
 
-    res.json({ message: 'Contraseña actualizada correctamente.' });
+    // Reemite el token con el nuevo tokenVersion: conserva la sesión actual e
+    // invalida cualquier otra sesión abierta con la contraseña anterior.
+    const token = jwt.sign(
+      { id: updated.id, email: updated.email, role: updated.role, organizationId: updated.organizationId ?? null, tokenVersion: updated.tokenVersion },
+      JWT_SECRET,
+      { expiresIn: '24h', algorithm: 'HS256' }
+    );
+
+    res.json({ message: 'Contraseña actualizada correctamente.', token });
   } catch (error) {
     console.error('Change password error:', error);
     res.status(500).json({ error: 'Error del servidor' });

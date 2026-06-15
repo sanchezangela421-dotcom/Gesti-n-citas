@@ -65,7 +65,7 @@ router.post('/', loginLimiter, async (req, res) => {
 
     // Token de corta duración — 2h en lugar de 24h del token normal
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, organizationId: null },
+      { id: user.id, email: user.email, role: user.role, organizationId: null, tokenVersion: user.tokenVersion },
       JWT_SECRET,
       { expiresIn: '2h', algorithm: 'HS256' }
     );

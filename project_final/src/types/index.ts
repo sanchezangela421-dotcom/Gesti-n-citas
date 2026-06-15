@@ -79,13 +79,49 @@ export interface Appointment {
   status: string;
   modality: string;
   motivo: string;
-  notes?: string;
+  cancellationReason?: string | null; // motivo de cancelación (no confidencial)
   meetingUrl?: string | null;
   isFollowUp?: boolean;
   parentId?: string | null;
   periodId?: string | null;
   createdAt: string;
   updatedAt?: string;
+}
+
+// ── Expediente clínico ───────────────────────────────────
+export interface PatientSummary {
+  studentId: string;
+  studentName: string;
+  lastSession: string;
+  total: number;
+}
+
+export interface RecordNote {
+  id: string;
+  body: string;
+  authoredByMe: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RecordSession {
+  id: string;
+  date: string;
+  time: string;
+  status: string;
+  modality: string;
+  motivo: string;
+  specialistId: string;
+  specialistName: string;
+  isFollowUp?: boolean;
+  parentId?: string | null;
+  note: RecordNote | null;
+}
+
+export interface PatientRecord {
+  studentId: string;
+  department: string;
+  timeline: RecordSession[];
 }
 
 export interface ReportPeriod {

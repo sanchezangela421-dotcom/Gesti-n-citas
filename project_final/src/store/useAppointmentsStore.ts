@@ -108,7 +108,7 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
         originalStatus = appt.status;
         capturedAppt = appt;
       }
-      return p.map(a => a.id === id ? { ...a, status, ...(notes ? { notes } : {}), ...(meetingUrl ? { meetingUrl } : {}) } : a);
+      return p.map(a => a.id === id ? { ...a, status, ...(notes && status === "Cancelada" ? { cancellationReason: notes } : {}), ...(meetingUrl ? { meetingUrl } : {}) } : a);
     });
 
     fetch(`${API}/appointments/${id}/status`, {
