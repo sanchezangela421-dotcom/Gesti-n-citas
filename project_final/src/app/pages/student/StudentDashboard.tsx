@@ -475,12 +475,12 @@ export function StudentDashboard() {
                                         <p className="text-slate-400 dark:text-slate-400 text-xs mt-1">
                                             {new Date(appt.date + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })} — {appt.time}
                                         </p>
-                                        {appt.status === "Cancelada" && appt.notes && (
+                                        {appt.status === "Cancelada" && appt.cancellationReason && (
                                             <div className="mt-2 flex items-start gap-2 p-2.5 bg-rose-50 rounded-xl border border-rose-100">
                                                 <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
                                                 <div>
                                                     <p className="text-[0.65rem] font-bold text-rose-400 uppercase tracking-wider mb-0.5">Motivo de cancelación</p>
-                                                    <p className="text-slate-600 text-xs leading-relaxed">{appt.notes}</p>
+                                                    <p className="text-slate-600 text-xs leading-relaxed">{appt.cancellationReason}</p>
                                                 </div>
                                             </div>
                                         )}

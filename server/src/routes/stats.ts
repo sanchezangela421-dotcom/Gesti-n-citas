@@ -1,13 +1,9 @@
 import { Router } from 'express';
 import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
+import { orgScope } from '../lib/orgScope';
 
 const router = Router();
-
-function orgFilter(req: AuthRequest) {
-  if (req.user?.role === 'superadmin') return {};
-  return req.user?.organizationId ? { organizationId: req.user.organizationId } : {};
-}
 
 // GET /api/stats?periodId=<id>
 // Si se pasa periodId, filtra las citas de ese período.
@@ -15,12 +11,12 @@ function orgFilter(req: AuthRequest) {
 router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const { periodId } = req.query;
-    const orgScope = orgFilter(req);
+    const scope = orgScope(req.user);
     const where: any = periodId === 'unassigned'
-      ? { ...orgScope, periodId: null }
+      ? { ...scope, periodId: null }
       : periodId
-        ? { ...orgScope, periodId: periodId as string }
-        : { ...orgScope };
+        ? { ...scope, periodId: periodId as string }
+        : { ...scope };
 
     const [totalAppointments, pendientes, confirmadas, completadas, canceladas] =
       await Promise.all([
