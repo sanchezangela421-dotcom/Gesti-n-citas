@@ -25,13 +25,13 @@ export function appointmentRescheduledStudentTemplate(
       </p>
       <p style="color:#64748b;font-size:13px;font-weight:600;margin:20px 0 8px;">Fecha y hora anterior</p>
       ${appointmentBox([
-        { label: 'Fecha', value: `<s style="color:#94a3b8;">${data.previousDate}</s>` },
-        { label: 'Hora', value: `<s style="color:#94a3b8;">${data.previousTime}</s>` },
+        { label: 'Fecha', value: `<s style="color:#94a3b8;">${data.previousDate}</s>`, raw: true },
+        { label: 'Hora', value: `<s style="color:#94a3b8;">${data.previousTime}</s>`, raw: true },
       ])}
       <p style="color:#64748b;font-size:13px;font-weight:600;margin:20px 0 8px;">Nueva fecha y hora</p>
       ${appointmentBox([
-        { label: 'Fecha', value: `<strong style="color:#0f766e;">${data.newDate}</strong>` },
-        { label: 'Hora', value: `<strong style="color:#0f766e;">${data.newTime}</strong>` },
+        { label: 'Fecha', value: `<strong style="color:#0f766e;">${data.newDate}</strong>`, raw: true },
+        { label: 'Hora', value: `<strong style="color:#0f766e;">${data.newTime}</strong>`, raw: true },
         { label: 'Modalidad', value: data.modality },
       ])}
       ${infoBanner(
@@ -60,14 +60,14 @@ export function appointmentRescheduledSpecialistTemplate(
       </p>
       <p style="color:#64748b;font-size:13px;font-weight:600;margin:20px 0 8px;">Fecha y hora anterior</p>
       ${appointmentBox([
-        { label: 'Fecha', value: `<s style="color:#94a3b8;">${data.previousDate}</s>` },
-        { label: 'Hora', value: `<s style="color:#94a3b8;">${data.previousTime}</s>` },
+        { label: 'Fecha', value: `<s style="color:#94a3b8;">${data.previousDate}</s>`, raw: true },
+        { label: 'Hora', value: `<s style="color:#94a3b8;">${data.previousTime}</s>`, raw: true },
       ])}
       <p style="color:#64748b;font-size:13px;font-weight:600;margin:20px 0 8px;">Nueva fecha y hora</p>
       ${appointmentBox([
         { label: 'Alumno', value: studentName },
-        { label: 'Fecha', value: `<strong style="color:#0f766e;">${data.newDate}</strong>` },
-        { label: 'Hora', value: `<strong style="color:#0f766e;">${data.newTime}</strong>` },
+        { label: 'Fecha', value: `<strong style="color:#0f766e;">${data.newDate}</strong>`, raw: true },
+        { label: 'Hora', value: `<strong style="color:#0f766e;">${data.newTime}</strong>`, raw: true },
         { label: 'Modalidad', value: data.modality },
       ])}
       ${ctaButton('Ver mi agenda', data.appUrl, 'linear-gradient(135deg,#92400e,#d97706)')}

@@ -32,13 +32,15 @@ export const header = (subtitle: string, accentGradient = 'linear-gradient(135de
   </div>
 `;
 
-/** Caja de detalles de cita — layout vertical (label encima, valor abajo) */
-export const appointmentBox = (rows: { label: string; value: string }[]) => `
+/** Caja de detalles de cita — layout vertical (label encima, valor abajo).
+ *  Por defecto el valor se escapa (anti-XSS). Usa `raw: true` SOLO para HTML
+ *  generado por el servidor y sin input de usuario (ej. fechas con formato). */
+export const appointmentBox = (rows: { label: string; value: string; raw?: boolean }[]) => `
   <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:20px;margin:24px 0;">
     ${rows.map((r, i) => `
       <div style="padding:8px 0;${i < rows.length - 1 ? 'border-bottom:1px solid #e2e8f0;' : ''}">
         <p style="color:#64748b;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 2px;">${escapeHtml(r.label)}</p>
-        <p style="color:#1e293b;font-size:14px;margin:0;font-weight:500;">${escapeHtml(r.value)}</p>
+        <p style="color:#1e293b;font-size:14px;margin:0;font-weight:500;">${r.raw ? r.value : escapeHtml(r.value)}</p>
       </div>
     `).join('')}
   </div>

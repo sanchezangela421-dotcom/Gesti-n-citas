@@ -99,6 +99,8 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
 
     // El alumno/usuario solo puede agendar para sí mismo; admin indica el alumno en el body.
     const isEndUser = caller.role === 'alumno' || caller.role === 'usuario';
+    // Si la agenda un especialista (caso seguimiento) la cita queda confirmada de una vez.
+    const createdBySpecialist = caller.role === 'especialista';
     const studentId: string | undefined = isEndUser ? caller.id : data.studentId;
     if (!studentId) {
       return res.status(400).json({ error: 'Falta el alumno de la cita' });
@@ -169,9 +171,13 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
           department: specialist.department,
           date: data.date,
           time: data.time,
-          status: 'Pendiente',
+          status: createdBySpecialist ? 'Confirmada' : 'Pendiente',
           modality: data.modality,
           motivo: data.motivo,
+          // Seguimiento virtual auto-confirmado: hereda el enlace por defecto del especialista
+          ...(createdBySpecialist && data.modality === 'Virtual' && specialist.meetingUrl
+            ? { meetingUrl: specialist.meetingUrl }
+            : {}),
           isFollowUp: data.isFollowUp ?? false,
           parentId: data.parentId ?? null,
           periodId: activePeriod?.id ?? null,
@@ -180,22 +186,35 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
       });
     });
 
-    // Email: avisa al alumno (recibida) y al especialista (nueva solicitud)
+    // Email según quién agenda:
+    //  - especialista (seguimiento): la cita ya está confirmada → solo se avisa al alumno (confirmación).
+    //  - alumno: solicitud nueva → se notifica al alumno (recibida) y al especialista (pendiente).
     fireEmail(async () => {
       const { studentEmail, specialistEmail } = await getPartyEmails(
         appointment.studentId,
         appointment.specialistId
       );
-      if (!studentEmail || !specialistEmail) return;
-      await sendAppointmentNewEmails(studentEmail, specialistEmail, {
+      const base = {
         date: formatDate(appointment.date),
         time: formatTime(appointment.time),
         specialistName: appointment.specialistName,
         studentName: appointment.studentName,
         department: appointment.department ?? '',
         modality: appointment.modality ?? '',
-        reason: appointment.motivo ?? undefined,
-      });
+      };
+
+      if (createdBySpecialist) {
+        if (studentEmail) {
+          await sendAppointmentConfirmedEmail(studentEmail, {
+            ...base,
+            meetingUrl: appointment.modality === 'Virtual' ? (specialist.meetingUrl ?? undefined) : undefined,
+          });
+        }
+        return;
+      }
+
+      if (!studentEmail || !specialistEmail) return;
+      await sendAppointmentNewEmails(studentEmail, specialistEmail, { ...base, reason: appointment.motivo ?? undefined });
     });
 
     res.status(201).json(appointment);
