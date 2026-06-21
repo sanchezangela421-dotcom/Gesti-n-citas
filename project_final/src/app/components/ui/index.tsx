@@ -2,6 +2,11 @@ import {
     CheckCircle2, Clock, Megaphone, RefreshCw, UserPlus, FileText,
     AlertTriangle, CalendarCheck, ChevronLeft, ChevronRight, X,
 } from "lucide-react";
+import { motion } from "motion/react";
+import { useId } from "react";
+import { Reveal, Stagger, StaggerItem, Skeleton, useCountUp } from "./motion";
+
+export { Reveal, Stagger, StaggerItem, Skeleton, useCountUp };
 
 const AVATAR_API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
@@ -76,22 +81,32 @@ interface StatCardProps {
     icon: React.ElementType;
     gradient: string;
     sub?: string;
+    index?: number;
 }
-export function StatCard({ label, value, icon: Icon, gradient, sub }: StatCardProps) {
+export function StatCard({ label, value, icon: Icon, gradient, sub, index = 0 }: StatCardProps) {
+    // Count-up sólo cuando el valor es numérico; strings (ej. "85%") se muestran tal cual.
+    const numeric = typeof value === "number" ? value : null;
+    const counted = useCountUp(numeric ?? 0);
+    const display = numeric !== null ? counted : value;
     return (
-        <div className={`relative overflow-hidden rounded-2xl p-5 shadow-lg text-white bg-gradient-to-br ${gradient}`}>
+        <motion.div
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, delay: index * 0.07, ease: [0.22, 1, 0.36, 1] }}
+            whileHover={{ y: -3 }}
+            className={`relative overflow-hidden rounded-2xl p-5 shadow-lg shadow-slate-900/5 text-white bg-gradient-to-br ${gradient}`}>
             <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl pointer-events-none" />
             <div className="flex items-start justify-between relative z-10">
                 <div>
                     <p className="text-white/80 font-medium tracking-wide mb-1 text-sm">{label}</p>
-                    <p className="text-3xl font-bold tracking-tight">{value}</p>
+                    <p className="text-3xl font-bold tracking-tight font-display tabular-nums">{display}</p>
                     {sub && <p className="text-white/70 mt-1 text-xs">{sub}</p>}
                 </div>
                 <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center shrink-0">
                     <Icon className="w-6 h-6 text-white" />
                 </div>
             </div>
-        </div>
+        </motion.div>
     );
 }
 
@@ -127,7 +142,7 @@ export function Btn({
 // ─── Card ────────────────────────────────────────────────
 export function Card({ children, className = "", hover = false }: { children: React.ReactNode; className?: string; hover?: boolean }) {
     return (
-        <div className={`bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm ${hover ? "transition-all duration-300 hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600" : ""} ${className}`}>
+        <div className={`bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm ${hover ? "transition-all duration-300 hover:shadow-lg hover:shadow-slate-900/5 hover:-translate-y-0.5 hover:border-slate-300 dark:hover:border-slate-600" : ""} ${className}`}>
             {children}
         </div>
     );
@@ -140,6 +155,8 @@ interface TabNavProps {
     onSelect: (k: string) => void;
 }
 export function TabNav({ tabs, active, onSelect }: TabNavProps) {
+    // Id único por instancia: evita que el indicador deslizante salte entre dos TabNav distintos.
+    const groupId = useId();
     return (
         <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl mb-4 overflow-x-auto">
             {tabs.map(t => {
@@ -148,21 +165,30 @@ export function TabNav({ tabs, active, onSelect }: TabNavProps) {
                     <button
                         key={t.key}
                         onClick={() => onSelect(t.key)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg whitespace-nowrap transition-all duration-200 text-sm ${isActive
-                            ? "bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white font-medium"
-                            : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-700/50"
+                        className={`relative flex items-center gap-2 px-4 py-2 rounded-lg whitespace-nowrap text-sm transition-colors duration-200 ${isActive
+                            ? "text-slate-900 dark:text-white font-medium"
+                            : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                         }`}
                     >
-                        {t.icon && <t.icon className={`w-4 h-4 ${isActive ? "text-blue-600 dark:text-blue-400" : ""}`} />}
-                        {t.label}
-                        {t.badge !== undefined && t.badge > 0 && (
-                            <span className={`ml-1 flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${isActive
-                                ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400"
-                                : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400"
-                            }`}>
-                                {t.badge}
-                            </span>
+                        {isActive && (
+                            <motion.span
+                                layoutId={`tabnav-${groupId}`}
+                                transition={{ type: "spring", stiffness: 500, damping: 38 }}
+                                className="absolute inset-0 bg-white dark:bg-slate-700 rounded-lg shadow-sm"
+                            />
                         )}
+                        <span className="relative z-10 flex items-center gap-2">
+                            {t.icon && <t.icon className={`w-4 h-4 ${isActive ? "text-blue-600 dark:text-blue-400" : ""}`} />}
+                            {t.label}
+                            {t.badge !== undefined && t.badge > 0 && (
+                                <span className={`ml-1 flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${isActive
+                                    ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400"
+                                    : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400"
+                                }`}>
+                                    {t.badge}
+                                </span>
+                            )}
+                        </span>
                     </button>
                 );
             })}

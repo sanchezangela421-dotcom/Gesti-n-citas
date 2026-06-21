@@ -10,7 +10,7 @@ import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
 import { API_BASE, API, authHeaders } from "../../../lib/api";
 import { AppShell } from "../../components/layout/AppShell";
-import { Btn, StatCard, TabNav, Modal, MiniCalendar, StatusBadge, Avatar, EmptyState } from "../../components/ui";
+import { Btn, StatCard, TabNav, Modal, MiniCalendar, StatusBadge, Avatar, EmptyState, Stagger, StaggerItem } from "../../components/ui";
 import { DEPT_CONFIG, DEPT_REASONS } from "../../../constants";
 import { useAppointmentWizard, useReschedule, useCancelAppointment } from "../../hooks";
 import type { AppEvent } from "../../../types";
@@ -361,7 +361,7 @@ export function StudentDashboard() {
 
                 {/* ── Stats ── */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {stats.map(s => <StatCard key={s.label} label={s.label.toUpperCase()} value={s.value} icon={s.icon} gradient={s.bg} />)}
+                    {stats.map((s, i) => <StatCard key={s.label} index={i} label={s.label.toUpperCase()} value={s.value} icon={s.icon} gradient={s.bg} />)}
                 </div>
 
                 {/* ── Appointments ── */}
@@ -390,6 +390,7 @@ export function StudentDashboard() {
                                         subtitle={activePeriod ? `No hay citas en el período "${activePeriod.name}"` : "Solicita una cita usando el botón de arriba"} />
                                 </div>
                             ) : (<>
+                            <Stagger key={`prox-${proximasPage}`} className="space-y-4">
                             {pagedProximas.map(appt => {
                                 const apptDate = new Date(appt.date + "T12:00:00");
                                 const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -398,7 +399,7 @@ export function StudentDashboard() {
                                 const hoursUntil = (apptDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
                                 const isWithin24h = hoursUntil >= 0 && hoursUntil < 24;
                                 return (
-                                <div key={appt.id} className={`bg-white dark:bg-slate-800 rounded-2xl border shadow-sm p-5 flex flex-col sm:flex-row sm:items-center gap-4 hover:shadow-md transition-shadow ${isPast ? "border-rose-100 dark:border-rose-900/50 bg-rose-50/30 dark:bg-rose-900/10" : "border-slate-200 dark:border-slate-700"}`}>
+                                <StaggerItem key={appt.id} className={`bg-white dark:bg-slate-800 rounded-2xl border shadow-sm p-5 flex flex-col sm:flex-row sm:items-center gap-4 hover:shadow-md transition-shadow ${isPast ? "border-rose-100 dark:border-rose-900/50 bg-rose-50/30 dark:bg-rose-900/10" : "border-slate-200 dark:border-slate-700"}`}>
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-1 flex-wrap">
                                             <p className="font-bold text-slate-900 dark:text-white">{appt.department}</p>
@@ -471,9 +472,10 @@ export function StudentDashboard() {
                                             </>
                                         )}
                                     </div>
-                                </div>
+                                </StaggerItem>
                                 );
                             })}
+                            </Stagger>
                             {proximasTotalPages > 1 && (
                                 <div className="flex items-center justify-between pt-2">
                                     <span className="text-xs text-slate-400">{proximasPage * PROXIMAS_PAGE_SIZE + 1}–{Math.min((proximasPage + 1) * PROXIMAS_PAGE_SIZE, proximas.length)} de {proximas.length}</span>
@@ -498,12 +500,14 @@ export function StudentDashboard() {
                                     <EmptyState icon={CalendarCheck} title="Sin historial de citas" />
                                 </div>
                             ) : (<>
+                            <Stagger key={`hist-${historialPage}`} className="space-y-4">
                             {pagedHistorial.map(appt => {
                                 const isLate = appt.status === "Completada" &&
                                     appt.updatedAt &&
                                     appt.updatedAt.split("T")[0] > appt.date;
                                 return (
-                                <div key={appt.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-5 flex items-center gap-4 opacity-80">
+                                <StaggerItem key={appt.id}>
+                                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-5 flex items-center gap-4 opacity-80">
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-1 flex-wrap">
                                             <p className="font-bold text-slate-900 dark:text-white">{appt.department}</p>
@@ -525,8 +529,10 @@ export function StudentDashboard() {
                                         )}
                                     </div>
                                 </div>
+                                </StaggerItem>
                                 );
                             })}
+                            </Stagger>
                             {historialTotalPages > 1 && (
                                 <div className="flex items-center justify-between pt-2">
                                     <span className="text-xs text-slate-400">{historialPage * HISTORIAL_PAGE_SIZE + 1}–{Math.min((historialPage + 1) * HISTORIAL_PAGE_SIZE, historial.length)} de {historial.length}</span>
@@ -548,7 +554,7 @@ export function StudentDashboard() {
                 </div>
 
                 {/* ── New Appointment Wizard ── */}
-                <Modal open={wizard.show} onClose={() => { wizard.setShow(false); wizard.reset(); }} title="Solicitar Cita" maxWidth="max-w-2xl">
+                <Modal open={wizard.show} onClose={() => { wizard.setShow(false); wizard.reset(); }} title="Solicitar Cita" maxWidth={wizard.step === 2 ? "max-w-4xl" : "max-w-2xl"}>
                     {/* Step indicators */}
                     <div className="flex items-center gap-2 mb-6">
                         {[1, 2, 3].map(n => (
@@ -561,7 +567,7 @@ export function StudentDashboard() {
                             <p className="font-bold text-slate-900 text-lg">¿Con qué departamento?</p>
                             <div className="grid gap-3">
                                 {DEPARTMENTS.map(d => (
-                                    <button key={d.key} onClick={() => { wizard.setSelDept(d.key); wizard.setStep(2); }}
+                                    <button key={d.key} onClick={() => wizard.chooseDept(d.key)}
                                         className={`flex items-center gap-4 p-4 rounded-2xl border-2 transition-all cursor-pointer text-left ${wizard.selDept === d.key ? "border-blue-600 bg-blue-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>
                                         <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${d.color} flex items-center justify-center shrink-0`}>
                                             <d.icon className="w-6 h-6 text-white" />
@@ -575,47 +581,62 @@ export function StudentDashboard() {
 
                     {wizard.step === 2 && wizard.selDept && (
                         <div className="space-y-5">
-                            <button onClick={() => wizard.setStep(1)} className="text-slate-500 text-sm flex items-center gap-1 hover:text-slate-700 cursor-pointer">
+                            <button onClick={wizard.backToDept} className="text-slate-500 text-sm flex items-center gap-1 hover:text-slate-700 cursor-pointer">
                                 <ChevronLeft className="w-4 h-4" /> Cambiar departamento
                             </button>
                             <p className="font-bold text-slate-900 text-lg">Elige especialista, fecha y horario</p>
 
-                            {/* Specialist selection */}
-                            <div className="space-y-2">
-                                {wizard.deptSpecialists.map(s => (
-                                    <button key={s.id} onClick={() => wizard.setSelSpecId(s.id)}
-                                        className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-all cursor-pointer text-left ${wizard.selSpecId === s.id ? "border-blue-600 bg-blue-50" : "border-slate-200 hover:border-slate-300"}`}>
-                                        <Avatar name={s.name} size="md" avatarUrl={s.avatarUrl} />
-                                        <div>
-                                            <p className="font-bold text-slate-900 text-sm">{s.name}</p>
-                                            <p className="text-slate-400 text-xs">{s.shift} • {s.email}</p>
+                            <div className="grid grid-cols-1 lg:grid-cols-4 gap-5 items-start">
+                                {/* ── Especialista (izquierda) ── */}
+                                <div className="lg:col-span-1 space-y-2">
+                                    <p className="font-bold text-slate-700 text-xs uppercase tracking-wide">Especialista</p>
+                                    {wizard.deptSpecialists.map(s => (
+                                        <button key={s.id} onClick={() => wizard.setSelSpecId(s.id)}
+                                            className={`w-full flex items-center gap-2.5 p-2.5 rounded-xl border-2 transition-all cursor-pointer text-left ${wizard.selSpecId === s.id ? "border-blue-600 bg-blue-50" : "border-slate-200 hover:border-slate-300"}`}>
+                                            <Avatar name={s.name} size="sm" avatarUrl={s.avatarUrl} />
+                                            <div className="min-w-0">
+                                                <p className="font-bold text-slate-900 text-sm truncate">{s.name}</p>
+                                                <p className="text-slate-400 text-xs truncate">{s.shift}</p>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {/* ── Calendario (centro) ── */}
+                                <div className="lg:col-span-2">
+                                    <p className="font-bold text-slate-700 text-xs uppercase tracking-wide mb-2">Fecha</p>
+                                    {wizard.selSpecId ? (
+                                        <MiniCalendar selectedDate={wizard.selDate} onSelect={wizard.setSelDate} availableDates={wizard.availDates} onMonthChange={wizard.handleMonthChange} />
+                                    ) : (
+                                        <div className="min-h-[260px] flex items-center justify-center text-center rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-700 p-6">
+                                            <p className="text-slate-400 text-sm">Selecciona un especialista para ver las fechas disponibles</p>
                                         </div>
-                                    </button>
-                                ))}
+                                    )}
+                                </div>
+
+                                {/* ── Horarios (derecha) ── */}
+                                <div className="lg:col-span-1">
+                                    <p className="font-bold text-slate-700 text-xs uppercase tracking-wide mb-2">Horario</p>
+                                    {!wizard.selDate ? (
+                                        <div className="min-h-[120px] flex items-center justify-center text-center rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-700 p-4">
+                                            <p className="text-slate-400 text-xs">Elige una fecha disponible</p>
+                                        </div>
+                                    ) : wizard.slotsForDate.length > 0 ? (
+                                        <div className="grid grid-cols-2 lg:grid-cols-1 gap-2">
+                                            {wizard.slotsForDate.map(slot => (
+                                                <button key={slot.start} onClick={() => wizard.setSelSlot(slot.start)}
+                                                    className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 font-bold text-sm transition-all cursor-pointer ${wizard.selSlot === slot.start ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:border-blue-300"}`}>
+                                                    <Clock className="w-3.5 h-3.5" />{slot.start}–{slot.end}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="min-h-[120px] flex items-center justify-center text-center rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-700 p-4">
+                                            <p className="text-slate-400 text-xs">Sin horarios para este día</p>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-
-                            {/* Date picker */}
-                            {wizard.selSpecId && (
-                                <div>
-                                    <p className="font-bold text-slate-700 text-sm mb-2">Selecciona una fecha disponible</p>
-                                    <MiniCalendar selectedDate={wizard.selDate} onSelect={wizard.setSelDate} availableDates={wizard.availDates} onMonthChange={wizard.handleMonthChange} />
-                                </div>
-                            )}
-
-                            {/* Slots */}
-                            {wizard.selDate && wizard.slotsForDate.length > 0 && (
-                                <div>
-                                    <p className="font-bold text-slate-700 text-sm mb-2">Selecciona un horario</p>
-                                    <div className="grid grid-cols-3 gap-2">
-                                        {wizard.slotsForDate.map(slot => (
-                                            <button key={slot.start} onClick={() => wizard.setSelSlot(slot.start)}
-                                                className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 font-bold text-sm transition-all cursor-pointer ${wizard.selSlot === slot.start ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:border-blue-300"}`}>
-                                                <Clock className="w-3.5 h-3.5" />{slot.start}–{slot.end}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
 
                             <Btn className="w-full" disabled={!wizard.selSpecId || !wizard.selDate || !wizard.selSlot} onClick={() => wizard.setStep(3)}>
                                 Continuar
@@ -839,7 +860,8 @@ export function StudentDashboard() {
                         />
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 min-h-[400px]">
                             {resources.filter(r => r.department === activeResTab).map(item => (
-                                <div key={item.id} className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 overflow-hidden group">
+                                <div key={item.id} className="h-full">
+                                <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 overflow-hidden group h-full">
                                     {item.type === "image" && item.imageUrl && (
                                         <div className="h-36 overflow-hidden bg-slate-100">
                                             <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
@@ -888,6 +910,7 @@ export function StudentDashboard() {
                                             </Btn>
                                         </div>
                                     </div>
+                                </div>
                                 </div>
                             ))}
 

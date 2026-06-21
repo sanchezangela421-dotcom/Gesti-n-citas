@@ -1,21 +1,26 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import {
     Clock, CalendarCheck, CheckCircle2, Users, FileText, Megaphone,
     CalendarDays, Info, RefreshCw, Pencil, Trash2, Calendar,
-    Video, Plus, ExternalLink, Image as ImageIcon, MapPin,
+    Video, Plus, MapPin,
     ClipboardList, ArrowRight, Lock, History, XCircle,
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
 import { AppShell } from "../../components/layout/AppShell";
-import { Btn, StatCard, Modal, MiniCalendar, StatusBadge, inputCls, EmptyState } from "../../components/ui";
+import { Btn, StatCard, Modal, MiniCalendar, StatusBadge, inputCls, EmptyState, Reveal } from "../../components/ui";
 import { DAYS_FULL } from "../../../constants";
 import { useReschedule, useActionModal } from "../../hooks";
 import { localISODate } from "../../../utils/date";
 import { API, authHeaders } from "../../../lib/api";
 import { PatientRecords } from "./PatientRecords";
-import type { Appointment, EventRegistrant, OrgLocation } from "../../../types";
+import { ContentTab } from "./ContentTab";
+import { EventTab } from "./EventTab";
+import type { Appointment, OrgLocation } from "../../../types";
+
+// Referencia estable para el fallback de schedule (evita un array nuevo por render)
+const EMPTY_SCHEDULE: never[] = [];
 
 // ─── Schedule slot management hook ───────────────────────
 function useScheduleSlots(specId: string | undefined, schedule: any[]) {
@@ -156,7 +161,7 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
 // ─── Component ───────────────────────────────────────────
 export function SpecialistDashboard() {
     const { user } = useAuth();
-    const { specialists, specialistsLoaded, getAppointments, addEvent, updateEvent, deleteEvent, addResource, updateResource, deleteResource, resources, events, getAvailableDays, getAvailableSlots, createAppointment, addNotification, updateMeetingUrl, updateSpecialistLocation, activePeriod } = useStore();
+    const { specialists, specialistsLoaded, getAppointments, getAvailableDays, getAvailableSlots, createAppointment, addNotification, updateMeetingUrl, updateSpecialistLocation, activePeriod } = useStore();
 
     const [orgLocations, setOrgLocations] = useState<OrgLocation[]>([]);
     useEffect(() => {
@@ -166,7 +171,7 @@ export function SpecialistDashboard() {
             .catch(() => { });
     }, []);
 
-    const spec = specialists.find(s => s.userId === user?.id);
+    const spec = useMemo(() => specialists.find(s => s.userId === user?.id), [specialists, user?.id]);
     const dept = user?.department || "Psicología";
 
     const [activeTab, setActiveTab] = useState("calendar");
@@ -176,57 +181,67 @@ export function SpecialistDashboard() {
     const [presencialConfirmAppt, setPresencialConfirmAppt] = useState<Appointment | null>(null);
     const [presencialConfirmLocationId, setPresencialConfirmLocationId] = useState("");
 
-    // Inscritos a un evento (conferencia)
-    const [inscritosEvent, setInscritosEvent] = useState<any | null>(null);
-    const [inscritosList, setInscritosList] = useState<EventRegistrant[]>([]);
-    const [inscritosLoading, setInscritosLoading] = useState(false);
+    const allAppts = useMemo(
+        () => (spec ? getAppointments({ specialistId: spec.id }) : []),
+        [spec, getAppointments]
+    );
+    // Medianoche de hoy — se fija una vez por montaje (estable para deps de useMemo).
+    const todayMidnight = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
 
-    const openInscritos = async (ev: any) => {
-        setInscritosEvent(ev);
-        setInscritosList([]);
-        setInscritosLoading(true);
-        try {
-            const res = await fetch(`${API}/events/${ev.id}/registrations`, { headers: authHeaders() });
-            if (res.ok) setInscritosList(await res.json());
-            else {
-                const b = await res.json().catch(() => ({}));
-                toast.error(b.error || "No se pudo cargar la lista de inscritos.");
-            }
-        } catch {
-            toast.error("Error de conexión.");
-        } finally {
-            setInscritosLoading(false);
+    // Buckets de citas en UNA sola pasada (antes: 5 .filter()/Set por render).
+    const { sinCerrar, pendientes, confirmadas, completadas, totalPatients } = useMemo(() => {
+        const sinCerrar: Appointment[] = [], pendientes: Appointment[] = [];
+        const confirmadas: Appointment[] = [], completadas: Appointment[] = [];
+        const patients = new Set<string>();
+        for (const a of allAppts) {
+            patients.add(a.studentName);
+            const isPast = new Date(a.date + "T12:00:00") < todayMidnight;
+            // Pasadas y aún abiertas (Pendiente o Confirmada) → requieren cierre
+            if ((a.status === "Pendiente" || a.status === "Confirmada") && isPast) sinCerrar.push(a);
+            // Pendientes solo de hoy en adelante
+            if (a.status === "Pendiente" && !isPast) pendientes.push(a);
+            if (a.status === "Confirmada") confirmadas.push(a);
+            if (a.status === "Completada") completadas.push(a);
         }
-    };
-
-    const allAppts = spec ? getAppointments({ specialistId: spec.id }) : [];
-    const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
-
-    // Citas pasadas que siguen abiertas (Pendiente o Confirmada sin cerrar)
-    const sinCerrar = allAppts.filter(a =>
-        (a.status === "Pendiente" || a.status === "Confirmada") &&
-        new Date(a.date + "T12:00:00") < todayMidnight
-    );
-
-    // Pendientes solo de hoy en adelante
-    const pendientes = allAppts.filter(a =>
-        a.status === "Pendiente" && new Date(a.date + "T12:00:00") >= todayMidnight
-    );
-    const confirmadas = allAppts.filter(a => a.status === "Confirmada");
-    const completadas = allAppts.filter(a => a.status === "Completada");
-    const totalPatients = new Set(allAppts.map(a => a.studentName)).size;
+        return { sinCerrar, pendientes, confirmadas, completadas, totalPatients: patients.size };
+    }, [allAppts, todayMidnight]);
 
     // Calendar tab state
     const [selDate, setSelDate] = useState(new Date());
-    const apptDates = [...new Set(allAppts.filter(a => a.status !== "Cancelada").map(a => a.date))]
-        .map(d => new Date(d + "T12:00:00"))
-        .filter(d => d >= todayMidnight);
-    const dayAppts = allAppts.filter(a => a.date === localISODate(selDate) && a.status !== "Cancelada");
+    const apptDates = useMemo(
+        () => [...new Set(allAppts.filter(a => a.status !== "Cancelada").map(a => a.date))]
+            .map(d => new Date(d + "T12:00:00"))
+            .filter(d => d >= todayMidnight),
+        [allAppts, todayMidnight]
+    );
+    const dayAppts = useMemo(
+        () => allAppts.filter(a => a.date === localISODate(selDate) && a.status !== "Cancelada"),
+        [allAppts, selDate]
+    );
+
+    // Historial: citas raíz (Completada/Cancelada sin parentId), orden desc por fecha.
+    const historialAppts = useMemo(
+        () => allAppts
+            .filter(a => (a.status === "Completada" || a.status === "Cancelada") && !a.parentId)
+            .sort((a, b) => b.date.localeCompare(a.date)),
+        [allAppts]
+    );
+    // Mapa parentId → citas de seguimiento (cualquier estado).
+    const followUpsByParent = useMemo(
+        () => allAppts.reduce((acc, a) => {
+            if (a.parentId) {
+                if (!acc[a.parentId]) acc[a.parentId] = [];
+                acc[a.parentId].push(a);
+            }
+            return acc;
+        }, {} as Record<string, typeof allAppts>),
+        [allAppts]
+    );
 
     // Hooks
     const action = useActionModal();
     const resch = useReschedule("specialist");
-    const slots = useScheduleSlots(spec?.id, spec?.schedule ?? []);
+    const slots = useScheduleSlots(spec?.id, spec?.schedule ?? EMPTY_SCHEDULE);
 
     // ── Direct confirm (no modal) ───────────────────────────────
     const { updateAppointmentStatus } = useStore();
@@ -315,110 +330,8 @@ export function SpecialistDashboard() {
         setSeguimientoSlot(null);
     };
 
-    // Content form
-    const [ctitle, setCtitle] = useState("");
-    const [cdesc, setCdesc] = useState("");
-    const [ctype, setCtype] = useState("video");
-    const [curl, setCurl] = useState("");
-    const [cimgUrl, setCimgUrl] = useState("");
-    const [selectedFile, setSelectedFile] = useState<File | null>(null);
-
-    // Edit resource modal
-    const [editingResource, setEditingResource] = useState<any | null>(null);
-    const [editRTitle, setEditRTitle] = useState("");
-    const [editRDesc, setEditRDesc] = useState("");
-    const [editRUrl, setEditRUrl] = useState("");
-    const [editRFile, setEditRFile] = useState<File | null>(null);
-
-    const openEditResource = (r: any) => {
-        setEditingResource(r);
-        setEditRTitle(r.title);
-        setEditRDesc(r.description);
-        setEditRUrl(r.url === "#" ? "" : r.url);
-        setEditRFile(null);
-    };
-
-    const handleSaveResource = async () => {
-        if (!editingResource || !editRTitle) { toast.error("El título es obligatorio"); return; }
-        await updateResource(editingResource.id, {
-            title: editRTitle, description: editRDesc, url: editRUrl || "#",
-        }, editRFile || undefined);
-        toast.success("Recurso actualizado");
-        setEditingResource(null);
-    };
-
-    // Edit event modal
-    const [editingEvent, setEditingEvent] = useState<any | null>(null);
-    const [editEvTitle, setEditEvTitle] = useState("");
-    const [editEvDesc, setEditEvDesc] = useState("");
-    const [editEvDate, setEditEvDate] = useState("");
-    const [editEvTime, setEditEvTime] = useState("");
-    const [editEvType, setEditEvType] = useState("");
-    const [editEvRegUrl, setEditEvRegUrl] = useState("");
-    const [editEvImg, setEditEvImg] = useState<File | null>(null);
-
-    const openEditEvent = (ev: any) => {
-        setEditingEvent(ev);
-        setEditEvTitle(ev.title);
-        setEditEvDesc(ev.description);
-        setEditEvDate(ev.date);
-        setEditEvTime(ev.time);
-        setEditEvType(ev.type);
-        setEditEvRegUrl(ev.registrationUrl || "");
-        setEditEvImg(null);
-    };
-
-    const handleSaveEvent = async () => {
-        if (!editingEvent || !editEvTitle || !editEvDate) { toast.error("Título y fecha son obligatorios"); return; }
-        await updateEvent(editingEvent.id, {
-            title: editEvTitle, description: editEvDesc,
-            date: editEvDate, time: editEvTime, type: editEvType,
-            registrationUrl: editEvType === "taller" ? editEvRegUrl : undefined,
-        }, editEvImg || undefined);
-        toast.success("Evento actualizado");
-        setEditingEvent(null);
-    };
-
-    const handlePublishContent = () => {
-        if (!ctitle) { toast.error("El título es obligatorio"); return; }
-        if (ctype !== "image" && !curl && !selectedFile) {
-            toast.error("Agrega un enlace o sube un archivo"); return;
-        }
-        addResource({
-            department: dept,
-            type: ctype,
-            title: ctitle,
-            description: cdesc,
-            url: curl || "#",
-            imageUrl: cimgUrl || undefined,
-        }, selectedFile || undefined);
-        setCtitle(""); setCdesc(""); setCurl(""); setCimgUrl(""); setSelectedFile(null);
-    };
-
     // Historial pagination
     const [historialSpecPage, setHistorialSpecPage] = useState(0);
-
-    // Event form
-    const [evTitle, setEvTitle] = useState("");
-    const [evDesc, setEvDesc] = useState("");
-    const [evDate, setEvDate] = useState("");
-    const [evTime, setEvTime] = useState("");
-    const [evType, setEvType] = useState("taller");
-    const [evImg, setEvImg] = useState("");
-    const [evRegUrl, setEvRegUrl] = useState("");
-    const [selectedEventImg, setSelectedEventImg] = useState<File | null>(null);
-
-    const handlePublishEvent = () => {
-        if (!evTitle || !evDate) { toast.error("Título y fecha son obligatorios"); return; }
-        addEvent({
-            title: evTitle, description: evDesc, department: dept,
-            date: evDate, time: evTime, type: evType,
-            // Si hay archivo lo sube multer y el servidor pone la URL; si no, usar URL manual o default
-            imageUrl: selectedEventImg ? undefined : (evImg || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=400&q=80"),
-            registrationUrl: evType === "taller" ? evRegUrl : undefined,
-        }, selectedEventImg || undefined);
-        setEvTitle(""); setEvDesc(""); setEvDate(""); setEvTime(""); setEvImg(""); setEvRegUrl(""); setSelectedEventImg(null);
-    };
 
     // Loading states
     if (!specialistsLoaded) return (
@@ -447,27 +360,13 @@ export function SpecialistDashboard() {
         { label: endUserTabLabel, value: totalPatients, icon: Users, gradient: "from-violet-500 to-violet-600" },
     ];
 
-    // Root appointments in history (Completada or Cancelada, no parentId)
-    const historialAppts = allAppts
-        .filter(a => (a.status === "Completada" || a.status === "Cancelada") && !a.parentId)
-        .sort((a, b) => b.date.localeCompare(a.date));
-
-    // Paginación del historial
+    // Paginación del historial (historialAppts y followUpsByParent ya memoizados arriba)
     const HISTORIAL_SPEC_PAGE_SIZE = 10;
     const historialSpecTotalPages = Math.ceil(historialAppts.length / HISTORIAL_SPEC_PAGE_SIZE);
     const pagedHistorialAppts = historialAppts.slice(
         historialSpecPage * HISTORIAL_SPEC_PAGE_SIZE,
         (historialSpecPage + 1) * HISTORIAL_SPEC_PAGE_SIZE
     );
-
-    // Map parentId → follow-up appointments (any status, not cancelled)
-    const followUpsByParent = allAppts.reduce((acc, a) => {
-        if (a.parentId) {
-            if (!acc[a.parentId]) acc[a.parentId] = [];
-            acc[a.parentId].push(a);
-        }
-        return acc;
-    }, {} as Record<string, typeof allAppts>);
 
     const sidebarTabs = [
         { key: "calendar", label: "Mi Calendario", icon: CalendarDays },
@@ -490,9 +389,11 @@ export function SpecialistDashboard() {
 
                 {/* Stats */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    {statsData.map(s => <StatCard key={s.label} {...s} />)}
+                    {statsData.map((s, i) => <StatCard key={s.label} index={i} {...s} />)}
                 </div>
 
+                {/* Contenido por pestaña — fade-up en cada cambio (key=activeTab) */}
+                <Reveal key={activeTab} className="space-y-8">
                 {/* Expedientes Tab */}
                 {activeTab === "expedientes" && (
                     <PatientRecords mySpecialistId={spec.id} endUserLabel={endUserLabel} />
@@ -944,281 +845,14 @@ export function SpecialistDashboard() {
 
                 {/* Publish Content Tab */}
                 {activeTab === "content" && (
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
-                        {/* ── Form ── */}
-                        <div>
-                            <h3 className="text-2xl font-bold text-slate-900 mb-2">Publicar Material Educativo</h3>
-                            <p className="text-slate-500 font-medium mb-6">Comparte recursos con los {endUserTabLabel} de tu organización.</p>
-                            <div className="space-y-5 bg-slate-50 border border-slate-200 rounded-3xl p-6 shadow-sm">
-                                <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Título <span className="text-rose-500">*</span></label>
-                                    <input type="text" value={ctitle} onChange={e => setCtitle(e.target.value)} placeholder="Ej. Guía para el manejo de ansiedad" className={inputCls} />
-                                </div>
-                                <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Descripción</label>
-                                    <textarea value={cdesc} onChange={e => setCdesc(e.target.value)} className={`${inputCls} resize-none`} rows={3} />
-                                </div>
-                                <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Tipo de recurso</label>
-                                    <div className="grid grid-cols-3 gap-3">
-                                        {[
-                                            { key: "video", label: "Video", icon: Video, color: "rose" },
-                                            { key: "image", label: "Infografía", icon: ImageIcon, color: "emerald" },
-                                            { key: "link", label: "Enlace", icon: ExternalLink, color: "blue" },
-                                        ].map(t => (
-                                            <button key={t.key} onClick={() => { setCtype(t.key); setCurl(""); setSelectedFile(null); }}
-                                                className={`flex flex-col items-center gap-2 p-4 border-2 rounded-2xl cursor-pointer transition-all ${ctype === t.key ? `border-${t.color}-500 bg-${t.color}-50` : "border-slate-200 bg-white hover:border-slate-300"}`}>
-                                                <t.icon className={`w-6 h-6 ${ctype === t.key ? `text-${t.color}-600` : "text-slate-400"}`} />
-                                                <span className={`text-xs font-bold ${ctype === t.key ? `text-${t.color}-700` : "text-slate-500"}`}>{t.label}</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                                {ctype === "image" && (
-                                    <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">Imagen / Infografía <span className="text-rose-500">*</span></label>
-                                        <div className="relative flex items-center gap-4 p-4 bg-white border-2 border-dashed border-emerald-200 rounded-2xl hover:border-emerald-400 transition-colors cursor-pointer">
-                                            <input type="file" accept="image/*" onChange={e => setSelectedFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                                            {selectedFile ? (
-                                                <>
-                                                    <div className="w-16 h-16 rounded-xl bg-emerald-100 flex items-center justify-center border border-emerald-200 shrink-0"><ImageIcon className="w-7 h-7 text-emerald-500" /></div>
-                                                    <div><p className="text-sm font-bold text-slate-700">{selectedFile.name}</p><p className="text-xs text-slate-400">{(selectedFile.size / 1024).toFixed(1)} KB — haz clic para cambiar</p></div>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <div className="w-16 h-16 rounded-xl bg-emerald-50 flex items-center justify-center border border-emerald-100 shrink-0"><ImageIcon className="w-7 h-7 text-emerald-400" /></div>
-                                                    <div><p className="text-sm font-bold text-slate-700">Subir imagen o infografía</p><p className="text-xs text-slate-400">JPG, PNG, WEBP. Recomendado: 800×400px</p></div>
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                                {ctype === "video" && (
-                                    <div className="space-y-4">
-                                        <div>
-                                            <label className="block mb-1 text-slate-900 font-bold text-sm">Enlace del video <span className="text-rose-500">*</span></label>
-                                            <p className="text-xs text-slate-400 mb-2">Pega la URL de YouTube o Vimeo. Los {endUserTabLabel} verán el video integrado directamente en la plataforma.</p>
-                                            <input type="url" value={curl} onChange={e => setCurl(e.target.value)} placeholder="https://youtube.com/watch?v=... o https://vimeo.com/..." className={inputCls} />
-                                        </div>
-                                        <div>
-                                            <label className="block mb-2 text-slate-900 font-bold text-sm">Archivo adjunto (opcional)</label>
-                                            <div className="relative flex items-center gap-3 p-4 bg-white border border-slate-200 rounded-xl hover:border-rose-300 transition-colors cursor-pointer">
-                                                <input type="file" onChange={e => setSelectedFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                                                <Plus className="w-5 h-5 text-slate-400" />
-                                                <div>
-                                                    <p className="text-sm font-bold text-slate-700">{selectedFile ? selectedFile.name : "Subir archivo complementario"}</p>
-                                                    {selectedFile && <p className="text-xs text-slate-400">{(selectedFile.size / 1024).toFixed(1)} KB</p>}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                                {ctype === "link" && (
-                                    <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">URL del enlace <span className="text-rose-500">*</span></label>
-                                        <input type="url" value={curl} onChange={e => setCurl(e.target.value)} placeholder="https://..." className={inputCls} />
-                                    </div>
-                                )}
-                                <Btn onClick={handlePublishContent} size="lg" className="w-full">
-                                    <FileText className="w-5 h-5" /> Publicar Material
-                                </Btn>
-                            </div>
-                        </div>
-
-                        {/* ── Published resources for this dept ── */}
-                        <div>
-                            <h3 className="text-xl font-bold text-slate-900 mb-4">Material publicado — {dept}</h3>
-                            <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-                                {resources.filter(r => r.department === dept).length === 0 ? (
-                                    <div className="text-center py-12 text-slate-400 border-2 border-dashed border-slate-100 rounded-2xl">
-                                        <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                                        <p className="text-sm font-medium">Sin material publicado en {dept}</p>
-                                    </div>
-                                ) : (
-                                    resources.filter(r => r.department === dept).map(r => (
-                                        <div key={r.id} className="flex items-start gap-3 p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow group">
-                                            <div className={`p-2 rounded-lg shrink-0 ${r.type === "video" ? "bg-rose-50" : r.type === "link" ? "bg-blue-50" : "bg-emerald-50"}`}>
-                                                {r.type === "video" && <Video className="w-4 h-4 text-rose-500" />}
-                                                {r.type === "link" && <ExternalLink className="w-4 h-4 text-blue-500" />}
-                                                {r.type === "image" && <ImageIcon className="w-4 h-4 text-emerald-500" />}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-bold text-slate-800 truncate">{r.title}</p>
-                                                {r.description && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{r.description}</p>}
-                                                <span className="text-[0.65rem] uppercase tracking-wider font-bold text-slate-400">{r.type}</span>
-                                            </div>
-                                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 shrink-0 transition-all">
-                                                <button onClick={() => openEditResource(r)} title="Editar"
-                                                    className="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all cursor-pointer">
-                                                    <Pencil className="w-4 h-4" />
-                                                </button>
-                                                <button onClick={() => deleteResource(r.id)} title="Eliminar"
-                                                    className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all cursor-pointer">
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-                        </div>
-                    </div>
+                    <ContentTab dept={dept} endUserTabLabel={endUserTabLabel} />
                 )}
 
                 {/* Publish Event Tab */}
                 {activeTab === "event" && (
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
-                        {/* ── Form ── */}
-                        <div>
-                            <h3 className="text-2xl font-bold text-slate-900 mb-2">Publicar Evento o Taller</h3>
-                            <p className="text-slate-500 font-medium mb-6">Crea un banner que aparecerá en el carrusel principal de {endUserTabLabel}.</p>
-                            <div className="space-y-5 bg-slate-50 border border-slate-200 rounded-3xl p-6 shadow-sm">
-                                <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Formato</label>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        {["taller", "conferencia"].map(t => (
-                                            <button key={t} onClick={() => setEvType(t)}
-                                                className={`py-3 rounded-xl border-2 cursor-pointer capitalize font-bold text-sm transition-all ${evType === t ? "border-violet-600 bg-violet-50 text-violet-700 shadow-sm" : "border-slate-200 bg-white text-slate-500"}`}>
-                                                {t}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Título <span className="text-rose-500">*</span></label>
-                                    <input type="text" value={evTitle} onChange={e => setEvTitle(e.target.value)} placeholder="Ej. Taller de Organización" className={inputCls} />
-                                </div>
-                                <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Descripción</label>
-                                    <textarea value={evDesc} onChange={e => setEvDesc(e.target.value)} className={`${inputCls} resize-none`} rows={3} />
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">Fecha <span className="text-rose-500">*</span></label>
-                                        <input type="date" value={evDate} onChange={e => setEvDate(e.target.value)} className={inputCls} />
-                                    </div>
-                                    <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">Hora</label>
-                                        <input type="time" value={evTime} onChange={e => setEvTime(e.target.value)} className={inputCls} />
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Imagen de portada</label>
-                                    <div className="relative flex items-center gap-4 p-5 bg-white border border-slate-200 rounded-2xl hover:border-violet-400 transition-colors cursor-pointer">
-                                        <input type="file" accept="image/*" onChange={e => setSelectedEventImg(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                                        <div className="w-20 h-20 rounded-xl bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-100">
-                                            <ImageIcon className={`w-8 h-8 ${selectedEventImg ? "text-violet-400" : "text-slate-400"}`} />
-                                        </div>
-                                        <div>
-                                            <p className="text-sm font-bold text-slate-700">{selectedEventImg ? selectedEventImg.name : "Subir imagen"}</p>
-                                            <p className="text-xs text-slate-400">JPG, PNG. Recomendado: 800×400px</p>
-                                        </div>
-                                    </div>
-                                </div>
-                                {evType === "taller" && (
-                                    <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">Enlace de registro <span className="text-rose-500">*</span></label>
-                                        <input type="url" value={evRegUrl} onChange={e => setEvRegUrl(e.target.value)} placeholder="https://forms.gle/..." className={inputCls} />
-                                    </div>
-                                )}
-                                <Btn onClick={handlePublishEvent} size="lg" className="w-full bg-violet-600 hover:bg-violet-700">
-                                    <Megaphone className="w-5 h-5" /> Publicar Evento
-                                </Btn>
-                            </div>
-                        </div>
-
-                        {/* ── Published events for this dept ── */}
-                        <div>
-                            <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
-                                <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center"><CheckCircle2 className="w-4 h-4 text-emerald-600" /></div>
-                                Eventos publicados — {dept} ({events.filter(e => e.department === dept).length})
-                            </h3>
-                            <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
-                                {events.filter(e => e.department === dept).length === 0 ? (
-                                    <div className="text-center py-12 text-slate-400 border-2 border-dashed border-slate-100 rounded-2xl">
-                                        <Megaphone className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                                        <p className="text-sm font-medium">Sin eventos publicados en {dept}</p>
-                                    </div>
-                                ) : (
-                                    events.filter(e => e.department === dept).map(ev => (
-                                        <div key={ev.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group">
-                                            {ev.imageUrl && (
-                                                <div className="h-28 bg-slate-100 overflow-hidden relative">
-                                                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900/50 to-transparent z-10" />
-                                                    <img src={ev.imageUrl} alt={ev.title} className="w-full h-full object-cover"
-                                                        onError={(e: React.SyntheticEvent<HTMLImageElement>) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                                                    <span className={`absolute bottom-2 left-2 z-20 px-2 py-0.5 rounded-md font-bold text-[0.6rem] uppercase ${ev.type === "conferencia" ? "bg-violet-500 text-white" : "bg-blue-500 text-white"}`}>
-                                                        {ev.type === "conferencia" ? "Conferencia" : "Taller"}
-                                                    </span>
-                                                    <div className="absolute top-2 right-2 z-20 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                                                        <button onClick={() => openEditEvent(ev)} title="Editar"
-                                                            className="p-1.5 bg-white/90 hover:bg-white text-blue-600 rounded-lg cursor-pointer shadow">
-                                                            <Pencil className="w-3.5 h-3.5" />
-                                                        </button>
-                                                        <button onClick={() => deleteEvent(ev.id)} title="Eliminar"
-                                                            className="p-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg cursor-pointer shadow">
-                                                            <Trash2 className="w-3.5 h-3.5" />
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            )}
-                                            <div className="p-3 flex items-start justify-between gap-2">
-                                                <div>
-                                                    <p className="text-slate-900 font-bold text-sm leading-tight">{ev.title}</p>
-                                                    <p className="text-slate-500 text-xs mt-1 flex items-center gap-1">
-                                                        <CalendarDays className="w-3 h-3" />
-                                                        {new Date(ev.date + "T12:00:00").toLocaleDateString("es-MX", { weekday: "short", day: "numeric", month: "short" })}
-                                                        {ev.time ? ` • ${ev.time}` : ""}
-                                                    </p>
-                                                    {ev.type === "conferencia" && (
-                                                        <button onClick={() => openInscritos(ev)}
-                                                            className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-violet-600 hover:text-violet-800 cursor-pointer">
-                                                            <Users className="w-3 h-3" /> {ev.registeredCount ?? 0} inscrito{(ev.registeredCount ?? 0) === 1 ? "" : "s"}
-                                                        </button>
-                                                    )}
-                                                </div>
-                                                {!ev.imageUrl && (
-                                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 shrink-0 transition-all">
-                                                        <button onClick={() => openEditEvent(ev)} title="Editar"
-                                                            className="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all cursor-pointer">
-                                                            <Pencil className="w-4 h-4" />
-                                                        </button>
-                                                        <button onClick={() => deleteEvent(ev.id)} title="Eliminar"
-                                                            className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all cursor-pointer">
-                                                            <Trash2 className="w-4 h-4" />
-                                                        </button>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-                        </div>
-                    </div>
+                    <EventTab dept={dept} endUserTabLabel={endUserTabLabel} />
                 )}
-
-                {/* Inscritos Modal */}
-                <Modal open={!!inscritosEvent} onClose={() => setInscritosEvent(null)} title="Inscritos al evento" subtitle={inscritosEvent?.title}>
-                    {inscritosLoading ? (
-                        <div className="flex justify-center py-8"><div className="w-7 h-7 rounded-full border-4 border-violet-600 border-t-transparent animate-spin" /></div>
-                    ) : inscritosList.length === 0 ? (
-                        <EmptyState icon={Users} title="Aún no hay inscritos" />
-                    ) : (
-                        <div className="space-y-2 max-h-96 overflow-y-auto">
-                            <p className="text-xs text-slate-400 font-medium mb-1">{inscritosList.length} {inscritosList.length === 1 ? "persona inscrita" : "personas inscritas"}</p>
-                            {inscritosList.map(r => (
-                                <div key={r.id} className="flex items-center justify-between gap-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
-                                    <div className="min-w-0">
-                                        <p className="font-bold text-slate-800 dark:text-white text-sm truncate">{r.name}</p>
-                                        <p className="text-slate-500 dark:text-slate-400 text-xs truncate">{r.email}</p>
-                                    </div>
-                                    <p className="text-slate-400 text-[0.7rem] shrink-0">{new Date(r.registeredAt).toLocaleDateString("es-MX", { day: "numeric", month: "short" })}</p>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </Modal>
+                </Reveal>
 
                 {/* Virtual Confirm Modal */}
                 <Modal
@@ -1462,86 +1096,6 @@ export function SpecialistDashboard() {
                             >
                                 <ArrowRight className="w-4 h-4" /> Confirmar Seguimiento
                             </Btn>
-                        </div>
-                    </div>
-                </Modal>
-
-                {/* ─── Edit Event Modal ─── */}
-                <Modal open={!!editingEvent} onClose={() => setEditingEvent(null)} title="Editar Evento" subtitle={editingEvent?.title} maxWidth="max-w-lg">
-                    <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-3">
-                            {["taller", "conferencia"].map(t => (
-                                <button key={t} onClick={() => setEditEvType(t)}
-                                    className={`py-2.5 rounded-xl border-2 cursor-pointer capitalize font-bold text-sm transition-all ${editEvType === t ? "border-violet-600 bg-violet-50 text-violet-700" : "border-slate-200 bg-white text-slate-500"}`}>
-                                    {t}
-                                </button>
-                            ))}
-                        </div>
-                        <div>
-                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Título <span className="text-rose-500">*</span></label>
-                            <input type="text" value={editEvTitle} onChange={e => setEditEvTitle(e.target.value)} className={inputCls} />
-                        </div>
-                        <div>
-                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Descripción</label>
-                            <textarea value={editEvDesc} onChange={e => setEditEvDesc(e.target.value)} rows={3} className={`${inputCls} resize-none`} />
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Fecha <span className="text-rose-500">*</span></label>
-                                <input type="date" value={editEvDate} onChange={e => setEditEvDate(e.target.value)} className={inputCls} />
-                            </div>
-                            <div>
-                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Hora</label>
-                                <input type="time" value={editEvTime} onChange={e => setEditEvTime(e.target.value)} className={inputCls} />
-                            </div>
-                        </div>
-                        {editEvType === "taller" && (
-                            <div>
-                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Enlace de Registro</label>
-                                <input type="url" value={editEvRegUrl} onChange={e => setEditEvRegUrl(e.target.value)} placeholder="https://forms.gle/..." className={inputCls} />
-                            </div>
-                        )}
-                        <div>
-                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Cambiar imagen (opcional)</label>
-                            <input type="file" accept="image/*" onChange={e => setEditEvImg(e.target.files?.[0] || null)}
-                                className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 cursor-pointer" />
-                            {editEvImg && <p className="text-xs text-slate-400 mt-1">{editEvImg.name}</p>}
-                        </div>
-                        <div className="flex gap-3 pt-2">
-                            <Btn variant="ghost" onClick={() => setEditingEvent(null)} className="flex-1">Cancelar</Btn>
-                            <Btn onClick={handleSaveEvent} className="flex-1 bg-violet-600 hover:bg-violet-700 text-white shadow-violet-600/20">Guardar Cambios</Btn>
-                        </div>
-                    </div>
-                </Modal>
-
-                {/* ─── Edit Resource Modal ─── */}
-                <Modal open={!!editingResource} onClose={() => setEditingResource(null)} title="Editar Recurso" subtitle={editingResource?.title} maxWidth="max-w-md">
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Título <span className="text-rose-500">*</span></label>
-                            <input type="text" value={editRTitle} onChange={e => setEditRTitle(e.target.value)} className={inputCls} />
-                        </div>
-                        <div>
-                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Descripción</label>
-                            <textarea value={editRDesc} onChange={e => setEditRDesc(e.target.value)} rows={3} className={`${inputCls} resize-none`} />
-                        </div>
-                        {editingResource?.type !== "image" && (
-                            <div>
-                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Enlace</label>
-                                <input type="url" value={editRUrl} onChange={e => setEditRUrl(e.target.value)} placeholder="https://..." className={inputCls} />
-                            </div>
-                        )}
-                        {editingResource?.type !== "link" && (
-                            <div>
-                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Cambiar archivo (opcional)</label>
-                                <input type="file" onChange={e => setEditRFile(e.target.files?.[0] || null)}
-                                    className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer" />
-                                {editRFile && <p className="text-xs text-slate-400 mt-1">{editRFile.name}</p>}
-                            </div>
-                        )}
-                        <div className="flex gap-3 pt-2">
-                            <Btn variant="ghost" onClick={() => setEditingResource(null)} className="flex-1">Cancelar</Btn>
-                            <Btn onClick={handleSaveResource} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20">Guardar Cambios</Btn>
                         </div>
                     </div>
                 </Modal>

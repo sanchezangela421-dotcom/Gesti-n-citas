@@ -30,6 +30,24 @@ export function useAppointmentWizard() {
         setConfidentialityAccepted(false);
     };
 
+    // Volver al paso 1 (cambiar departamento) limpiando la selección dependiente.
+    // Al anular selSpecId/selDate, los efectos de abajo vacían availDates y slotsForDate,
+    // evitando arrastrar especialista/fecha/horario de un departamento a otro.
+    const backToDept = () => {
+        setSelSpecId(null); setSelDate(null); setSelSlot(null);
+        setStep(1);
+    };
+
+    // Elegir departamento en el paso 1; si cambia respecto al actual, limpia la
+    // selección dependiente antes de avanzar (defensa en profundidad).
+    const chooseDept = (dept: string) => {
+        if (dept !== selDept) {
+            setSelSpecId(null); setSelDate(null); setSelSlot(null);
+        }
+        setSelDept(dept);
+        setStep(2);
+    };
+
     useEffect(() => {
         if (!selSpecId) { setAvailDates([]); loadedMonths.current.clear(); return; }
         loadedMonths.current.clear();
@@ -89,6 +107,7 @@ export function useAppointmentWizard() {
         availDates, slotsForDate,
         deptSpecialists, selSpec,
         reset, confirm, handleMonthChange,
+        backToDept, chooseDept,
     };
 }
 

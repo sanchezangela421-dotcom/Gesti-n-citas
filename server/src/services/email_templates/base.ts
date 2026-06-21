@@ -8,6 +8,18 @@ export function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
+
+/** Sanea una URL para usar en un atributo href: solo permite http(s).
+ *  Cualquier otro esquema (javascript:, data:, etc.) → '#'.
+ *  El resultado debe escaparse igual (escapeHtml) antes de insertarlo en el HTML. */
+export function safeUrl(url: string): string {
+  const trimmed = (url ?? '').trim();
+  try {
+    const u = new URL(trimmed);
+    if (u.protocol === 'http:' || u.protocol === 'https:') return trimmed;
+  } catch { /* URL inválida */ }
+  return '#';
+}
 // La imagen se envía como adjunto MIME (CID) para que funcione en todos los clientes
 // sin depender de una URL pública. Ver email.ts → LOGO_ATTACHMENT.
 const LOGO_CID = 'logo@synkros';

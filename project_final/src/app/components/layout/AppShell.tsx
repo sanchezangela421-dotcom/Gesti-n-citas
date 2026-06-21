@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from "react";
 import { Bell, LogOut, X, Menu, Trash2, Moon, Sun, KeyRound, Eye, EyeOff, RefreshCw, ChevronDown, Camera, WifiOff } from "lucide-react";
+import { motion } from "motion/react";
 import { toast } from "sonner";
 import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
 import { useTheme } from "../../hooks/useTheme";
-import { Avatar, NotifIcon } from "../ui";
+import { Avatar, NotifIcon, Reveal } from "../ui";
 import { API_BASE } from "../../../lib/api";
 
 interface SidebarTab {
@@ -232,11 +233,16 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                             const badge = sidebar.badges?.[t.key];
                             return (
                                 <button key={t.key} onClick={() => sidebar.onSelect(t.key)}
-                                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all cursor-pointer group ${isActive ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}>
-                                    <t.icon className={`w-5 h-5 transition-colors ${isActive ? "text-white" : "text-slate-400 group-hover:text-white"}`} />
-                                    <span className="font-medium text-sm">{t.label}</span>
+                                    className={`relative w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors cursor-pointer group ${isActive ? "text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}>
+                                    {isActive && (
+                                        <motion.span layoutId="sidebar-desktop-active"
+                                            transition={{ type: "spring", stiffness: 500, damping: 40 }}
+                                            className="absolute inset-0 bg-blue-600 rounded-xl shadow-md shadow-blue-500/20" />
+                                    )}
+                                    <t.icon className={`relative z-10 w-5 h-5 transition-colors ${isActive ? "text-white" : "text-slate-400 group-hover:text-white"}`} />
+                                    <span className="relative z-10 font-medium text-sm">{t.label}</span>
                                     {badge !== undefined && badge > 0 && (
-                                        <span className={`ml-auto px-2 py-0.5 rounded-full text-xs font-bold ${isActive ? "bg-white text-blue-600" : "bg-blue-500/30 text-white"}`}>
+                                        <span className={`relative z-10 ml-auto px-2 py-0.5 rounded-full text-xs font-bold ${isActive ? "bg-white text-blue-600" : "bg-blue-500/30 text-white"}`}>
                                             {badge}
                                         </span>
                                     )}
@@ -264,11 +270,16 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                                 const badge = sidebar.badges?.[t.key];
                                 return (
                                     <button key={t.key} onClick={() => { sidebar.onSelect(t.key); setSidebarOpen(false); }}
-                                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all cursor-pointer group ${isActive ? "bg-blue-600 text-white shadow-md shadow-blue-500/20" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}>
-                                        <t.icon className={`w-5 h-5 ${isActive ? "text-white" : "text-slate-400 group-hover:text-white"}`} />
-                                        <span className="font-medium text-sm">{t.label}</span>
+                                        className={`relative w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors cursor-pointer group ${isActive ? "text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}>
+                                        {isActive && (
+                                            <motion.span layoutId="sidebar-mobile-active"
+                                                transition={{ type: "spring", stiffness: 500, damping: 40 }}
+                                                className="absolute inset-0 bg-blue-600 rounded-xl shadow-md shadow-blue-500/20" />
+                                        )}
+                                        <t.icon className={`relative z-10 w-5 h-5 ${isActive ? "text-white" : "text-slate-400 group-hover:text-white"}`} />
+                                        <span className="relative z-10 font-medium text-sm">{t.label}</span>
                                         {badge !== undefined && badge > 0 && (
-                                            <span className={`ml-auto px-2 py-0.5 rounded-full text-xs font-bold ${isActive ? "bg-white text-blue-600" : "bg-blue-500/30 text-white"}`}>
+                                            <span className={`relative z-10 ml-auto px-2 py-0.5 rounded-full text-xs font-bold ${isActive ? "bg-white text-blue-600" : "bg-blue-500/30 text-white"}`}>
                                                 {badge}
                                             </span>
                                         )}
@@ -478,7 +489,7 @@ export function AppShell({ children, sidebar }: AppShellProps) {
 
                 {/* Page content */}
                 <main className="flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-950 p-4 sm:p-6 lg:p-8">
-                    <div className="max-w-7xl mx-auto space-y-6">{children}</div>
+                    <Reveal className="max-w-7xl mx-auto space-y-6">{children}</Reveal>
                 </main>
             </div>
         </div>

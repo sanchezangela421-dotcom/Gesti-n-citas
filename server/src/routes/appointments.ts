@@ -305,12 +305,26 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       }
     }
 
+    // Saneamiento del enlace de videollamada (anti-XSS): solo se acepta http(s).
+    // El meetingUrl se renderiza como <a href> en correos y en el frontend, así que
+    // bloqueamos esquemas peligrosos (javascript:, data:, etc.) en el origen.
+    if (bodyMeetingUrl != null && String(bodyMeetingUrl).trim() !== '') {
+      let validUrl = false;
+      try {
+        const u = new URL(String(bodyMeetingUrl).trim());
+        validUrl = u.protocol === 'http:' || u.protocol === 'https:';
+      } catch { validUrl = false; }
+      if (!validUrl) {
+        return res.status(400).json({ error: 'El enlace de videollamada debe ser una URL http(s) válida.' });
+      }
+    }
+
     // Resolver meetingUrl / ubicación antes del update para guardarlos en la cita
     let resolvedMeetingUrl: string | undefined;
     let resolvedLocation: string | undefined;
     if (status === 'Confirmada' && (current.modality === 'Virtual' || current.modality === 'Presencial')) {
       const spec = await prisma.specialist.findUnique({ where: { id: current.specialistId }, include: { location: true } });
-      if (current.modality === 'Virtual') resolvedMeetingUrl = bodyMeetingUrl || spec?.meetingUrl || undefined;
+      if (current.modality === 'Virtual') resolvedMeetingUrl = (typeof bodyMeetingUrl === 'string' ? bodyMeetingUrl.trim() : '') || spec?.meetingUrl || undefined;
       if (current.modality === 'Presencial') {
         // El especialista puede elegir la sede al confirmar; si no, usa su sede por defecto.
         if (bodyLocationId) {

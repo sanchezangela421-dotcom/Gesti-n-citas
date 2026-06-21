@@ -1,1 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+/* Identidad tipográfica
+   - Display: Bricolage Grotesque — titulares con carácter (humanista, contemporánea)
+   - Cuerpo/UI: Manrope — geométrica, legible en densidad de dashboard
+   Cobertura latina completa (acentos/ñ del español). */
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Manrope:wght@300..800&display=swap');

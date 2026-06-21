@@ -1,4 +1,4 @@
-import { wrap, header, footer, appointmentBox, ctaButton, infoBanner } from './base';
+import { wrap, header, footer, appointmentBox, ctaButton, infoBanner, escapeHtml } from './base';
 
 interface RescheduledData {
   previousDate: string;
@@ -18,9 +18,9 @@ export function appointmentRescheduledStudentTemplate(
   return wrap(`
     ${header('Tu cita fue reagendada', 'linear-gradient(135deg,#92400e,#d97706)')}
     <div style="padding:32px;">
-      <p style="color:#334155;font-size:15px;">Hola <strong>${studentName}</strong>,</p>
+      <p style="color:#334155;font-size:15px;">Hola <strong>${escapeHtml(studentName)}</strong>,</p>
       <p style="color:#475569;font-size:14px;line-height:1.6;">
-        Tu especialista <strong>${specialistName}</strong> ha reagendado tu cita en
+        Tu especialista <strong>${escapeHtml(specialistName)}</strong> ha reagendado tu cita en
         <strong>Synkros</strong>. Revisa los nuevos datos a continuación.
       </p>
       <p style="color:#64748b;font-size:13px;font-weight:600;margin:20px 0 8px;">Fecha y hora anterior</p>
@@ -53,9 +53,9 @@ export function appointmentRescheduledSpecialistTemplate(
   return wrap(`
     ${header('Un alumno reagendó su cita', 'linear-gradient(135deg,#92400e,#d97706)')}
     <div style="padding:32px;">
-      <p style="color:#334155;font-size:15px;">Hola <strong>${specialistName}</strong>,</p>
+      <p style="color:#334155;font-size:15px;">Hola <strong>${escapeHtml(specialistName)}</strong>,</p>
       <p style="color:#475569;font-size:14px;line-height:1.6;">
-        El alumno <strong>${studentName}</strong> ha reagendado su cita en
+        El alumno <strong>${escapeHtml(studentName)}</strong> ha reagendado su cita en
         <strong>Synkros</strong>. Tu agenda ha sido actualizada.
       </p>
       <p style="color:#64748b;font-size:13px;font-weight:600;margin:20px 0 8px;">Fecha y hora anterior</p>

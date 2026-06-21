@@ -160,7 +160,22 @@ router.patch('/:id/meeting-url', verifyToken as any, async (req: AuthRequest, re
 
     const { meetingUrl, locationId } = req.body;
     const data: any = {};
-    if (meetingUrl !== undefined) data.meetingUrl = meetingUrl || null;
+    if (meetingUrl !== undefined) {
+      // Saneamiento anti-XSS: el enlace se muestra como <a href> en correos y frontend,
+      // así que solo aceptamos http(s) y bloqueamos esquemas peligrosos (javascript:, data:…).
+      const trimmed = typeof meetingUrl === 'string' ? meetingUrl.trim() : '';
+      if (trimmed) {
+        let validUrl = false;
+        try {
+          const u = new URL(trimmed);
+          validUrl = u.protocol === 'http:' || u.protocol === 'https:';
+        } catch { validUrl = false; }
+        if (!validUrl) {
+          return res.status(400).json({ error: 'El enlace de videollamada debe ser una URL http(s) válida.' });
+        }
+      }
+      data.meetingUrl = trimmed || null;
+    }
     if (locationId !== undefined) {
       // La sede debe pertenecer a la organización del especialista
       if (locationId) {
