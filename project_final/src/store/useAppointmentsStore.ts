@@ -97,7 +97,7 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
     }
   }, [specialists, users, addNotification]);
 
-  const updateAppointmentStatus = useCallback((id: string, status: string, notes?: string, byStudent?: boolean, meetingUrl?: string) => {
+  const updateAppointmentStatus = useCallback((id: string, status: string, notes?: string, byStudent?: boolean, meetingUrl?: string, locationId?: string) => {
     let originalStatus: string | null = null;
     let capturedAppt: Appointment | null = null;
 
@@ -114,7 +114,7 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
     fetch(`${API}/appointments/${id}/status`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ status, notes, ...(meetingUrl ? { meetingUrl } : {}) }),
+      body: JSON.stringify({ status, notes, ...(meetingUrl ? { meetingUrl } : {}), ...(locationId ? { locationId } : {}) }),
     }).then(async res => {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));

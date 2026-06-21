@@ -15,9 +15,20 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
 
     const events = await prisma.appEvent.findMany({
       where,
-      orderBy: { date: 'asc' }
+      orderBy: { date: 'asc' },
+      include: {
+        _count: { select: { registrations: true } },
+        registrations: { where: { userId: req.user!.id }, select: { id: true } },
+      },
     });
-    res.json(events);
+
+    // Aplanar: agregar conteo de inscritos e indicar si el usuario actual ya está inscrito
+    const shaped = events.map(({ _count, registrations, ...e }) => ({
+      ...e,
+      registeredCount: _count.registrations,
+      isRegistered: registrations.length > 0,
+    }));
+    res.json(shaped);
   } catch (error) {
     console.error('Error fetching events:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
@@ -52,6 +63,7 @@ router.post('/', verifyToken as any, upload.single('image'), async (req: AuthReq
         type: type || 'conferencia',
         imageUrl: imageUrl || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=400&q=80',
         registrationUrl,
+        createdById: req.user?.id ?? null,
         organizationId: req.user?.organizationId ?? null,
       }
     });
@@ -109,6 +121,82 @@ router.delete('/:id', verifyToken as any, async (req: AuthRequest, res) => {
     await prisma.appEvent.delete({ where: { id: req.params.id as string } });
     res.json({ success: true });
   } catch {
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// ── POST /api/events/:id/register ─────────────────────────────────────────────
+// El alumno/usuario se inscribe al evento (vincula su cuenta). Idempotente.
+router.post('/:id/register', verifyToken as any, async (req: AuthRequest, res) => {
+  const caller = req.user!;
+  if (caller.role !== 'alumno' && caller.role !== 'usuario') {
+    return res.status(403).json({ error: 'Solo los usuarios pueden inscribirse' });
+  }
+  try {
+    const id = req.params.id as string;
+    const event = await prisma.appEvent.findFirst({ where: { id, ...orgScope(caller) } });
+    if (!event) return res.status(404).json({ error: 'Evento no encontrado' });
+
+    try {
+      await prisma.eventRegistration.create({
+        data: { eventId: id, userId: caller.id, organizationId: event.organizationId },
+      });
+    } catch (e: any) {
+      if (e.code === 'P2002') return res.json({ ok: true, alreadyRegistered: true }); // ya inscrito
+      throw e;
+    }
+    res.status(201).json({ ok: true });
+  } catch (error) {
+    console.error('Error registering to event:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// ── DELETE /api/events/:id/register ───────────────────────────────────────────
+// El alumno/usuario cancela su inscripción. Idempotente.
+router.delete('/:id/register', verifyToken as any, async (req: AuthRequest, res) => {
+  const caller = req.user!;
+  try {
+    const id = req.params.id as string;
+    await prisma.eventRegistration.deleteMany({ where: { eventId: id, userId: caller.id } });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Error unregistering from event:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// ── GET /api/events/:id/registrations ─────────────────────────────────────────
+// Lista de inscritos: el admin ve los de su org; el especialista solo los de SUS eventos.
+router.get('/:id/registrations', verifyToken as any, async (req: AuthRequest, res) => {
+  const caller = req.user!;
+  if (caller.role !== 'admin' && caller.role !== 'superadmin' && caller.role !== 'especialista') {
+    return res.status(403).json({ error: 'Sin permisos' });
+  }
+  try {
+    const id = req.params.id as string;
+    const event = await prisma.appEvent.findFirst({ where: { id, ...orgScope(caller) } });
+    if (!event) return res.status(404).json({ error: 'Evento no encontrado' });
+
+    // El especialista solo ve inscritos de los eventos que él creó
+    if (caller.role === 'especialista' && event.createdById !== caller.id) {
+      return res.status(403).json({ error: 'Solo puedes ver inscritos de tus propios eventos' });
+    }
+
+    const regs = await prisma.eventRegistration.findMany({
+      where: { eventId: id },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, createdAt: true, user: { select: { id: true, name: true, email: true } } },
+    });
+    res.json(regs.map(r => ({
+      id: r.id,
+      registeredAt: r.createdAt,
+      userId: r.user.id,
+      name: r.user.name,
+      email: r.user.email,
+    })));
+  } catch (error) {
+    console.error('Error fetching event registrations:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });

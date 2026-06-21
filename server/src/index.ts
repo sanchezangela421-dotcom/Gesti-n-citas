@@ -56,6 +56,7 @@ import periodsRoutes from './routes/periods';
 import superadminRoutes from './routes/superadmin/index';
 import publicRoutes from './routes/public';
 import patientsRoutes from './routes/patients';
+import locationsRoutes from './routes/locations';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/appointments', appointmentsRoutes);
@@ -69,6 +70,7 @@ app.use('/api/periods', periodsRoutes);
 app.use('/api/superadmin', superadminRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/patients', patientsRoutes);
+app.use('/api/locations', locationsRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'API is running' });

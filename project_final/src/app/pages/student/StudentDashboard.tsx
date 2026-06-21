@@ -4,11 +4,11 @@ import {
     CalendarCheck, Clock, CheckCircle2, BookOpen, RefreshCw,
     AlertTriangle, Info, Video, Users, ChevronLeft, ChevronRight,
     Calendar, Brain, GraduationCap, Apple,
-    ExternalLink, Image as ImageIcon, Maximize2,
+    ExternalLink, Image as ImageIcon, Maximize2, MapPin,
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
-import { API_BASE } from "../../../lib/api";
+import { API_BASE, API, authHeaders } from "../../../lib/api";
 import { AppShell } from "../../components/layout/AppShell";
 import { Btn, StatCard, TabNav, Modal, MiniCalendar, StatusBadge, Avatar, EmptyState } from "../../components/ui";
 import { DEPT_CONFIG, DEPT_REASONS } from "../../../constants";
@@ -77,6 +77,34 @@ export function StudentDashboard() {
     const [videoModal, setVideoModal] = useState<{ embedUrl: string; title: string } | null>(null);
     const [showConfModal, setShowConfModal] = useState(false);
     const [selConf, setSelConf] = useState<AppEvent | null>(null);
+    const [confLoading, setConfLoading] = useState(false);
+
+    // Inscribirse / cancelar inscripción a una conferencia
+    const toggleConfRegistration = async () => {
+        if (!selConf) return;
+        const willRegister = !selConf.isRegistered;
+        setConfLoading(true);
+        try {
+            const res = await fetch(`${API}/events/${selConf.id}/register`, {
+                method: willRegister ? "POST" : "DELETE",
+                headers: authHeaders(),
+            });
+            if (!res.ok) {
+                const b = await res.json().catch(() => ({}));
+                throw new Error(b.error || "No se pudo procesar la inscripción.");
+            }
+            setSelConf({
+                ...selConf,
+                isRegistered: willRegister,
+                registeredCount: Math.max(0, (selConf.registeredCount ?? 0) + (willRegister ? 1 : -1)),
+            });
+            toast.success(willRegister ? "¡Inscripción confirmada!" : "Inscripción cancelada.");
+        } catch (e: any) {
+            toast.error(e.message || "Error de conexión.");
+        } finally {
+            setConfLoading(false);
+        }
+    };
 
     // Labels de campos dinámicos de la org (para mostrar en el header cuando no es escuela)
     const [orgFields, setOrgFields] = useState<Array<{ key: string; label: string }>>([]);
@@ -394,6 +422,17 @@ export function StudentDashboard() {
                                             ) : (
                                                 <p className="text-blue-500 text-xs mt-1 flex items-center gap-1">
                                                     <Video className="w-3.5 h-3.5" /> Cita virtual — el especialista compartirá el enlace
+                                                </p>
+                                            )
+                                        )}
+                                        {appt.status === "Confirmada" && appt.modality === "Presencial" && (
+                                            appt.location ? (
+                                                <p className="text-emerald-600 text-xs mt-1 flex items-center gap-1 font-medium">
+                                                    <MapPin className="w-3.5 h-3.5" /> {appt.location}
+                                                </p>
+                                            ) : (
+                                                <p className="text-emerald-500 text-xs mt-1 flex items-center gap-1">
+                                                    <MapPin className="w-3.5 h-3.5" /> Cita presencial — el especialista te indicará el lugar
                                                 </p>
                                             )
                                         )}
@@ -770,10 +809,15 @@ export function StudentDashboard() {
                                     </h4>
                                     <p className="text-slate-600 text-sm leading-relaxed whitespace-pre-wrap">{selConf.description}</p>
                                 </div>
-                                <Btn onClick={() => { setShowConfModal(false); toast.success("¡Interés registrado!"); }}
-                                    className="w-full bg-slate-900 text-white hover:bg-black font-black uppercase italic tracking-widest py-4 rounded-2xl shadow-xl">
-                                    ¡Registrarme Ahora!
+                                <Btn onClick={toggleConfRegistration} disabled={confLoading}
+                                    className={`w-full font-black uppercase italic tracking-widest py-4 rounded-2xl shadow-xl ${selConf.isRegistered ? "bg-rose-600 text-white hover:bg-rose-700" : "bg-slate-900 text-white hover:bg-black"}`}>
+                                    {confLoading ? "Procesando..." : selConf.isRegistered ? "Cancelar inscripción" : "¡Inscribirme!"}
                                 </Btn>
+                                {typeof selConf.registeredCount === "number" && (
+                                    <p className="text-center text-xs text-slate-400 font-medium">
+                                        {selConf.registeredCount} {selConf.registeredCount === 1 ? "persona inscrita" : "personas inscritas"}
+                                    </p>
+                                )}
                             </div>
                         </div>
                     )}

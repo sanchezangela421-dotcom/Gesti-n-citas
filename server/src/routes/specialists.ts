@@ -158,10 +158,21 @@ router.patch('/:id/meeting-url', verifyToken as any, async (req: AuthRequest, re
       return res.status(403).json({ error: 'Sin permisos' });
     }
 
-    const { meetingUrl } = req.body;
+    const { meetingUrl, locationId } = req.body;
+    const data: any = {};
+    if (meetingUrl !== undefined) data.meetingUrl = meetingUrl || null;
+    if (locationId !== undefined) {
+      // La sede debe pertenecer a la organización del especialista
+      if (locationId) {
+        const loc = await prisma.orgLocation.findFirst({ where: { id: locationId, ...orgScope(req.user) } });
+        if (!loc) return res.status(400).json({ error: 'Sede no válida' });
+      }
+      data.locationId = locationId || null;
+    }
+
     const updated = await prisma.specialist.update({
       where: { id },
-      data: { meetingUrl: meetingUrl || null },
+      data,
       include: { schedules: true },
     });
 

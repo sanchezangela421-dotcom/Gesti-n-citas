@@ -5,7 +5,7 @@ import {
     BarChart3, Plus, Pencil, XCircle, Search, Download,
     Clock3, FileText, Megaphone, Brain, GraduationCap, Apple,
     Video, ExternalLink, Image as ImageIcon, CalendarDays, Trash2,
-    Scissors, ChevronDown,
+    Scissors, ChevronDown, MapPin,
 } from "lucide-react";
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -24,7 +24,7 @@ import { useActionModal } from "../../hooks";
 import { useTheme } from "../../hooks/useTheme";
 import { API, authHeaders, getUploadUrl } from "../../../lib/api";
 import { calcularEdad } from "../../../utils/date";
-import type { Appointment, Specialist, AppEvent, Resource } from "../../../types";
+import type { Appointment, Specialist, AppEvent, Resource, EventRegistrant, OrgLocation } from "../../../types";
 
 // ─── ReportPeriod type ────────────────────────────────────────────────────────
 interface ReportPeriod {
@@ -258,6 +258,7 @@ async function generatePDFReport(deptReport: string, allAppts: Appointment[], us
             completadas: list.filter(a => a.status === "Completada").length,
             pendientes: list.filter(a => a.status === "Pendiente").length,
             canceladas: list.filter(a => a.status === "Cancelada").length,
+            seguimientos: list.filter(a => a.isFollowUp).length,
             topMotivos: Object.entries(motivosMap).sort(([, a], [, b]) => b - a).slice(0, 5),
             modalidad: Object.entries(modalidadMap),
             topCarreras: Object.entries(carreraMap).sort(([, a], [, b]) => b - a).slice(0, 6),
@@ -291,6 +292,7 @@ async function generatePDFReport(deptReport: string, allAppts: Appointment[], us
                 ["Completadas", stats.completadas],
                 ["Pendientes", stats.pendientes],
                 ["Canceladas", stats.canceladas],
+                ["De las cuales, seguimientos", stats.seguimientos],
             ],
             theme: "grid",
             headStyles: { fillColor: [59, 130, 246] },
@@ -697,6 +699,71 @@ export function AdminDashboard() {
         setEditEvImg(null);
     };
 
+    // Inscritos a un evento (la lista llega filtrada por org desde el backend)
+    const [inscritosEvent, setInscritosEvent] = useState<AppEvent | null>(null);
+    const [inscritosList, setInscritosList] = useState<EventRegistrant[]>([]);
+    const [inscritosLoading, setInscritosLoading] = useState(false);
+
+    // Sedes de la organización (catálogo) — solo el admin las da de alta
+    const [orgLocations, setOrgLocations] = useState<OrgLocation[]>([]);
+    const [newLocName, setNewLocName] = useState("");
+    const [newLocAddress, setNewLocAddress] = useState("");
+
+    const loadLocations = useCallback(async () => {
+        try {
+            const res = await fetch(`${API}/locations?all=1`, { headers: authHeaders() });
+            if (res.ok) setOrgLocations(await res.json());
+        } catch { /* silencioso */ }
+    }, []);
+    useEffect(() => { loadLocations(); }, [loadLocations]);
+
+    const addLocation = async () => {
+        const name = newLocName.trim();
+        if (!name) { toast.error("El nombre de la sede es requerido"); return; }
+        try {
+            const res = await fetch(`${API}/locations`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", ...authHeaders() },
+                body: JSON.stringify({ name, address: newLocAddress.trim() || null }),
+            });
+            if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || "Error"); }
+            setNewLocName(""); setNewLocAddress("");
+            await loadLocations();
+            toast.success("Sede agregada");
+        } catch (e: any) {
+            toast.error(e.message || "No se pudo agregar la sede.");
+        }
+    };
+
+    const deleteLocation = async (id: string) => {
+        try {
+            const res = await fetch(`${API}/locations/${id}`, { method: "DELETE", headers: authHeaders() });
+            if (!res.ok) throw new Error();
+            await loadLocations();
+            toast.success("Sede eliminada");
+        } catch {
+            toast.error("No se pudo eliminar la sede.");
+        }
+    };
+
+    const openInscritos = async (ev: AppEvent) => {
+        setInscritosEvent(ev);
+        setInscritosList([]);
+        setInscritosLoading(true);
+        try {
+            const res = await fetch(`${API}/events/${ev.id}/registrations`, { headers: authHeaders() });
+            if (res.ok) setInscritosList(await res.json());
+            else {
+                const b = await res.json().catch(() => ({}));
+                toast.error(b.error || "No se pudo cargar la lista de inscritos.");
+            }
+        } catch {
+            toast.error("Error de conexión.");
+        } finally {
+            setInscritosLoading(false);
+        }
+    };
+
     const handleSaveEvent = async () => {
         if (!editingEvent || !editEvTitle || !editEvDate) { toast.error("Título y fecha son obligatorios"); return; }
         await updateEvent(editingEvent.id, {
@@ -926,6 +993,7 @@ export function AdminDashboard() {
     const sidebarTabs = [
         { key: "citas", label: "Gestión de Citas", icon: CalendarDays },
         { key: "especialistas", label: "Especialistas", icon: Users },
+        { key: "sedes", label: "Sedes", icon: MapPin },
         { key: "estudiantes", label: endUserTabLabel, icon: Users },
         { key: "estadisticas", label: "Estadísticas", icon: BarChart3 },
         { key: "reportes", label: "Reportes", icon: FileText },
@@ -1832,6 +1900,42 @@ export function AdminDashboard() {
                     )}
 
                     {/* ─── Eventos Tab ─── */}
+                    {activeTab === "sedes" && (
+                        <div>
+                            <div className="mb-6">
+                                <h3 className="text-2xl font-bold text-slate-900 dark:text-white">Sedes de la organización</h3>
+                                <p className="text-slate-500 font-medium mt-1">Define las ubicaciones físicas. Los especialistas elegirán la suya de esta lista para sus citas presenciales.</p>
+                            </div>
+
+                            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-6 shadow-sm">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <input value={newLocName} onChange={e => setNewLocName(e.target.value)} placeholder="Nombre (ej. Campus Centro)" className={inputCls} />
+                                    <input value={newLocAddress} onChange={e => setNewLocAddress(e.target.value)} placeholder="Dirección o referencia (opcional)" className={inputCls} />
+                                </div>
+                                <Btn size="sm" className="mt-3" onClick={addLocation}><Plus className="w-4 h-4" /> Agregar sede</Btn>
+                            </div>
+
+                            {orgLocations.length === 0 ? (
+                                <EmptyState icon={MapPin} title="Sin sedes registradas" subtitle="Agrega la primera arriba." />
+                            ) : (
+                                <div className="space-y-2">
+                                    {orgLocations.map(l => (
+                                        <div key={l.id} className="flex items-center justify-between gap-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4">
+                                            <div className="min-w-0">
+                                                <p className="font-bold text-slate-800 dark:text-white text-sm flex items-center gap-2"><MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> {l.name}</p>
+                                                {l.address && <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5 truncate">{l.address}</p>}
+                                            </div>
+                                            <button onClick={() => deleteLocation(l.id)} title="Eliminar sede"
+                                                className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-all cursor-pointer shrink-0">
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {activeTab === "eventos" && (
                         <div className="p-8">
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -1952,6 +2056,12 @@ export function AdminDashboard() {
                                                             {new Date(ev.date + "T12:00:00").toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" })}
                                                             {ev.time ? ` • ${ev.time}` : ""}
                                                         </p>
+                                                        {ev.type === "conferencia" && (
+                                                            <button onClick={() => openInscritos(ev)}
+                                                                className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-violet-600 hover:text-violet-800 cursor-pointer">
+                                                                <Users className="w-3.5 h-3.5" /> {ev.registeredCount ?? 0} inscrito{(ev.registeredCount ?? 0) === 1 ? "" : "s"}
+                                                            </button>
+                                                        )}
                                                     </div>
                                                     {!ev.imageUrl && (
                                                         <div className="flex gap-1 opacity-0 group-hover:opacity-100 shrink-0 transition-all">
@@ -1983,14 +2093,17 @@ export function AdminDashboard() {
                     maxWidth="max-w-md">
                     <div className="space-y-5">
                         <div>
-                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Observaciones (opcional)</label>
+                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">{action.status === "Cancelada" ? <>Motivo de cancelación <span className="text-rose-500">*</span></> : "Observaciones (opcional)"}</label>
                             <textarea value={action.notes} onChange={e => action.setNotes(e.target.value)}
                                 placeholder="Agregar comentario..." rows={3}
                                 className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 resize-none focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600 transition-colors text-slate-700 dark:text-slate-200 bg-slate-50/50 dark:bg-slate-700/50 text-sm" />
                         </div>
                         <div className="flex gap-3">
                             <Btn variant="outline" onClick={action.close} className="flex-1">Cancelar Operación</Btn>
-                            <Btn onClick={() => action.confirm(false)}
+                            <Btn onClick={() => {
+                                    if (action.status === "Cancelada" && !action.notes.trim()) { toast.error("Indica el motivo de la cancelación."); return; }
+                                    action.confirm(false);
+                                }}
                                 className={`flex-1 text-white border-0 shadow-lg ${action.status === "Cancelada" ? "bg-rose-600 hover:bg-rose-700 shadow-rose-600/20" : "bg-blue-600 hover:bg-blue-700 shadow-blue-600/20"}`}>
                                 Confirmar Estado
                             </Btn>
@@ -2047,6 +2160,27 @@ export function AdminDashboard() {
                 </Modal>
 
                 {/* ─── Edit Event Modal ─── */}
+                <Modal open={!!inscritosEvent} onClose={() => setInscritosEvent(null)} title="Inscritos al evento" subtitle={inscritosEvent?.title}>
+                    {inscritosLoading ? (
+                        <div className="flex justify-center py-8"><div className="w-7 h-7 rounded-full border-4 border-violet-600 border-t-transparent animate-spin" /></div>
+                    ) : inscritosList.length === 0 ? (
+                        <EmptyState icon={Users} title="Aún no hay inscritos" />
+                    ) : (
+                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                            <p className="text-xs text-slate-400 font-medium mb-1">{inscritosList.length} {inscritosList.length === 1 ? "persona inscrita" : "personas inscritas"}</p>
+                            {inscritosList.map(r => (
+                                <div key={r.id} className="flex items-center justify-between gap-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                                    <div className="min-w-0">
+                                        <p className="font-bold text-slate-800 dark:text-white text-sm truncate">{r.name}</p>
+                                        <p className="text-slate-500 dark:text-slate-400 text-xs truncate">{r.email}</p>
+                                    </div>
+                                    <p className="text-slate-400 text-[0.7rem] shrink-0">{new Date(r.registeredAt).toLocaleDateString("es-MX", { day: "numeric", month: "short" })}</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </Modal>
+
                 <Modal open={!!editingEvent} onClose={() => setEditingEvent(null)} title="Editar Evento" subtitle={editingEvent?.title} maxWidth="max-w-lg">
                     <div className="space-y-4">
                         <div className="grid grid-cols-2 gap-3">

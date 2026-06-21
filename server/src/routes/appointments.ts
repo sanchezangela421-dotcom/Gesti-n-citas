@@ -31,6 +31,12 @@ function formatTime(timeStr: string): string {
   return `${hour12}:${m.toString().padStart(2, '0')} ${ampm}`;
 }
 
+/** Texto de ubicación a partir de una sede del catálogo (name — address) */
+function formatLocation(loc?: { name: string; address: string | null } | null): string | undefined {
+  if (!loc) return undefined;
+  return loc.address ? `${loc.name} — ${loc.address}` : loc.name;
+}
+
 /** Obtiene el email del alumno y del especialista de la BD */
 async function getPartyEmails(studentId: string, specialistId: string) {
   const [studentUser, specialist] = await Promise.all([
@@ -111,7 +117,7 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
     const scope = orgScope(caller);
     const [student, specialist] = await Promise.all([
       prisma.user.findFirst({ where: { id: studentId, ...scope } }),
-      prisma.specialist.findFirst({ where: { id: data.specialistId, ...scope } }),
+      prisma.specialist.findFirst({ where: { id: data.specialistId, ...scope }, include: { location: true } }),
     ]);
     if (!student || !specialist) {
       return res.status(404).json({ error: 'Alumno o especialista no disponible en tu organización' });
@@ -178,6 +184,9 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
           ...(createdBySpecialist && data.modality === 'Virtual' && specialist.meetingUrl
             ? { meetingUrl: specialist.meetingUrl }
             : {}),
+          ...(createdBySpecialist && data.modality === 'Presencial' && specialist.location
+            ? { location: formatLocation(specialist.location) }
+            : {}),
           isFollowUp: data.isFollowUp ?? false,
           parentId: data.parentId ?? null,
           periodId: activePeriod?.id ?? null,
@@ -208,6 +217,7 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
           await sendAppointmentConfirmedEmail(studentEmail, {
             ...base,
             meetingUrl: appointment.modality === 'Virtual' ? (specialist.meetingUrl ?? undefined) : undefined,
+            location: appointment.modality === 'Presencial' ? formatLocation(specialist.location) : undefined,
           });
         }
         return;
@@ -245,7 +255,7 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
-    const { status, notes, meetingUrl: bodyMeetingUrl } = req.body;
+    const { status, notes, meetingUrl: bodyMeetingUrl, locationId: bodyLocationId } = req.body;
 
     const current = await prisma.appointment.findFirst({ where: { id, ...orgScope(req.user) } });
     if (!current) {
@@ -270,6 +280,13 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       });
     }
 
+    // El especialista/admin debe justificar la cancelación
+    if (status === 'Cancelada' && (req.user?.role === 'especialista' || req.user?.role === 'admin')) {
+      if (!(typeof notes === 'string' && notes.trim())) {
+        return res.status(400).json({ error: 'El motivo de cancelación es obligatorio.' });
+      }
+    }
+
     if (status === 'Cancelada' && (req.user?.role === 'alumno' || req.user?.role === 'usuario')) {
       const [hours, minutes] = current.time.split(':').map(Number);
       const apptDateTime = new Date(`${current.date}T00:00:00`);
@@ -288,12 +305,21 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       }
     }
 
-    // Resolver meetingUrl antes del update para guardarlo en la cita
+    // Resolver meetingUrl / ubicación antes del update para guardarlos en la cita
     let resolvedMeetingUrl: string | undefined;
-    if (status === 'Confirmada' && current.modality === 'Virtual') {
-      resolvedMeetingUrl = bodyMeetingUrl
-        || (await prisma.specialist.findUnique({ where: { id: current.specialistId } }))?.meetingUrl
-        || undefined;
+    let resolvedLocation: string | undefined;
+    if (status === 'Confirmada' && (current.modality === 'Virtual' || current.modality === 'Presencial')) {
+      const spec = await prisma.specialist.findUnique({ where: { id: current.specialistId }, include: { location: true } });
+      if (current.modality === 'Virtual') resolvedMeetingUrl = bodyMeetingUrl || spec?.meetingUrl || undefined;
+      if (current.modality === 'Presencial') {
+        // El especialista puede elegir la sede al confirmar; si no, usa su sede por defecto.
+        if (bodyLocationId) {
+          const loc = await prisma.orgLocation.findFirst({ where: { id: bodyLocationId, ...orgScope(req.user) } });
+          resolvedLocation = formatLocation(loc);
+        } else {
+          resolvedLocation = formatLocation(spec?.location);
+        }
+      }
     }
 
     const noteText = typeof notes === 'string' ? notes.trim() : '';
@@ -307,6 +333,7 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
           status,
           ...(status === 'Cancelada' && noteText && { cancellationReason: noteText }),
           ...(resolvedMeetingUrl !== undefined && { meetingUrl: resolvedMeetingUrl }),
+          ...(resolvedLocation !== undefined && { location: resolvedLocation }),
         },
       });
 
@@ -373,6 +400,7 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
         await sendAppointmentConfirmedEmail(studentEmail, {
           ...base,
           meetingUrl: resolvedMeetingUrl,
+          location: resolvedLocation,
         });
       }
 

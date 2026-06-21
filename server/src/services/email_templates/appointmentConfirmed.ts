@@ -1,4 +1,4 @@
-import { wrap, header, footer, appointmentBox, ctaButton, infoBanner } from './base';
+import { wrap, header, footer, appointmentBox, ctaButton, infoBanner, escapeHtml } from './base';
 
 interface ConfirmedData {
   date: string;
@@ -7,6 +7,7 @@ interface ConfirmedData {
   department: string;
   modality: string;
   meetingUrl?: string;
+  location?: string;
   appUrl: string;
 }
 
@@ -17,6 +18,13 @@ export function appointmentConfirmedTemplate(studentName: string, data: Confirme
         `🎥 Tu cita es <strong>virtual</strong>. Guarda el enlace de la videollamada:<br/>
         <a href="${data.meetingUrl}" style="color:#1d4ed8;word-break:break-all;">${data.meetingUrl}</a>`,
         { bg: '#eff6ff', border: '#bfdbfe', color: '#1e40af' }
+      )
+    : '';
+
+  const presencialBanner = data.location
+    ? infoBanner(
+        `📍 Tu cita es <strong>presencial</strong>. Lugar: <strong>${escapeHtml(data.location)}</strong>`,
+        { bg: '#f0fdf4', border: '#bbf7d0', color: '#166534' }
       )
     : '';
 
@@ -35,6 +43,7 @@ export function appointmentConfirmedTemplate(studentName: string, data: Confirme
         { label: 'Modalidad', value: data.modality },
       ])}
       ${virtualBanner}
+      ${presencialBanner}
       ${ctaButton('Ver mis citas', data.appUrl, 'linear-gradient(135deg,#065f46,#0f766e)')}
     </div>
     ${footer}

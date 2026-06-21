@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import {
     Clock, CalendarCheck, CheckCircle2, Users, FileText, Megaphone,
     CalendarDays, Info, RefreshCw, Pencil, Trash2, Calendar,
-    Video, Plus, ExternalLink, Image as ImageIcon,
+    Video, Plus, ExternalLink, Image as ImageIcon, MapPin,
     ClipboardList, ArrowRight, Lock, History, XCircle,
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
@@ -13,8 +13,9 @@ import { Btn, StatCard, Modal, MiniCalendar, StatusBadge, inputCls, EmptyState }
 import { DAYS_FULL } from "../../../constants";
 import { useReschedule, useActionModal } from "../../hooks";
 import { localISODate } from "../../../utils/date";
+import { API, authHeaders } from "../../../lib/api";
 import { PatientRecords } from "./PatientRecords";
-import type { Appointment } from "../../../types";
+import type { Appointment, EventRegistrant, OrgLocation } from "../../../types";
 
 // ─── Schedule slot management hook ───────────────────────
 function useScheduleSlots(specId: string | undefined, schedule: any[]) {
@@ -155,7 +156,15 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
 // ─── Component ───────────────────────────────────────────
 export function SpecialistDashboard() {
     const { user } = useAuth();
-    const { specialists, specialistsLoaded, getAppointments, addEvent, updateEvent, deleteEvent, addResource, updateResource, deleteResource, resources, events, getAvailableDays, getAvailableSlots, createAppointment, addNotification, updateMeetingUrl, activePeriod } = useStore();
+    const { specialists, specialistsLoaded, getAppointments, addEvent, updateEvent, deleteEvent, addResource, updateResource, deleteResource, resources, events, getAvailableDays, getAvailableSlots, createAppointment, addNotification, updateMeetingUrl, updateSpecialistLocation, activePeriod } = useStore();
+
+    const [orgLocations, setOrgLocations] = useState<OrgLocation[]>([]);
+    useEffect(() => {
+        fetch(`${API}/locations`, { headers: authHeaders() })
+            .then(r => (r.ok ? r.json() : []))
+            .then(setOrgLocations)
+            .catch(() => { });
+    }, []);
 
     const spec = specialists.find(s => s.userId === user?.id);
     const dept = user?.department || "Psicología";
@@ -164,6 +173,31 @@ export function SpecialistDashboard() {
     const [meetingUrlInput, setMeetingUrlInput] = useState(spec?.meetingUrl ?? "");
     const [virtualConfirmAppt, setVirtualConfirmAppt] = useState<Appointment | null>(null);
     const [virtualConfirmUrl, setVirtualConfirmUrl] = useState("");
+    const [presencialConfirmAppt, setPresencialConfirmAppt] = useState<Appointment | null>(null);
+    const [presencialConfirmLocationId, setPresencialConfirmLocationId] = useState("");
+
+    // Inscritos a un evento (conferencia)
+    const [inscritosEvent, setInscritosEvent] = useState<any | null>(null);
+    const [inscritosList, setInscritosList] = useState<EventRegistrant[]>([]);
+    const [inscritosLoading, setInscritosLoading] = useState(false);
+
+    const openInscritos = async (ev: any) => {
+        setInscritosEvent(ev);
+        setInscritosList([]);
+        setInscritosLoading(true);
+        try {
+            const res = await fetch(`${API}/events/${ev.id}/registrations`, { headers: authHeaders() });
+            if (res.ok) setInscritosList(await res.json());
+            else {
+                const b = await res.json().catch(() => ({}));
+                toast.error(b.error || "No se pudo cargar la lista de inscritos.");
+            }
+        } catch {
+            toast.error("Error de conexión.");
+        } finally {
+            setInscritosLoading(false);
+        }
+    };
 
     const allAppts = spec ? getAppointments({ specialistId: spec.id }) : [];
     const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
@@ -200,10 +234,21 @@ export function SpecialistDashboard() {
         if (appt.modality === "Virtual") {
             setVirtualConfirmAppt(appt);
             setVirtualConfirmUrl(spec?.meetingUrl ?? "");
+        } else if (appt.modality === "Presencial" && orgLocations.length > 0) {
+            setPresencialConfirmAppt(appt);
+            setPresencialConfirmLocationId(spec?.locationId ?? (orgLocations[0]?.id ?? ""));
         } else {
             updateAppointmentStatus(appt.id, "Confirmada", undefined);
             toast.success("Cita confirmada");
         }
+    };
+
+    const handleConfirmPresencial = () => {
+        if (!presencialConfirmAppt) return;
+        updateAppointmentStatus(presencialConfirmAppt.id, "Confirmada", undefined, false, undefined, presencialConfirmLocationId || undefined);
+        toast.success("Cita presencial confirmada");
+        setPresencialConfirmAppt(null);
+        setPresencialConfirmLocationId("");
     };
 
     const handleConfirmVirtual = async () => {
@@ -667,6 +712,29 @@ export function SpecialistDashboard() {
                             </div>
                         </div>
 
+                        {/* Location config — el especialista ELIGE una sede del catálogo de la org (no escribe) */}
+                        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-6 shadow-sm">
+                            <div className="flex items-center gap-2 mb-3">
+                                <MapPin className="w-4 h-4 text-emerald-600" />
+                                <h4 className="font-bold text-slate-900 dark:text-white text-sm">Sede de atención presencial <span className="font-normal text-slate-400">(opcional)</span></h4>
+                            </div>
+                            <p className="text-slate-500 text-xs mb-3">Elige tu sede del catálogo de la organización. Se mostrará al alumno al confirmar citas presenciales.</p>
+                            {orgLocations.length === 0 ? (
+                                <p className="text-slate-400 text-xs italic">Tu organización aún no tiene sedes registradas. Pide al administrador que las agregue.</p>
+                            ) : (
+                                <select
+                                    value={spec?.locationId ?? ""}
+                                    onChange={e => spec && updateSpecialistLocation(spec.id, e.target.value || null)}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                >
+                                    <option value="">Sin sede asignada</option>
+                                    {orgLocations.map(l => (
+                                        <option key={l.id} value={l.id}>{l.name}{l.address ? ` — ${l.address}` : ""}</option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
+
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
                             <div>
                                 <h3 className="text-2xl font-bold text-slate-900 dark:text-white">Mis Horarios de Atención</h3>
@@ -1102,6 +1170,12 @@ export function SpecialistDashboard() {
                                                         {new Date(ev.date + "T12:00:00").toLocaleDateString("es-MX", { weekday: "short", day: "numeric", month: "short" })}
                                                         {ev.time ? ` • ${ev.time}` : ""}
                                                     </p>
+                                                    {ev.type === "conferencia" && (
+                                                        <button onClick={() => openInscritos(ev)}
+                                                            className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-violet-600 hover:text-violet-800 cursor-pointer">
+                                                            <Users className="w-3 h-3" /> {ev.registeredCount ?? 0} inscrito{(ev.registeredCount ?? 0) === 1 ? "" : "s"}
+                                                        </button>
+                                                    )}
                                                 </div>
                                                 {!ev.imageUrl && (
                                                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 shrink-0 transition-all">
@@ -1123,6 +1197,28 @@ export function SpecialistDashboard() {
                         </div>
                     </div>
                 )}
+
+                {/* Inscritos Modal */}
+                <Modal open={!!inscritosEvent} onClose={() => setInscritosEvent(null)} title="Inscritos al evento" subtitle={inscritosEvent?.title}>
+                    {inscritosLoading ? (
+                        <div className="flex justify-center py-8"><div className="w-7 h-7 rounded-full border-4 border-violet-600 border-t-transparent animate-spin" /></div>
+                    ) : inscritosList.length === 0 ? (
+                        <EmptyState icon={Users} title="Aún no hay inscritos" />
+                    ) : (
+                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                            <p className="text-xs text-slate-400 font-medium mb-1">{inscritosList.length} {inscritosList.length === 1 ? "persona inscrita" : "personas inscritas"}</p>
+                            {inscritosList.map(r => (
+                                <div key={r.id} className="flex items-center justify-between gap-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                                    <div className="min-w-0">
+                                        <p className="font-bold text-slate-800 dark:text-white text-sm truncate">{r.name}</p>
+                                        <p className="text-slate-500 dark:text-slate-400 text-xs truncate">{r.email}</p>
+                                    </div>
+                                    <p className="text-slate-400 text-[0.7rem] shrink-0">{new Date(r.registeredAt).toLocaleDateString("es-MX", { day: "numeric", month: "short" })}</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </Modal>
 
                 {/* Virtual Confirm Modal */}
                 <Modal
@@ -1151,6 +1247,42 @@ export function SpecialistDashboard() {
                         <div className="flex gap-3">
                             <Btn variant="ghost" onClick={() => setVirtualConfirmAppt(null)} className="flex-1">Cancelar</Btn>
                             <Btn onClick={handleConfirmVirtual} className="flex-1">
+                                <CheckCircle2 className="w-4 h-4" /> Confirmar cita
+                            </Btn>
+                        </div>
+                    </div>
+                </Modal>
+
+                {/* Presencial Confirm Modal */}
+                <Modal
+                    open={!!presencialConfirmAppt}
+                    onClose={() => setPresencialConfirmAppt(null)}
+                    title="Confirmar cita presencial"
+                    subtitle={presencialConfirmAppt ? `${presencialConfirmAppt.studentName} — ${presencialConfirmAppt.date} a las ${presencialConfirmAppt.time}` : ""}
+                    maxWidth="max-w-md"
+                >
+                    <div className="space-y-4">
+                        <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl flex items-start gap-2">
+                            <MapPin className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                            <p className="text-emerald-800 text-sm">El alumno verá la sede que elijas junto con la confirmación.</p>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-900 mb-2">Sede de atención</label>
+                            <select
+                                value={presencialConfirmLocationId}
+                                onChange={e => setPresencialConfirmLocationId(e.target.value)}
+                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            >
+                                <option value="">Sin sede específica</option>
+                                {orgLocations.map(l => (
+                                    <option key={l.id} value={l.id}>{l.name}{l.address ? ` — ${l.address}` : ""}</option>
+                                ))}
+                            </select>
+                            <p className="text-slate-400 text-xs mt-1">Solo puedes elegir entre las sedes de tu organización.</p>
+                        </div>
+                        <div className="flex gap-3">
+                            <Btn variant="ghost" onClick={() => setPresencialConfirmAppt(null)} className="flex-1">Cancelar</Btn>
+                            <Btn onClick={handleConfirmPresencial} className="flex-1">
                                 <CheckCircle2 className="w-4 h-4" /> Confirmar cita
                             </Btn>
                         </div>
@@ -1191,7 +1323,7 @@ export function SpecialistDashboard() {
                             </>
                         ) : (
                             <div>
-                                <label className="block mb-2 text-slate-900 font-bold text-sm">Motivo de cancelación (opcional)</label>
+                                <label className="block mb-2 text-slate-900 font-bold text-sm">Motivo de cancelación <span className="text-rose-500">*</span></label>
                                 <textarea
                                     value={action.notes}
                                     onChange={e => action.setNotes(e.target.value)}
@@ -1204,7 +1336,10 @@ export function SpecialistDashboard() {
                         <div className="flex gap-3">
                             <Btn variant="outline" onClick={action.close} className="flex-1">Cancelar</Btn>
                             <Btn
-                                onClick={() => action.confirm()}
+                                onClick={() => {
+                                    if (action.status === "Cancelada" && !action.notes.trim()) { toast.error("Indica el motivo de la cancelación."); return; }
+                                    action.confirm();
+                                }}
                                 className={`flex-1 text-white border-0 shadow-lg ${action.status === "Cancelada" ? "bg-rose-600 hover:bg-rose-700" : "bg-indigo-600 hover:bg-indigo-700"}`}
                             >
                                 {action.status === "Completada" ? "Finalizar Cita" : "Confirmar Cancelación"}
