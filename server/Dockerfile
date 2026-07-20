@@ -1,5 +1,10 @@
 FROM node:20-alpine
 
+# tzdata: permite que la variable TZ (America/Monterrey) surta efecto en Alpine.
+# Sin esto el contenedor corre en UTC y las comparaciones de fecha/hora de las
+# citas quedan desfasadas 6 horas respecto a la hora local de México.
+RUN apk add --no-cache tzdata
+
 WORKDIR /app
 
 # Enable pnpm via corepack

@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { orgScope } from '../lib/orgScope';
+import { localISODate } from '../lib/dates';
 import { sendAccountInvitation } from '../services/email';
 
 const EMAIL_REGEX = /^[^\s@,;]+@[^\s@,;.]+(\.[^\s@,;.]+)+$/;
@@ -158,10 +159,36 @@ router.patch('/:id/meeting-url', verifyToken as any, async (req: AuthRequest, re
       return res.status(403).json({ error: 'Sin permisos' });
     }
 
-    const { meetingUrl } = req.body;
+    const { meetingUrl, locationId } = req.body;
+    const data: any = {};
+    if (meetingUrl !== undefined) {
+      // Saneamiento anti-XSS: el enlace se muestra como <a href> en correos y frontend,
+      // así que solo aceptamos http(s) y bloqueamos esquemas peligrosos (javascript:, data:…).
+      const trimmed = typeof meetingUrl === 'string' ? meetingUrl.trim() : '';
+      if (trimmed) {
+        let validUrl = false;
+        try {
+          const u = new URL(trimmed);
+          validUrl = u.protocol === 'http:' || u.protocol === 'https:';
+        } catch { validUrl = false; }
+        if (!validUrl) {
+          return res.status(400).json({ error: 'El enlace de videollamada debe ser una URL http(s) válida.' });
+        }
+      }
+      data.meetingUrl = trimmed || null;
+    }
+    if (locationId !== undefined) {
+      // La sede debe pertenecer a la organización del especialista
+      if (locationId) {
+        const loc = await prisma.orgLocation.findFirst({ where: { id: locationId, ...orgScope(req.user) } });
+        if (!loc) return res.status(400).json({ error: 'Sede no válida' });
+      }
+      data.locationId = locationId || null;
+    }
+
     const updated = await prisma.specialist.update({
       where: { id },
-      data: { meetingUrl: meetingUrl || null },
+      data,
       include: { schedules: true },
     });
 
@@ -225,17 +252,6 @@ router.get('/:id/available-slots', verifyToken as any, async (req: AuthRequest, 
     requestedDate.setHours(0, 0, 0, 0);
     const dayOfWeek = requestedDate.getDay();
 
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    // Sunday (0): Monday is tomorrow (+1), matching specialist dashboard behaviour
-    const dayShift = now.getDay() === 0 ? 1 : 1 - now.getDay();
-    const mondayOfCurrentWeek = new Date(now);
-    mondayOfCurrentWeek.setDate(now.getDate() + dayShift);
-
-    const diffMs = requestedDate.getTime() - mondayOfCurrentWeek.getTime();
-    const diffWeeks = Math.floor(diffMs / (7 * 24 * 3600 * 1000));
-    const requestedWeek = Math.max(0, diffWeeks);
-
     const specialist = await prisma.specialist.findFirst({
       where: { id, ...orgScope(req.user) },
       include: { schedules: true }
@@ -243,8 +259,10 @@ router.get('/:id/available-slots', verifyToken as any, async (req: AuthRequest, 
 
     if (!specialist) return res.status(404).json({ error: 'No encontrado' });
 
-    // Combine both specific-date slots AND recurring slots for the day
-    // (previously used OR logic which dropped recurring slots if any specific-date slot existed)
+    // Slots de fecha específica + recurrentes semanales (week null).
+    // La marca week=0/1 era relativa a "hoy" (los slots de semana reaparecían
+    // eternamente); ahora esos slots se anclan por specificDate (ver migración
+    // 20260719000000) y aquí ya no se comparan semanas.
     const specificSlots = specialist.schedules.filter((s: any) =>
       s.specificDate === date && s.available
     );
@@ -253,7 +271,7 @@ router.get('/:id/available-slots', verifyToken as any, async (req: AuthRequest, 
       s.dayOfWeek === dayOfWeek &&
       s.available &&
       s.specificDate === null &&
-      (s.week === null || s.week === requestedWeek)
+      s.week === null
     );
 
     const activeSlotsForDay = [...specificSlots, ...recurringSlots];
@@ -264,7 +282,9 @@ router.get('/:id/available-slots', verifyToken as any, async (req: AuthRequest, 
 
     const occupiedTimes = new Set(appointmentsOnDate.map((a: any) => a.time));
     const nowTime = new Date();
-    const todayISO = nowTime.toISOString().split('T')[0];
+    // Fecha local del servidor (TZ), no UTC: con toISOString, a partir de las
+    // 18:00 hora de México "hoy" era mañana y el filtro de horas pasadas fallaba.
+    const todayISO = localISODate(nowTime);
     const isToday = date === todayISO;
 
     const seen = new Set<string>();
@@ -303,15 +323,26 @@ router.post('/:id/schedules', verifyToken as any, async (req: AuthRequest, res) 
       return res.status(403).json({ error: 'Sin permisos' });
     }
 
-    const { dayOfWeek, startTime, endTime, week, specificDate } = req.body;
+    const { dayOfWeek, startTime, endTime, specificDate } = req.body;
+
+    // Validación básica del rango: formato HH:MM y inicio < fin
+    const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (!TIME_RE.test(String(startTime)) || !TIME_RE.test(String(endTime)) || startTime >= endTime) {
+      return res.status(400).json({ error: 'Rango de horario inválido (inicio debe ser antes del fin)' });
+    }
+    const dow = Number(dayOfWeek);
+    if (!Number.isInteger(dow) || dow < 0 || dow > 6) {
+      return res.status(400).json({ error: 'Día de la semana inválido' });
+    }
 
     const slot = await prisma.scheduleSlot.create({
       data: {
         specialistId: id,
-        dayOfWeek,
+        dayOfWeek: dow,
         startTime,
         endTime,
-        week: week === undefined ? null : (week === 'both' ? null : parseInt(String(week))),
+        // "week" es legacy: los horarios por semana ahora se anclan con specificDate
+        week: null,
         specificDate: specificDate || null
       }
     });
@@ -338,7 +369,10 @@ router.delete('/:id/schedules/:slotId', verifyToken as any, async (req: AuthRequ
       return res.status(403).json({ error: 'Sin permisos' });
     }
 
-    await prisma.scheduleSlot.delete({ where: { id: slotId } });
+    // Acotar el slot al especialista de la URL: antes se podía borrar el horario
+    // de OTRO especialista (incluso de otra organización) conociendo el slotId (IDOR).
+    const { count } = await prisma.scheduleSlot.deleteMany({ where: { id: slotId, specialistId: id } });
+    if (count === 0) return res.status(404).json({ error: 'Horario no encontrado' });
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting schedule:', error);

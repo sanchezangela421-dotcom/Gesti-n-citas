@@ -31,6 +31,12 @@ function formatTime(timeStr: string): string {
   return `${hour12}:${m.toString().padStart(2, '0')} ${ampm}`;
 }
 
+/** Texto de ubicación a partir de una sede del catálogo (name — address) */
+function formatLocation(loc?: { name: string; address: string | null } | null): string | undefined {
+  if (!loc) return undefined;
+  return loc.address ? `${loc.name} — ${loc.address}` : loc.name;
+}
+
 /** Obtiene el email del alumno y del especialista de la BD */
 async function getPartyEmails(studentId: string, specialistId: string) {
   const [studentUser, specialist] = await Promise.all([
@@ -99,6 +105,8 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
 
     // El alumno/usuario solo puede agendar para sí mismo; admin indica el alumno en el body.
     const isEndUser = caller.role === 'alumno' || caller.role === 'usuario';
+    // Si la agenda un especialista (caso seguimiento) la cita queda confirmada de una vez.
+    const createdBySpecialist = caller.role === 'especialista';
     const studentId: string | undefined = isEndUser ? caller.id : data.studentId;
     if (!studentId) {
       return res.status(400).json({ error: 'Falta el alumno de la cita' });
@@ -109,7 +117,7 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
     const scope = orgScope(caller);
     const [student, specialist] = await Promise.all([
       prisma.user.findFirst({ where: { id: studentId, ...scope } }),
-      prisma.specialist.findFirst({ where: { id: data.specialistId, ...scope } }),
+      prisma.specialist.findFirst({ where: { id: data.specialistId, ...scope }, include: { location: true } }),
     ]);
     if (!student || !specialist) {
       return res.status(404).json({ error: 'Alumno o especialista no disponible en tu organización' });
@@ -118,17 +126,20 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'El alumno y el especialista pertenecen a organizaciones distintas' });
     }
 
-    // Rechazar citas en fecha/hora pasada
+    // Rechazar citas en fecha/hora pasada o con formato inválido (una fecha
+    // malformada produce NaN, y NaN <= now es false: sin el isNaN se colaba)
     const [h, m] = data.time.split(':').map(Number);
     const apptDateTime = new Date(`${data.date}T00:00:00`);
     apptDateTime.setHours(h, m, 0, 0);
-    if (apptDateTime <= new Date()) {
+    if (isNaN(apptDateTime.getTime()) || apptDateTime <= new Date()) {
       return res.status(422).json({ error: 'No puedes agendar una cita en una fecha u hora que ya pasó.' });
     }
 
-    // Obtener período activo para etiquetar la cita (fuera de la tx para no bloquear)
+    // Obtener período activo DE LA ORGANIZACIÓN para etiquetar la cita (fuera de
+    // la tx para no bloquear). Sin el scope, con varias orgs activas la cita se
+    // etiquetaba con el período de otra organización.
     const activePeriod = await prisma.reportPeriod.findFirst({
-      where: { status: 'activo' },
+      where: { status: 'activo', ...scope },
       select: { id: true },
     });
 
@@ -169,9 +180,16 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
           department: specialist.department,
           date: data.date,
           time: data.time,
-          status: 'Pendiente',
+          status: createdBySpecialist ? 'Confirmada' : 'Pendiente',
           modality: data.modality,
           motivo: data.motivo,
+          // Seguimiento virtual auto-confirmado: hereda el enlace por defecto del especialista
+          ...(createdBySpecialist && data.modality === 'Virtual' && specialist.meetingUrl
+            ? { meetingUrl: specialist.meetingUrl }
+            : {}),
+          ...(createdBySpecialist && data.modality === 'Presencial' && specialist.location
+            ? { location: formatLocation(specialist.location) }
+            : {}),
           isFollowUp: data.isFollowUp ?? false,
           parentId: data.parentId ?? null,
           periodId: activePeriod?.id ?? null,
@@ -180,22 +198,36 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
       });
     });
 
-    // Email: avisa al alumno (recibida) y al especialista (nueva solicitud)
+    // Email según quién agenda:
+    //  - especialista (seguimiento): la cita ya está confirmada → solo se avisa al alumno (confirmación).
+    //  - alumno: solicitud nueva → se notifica al alumno (recibida) y al especialista (pendiente).
     fireEmail(async () => {
       const { studentEmail, specialistEmail } = await getPartyEmails(
         appointment.studentId,
         appointment.specialistId
       );
-      if (!studentEmail || !specialistEmail) return;
-      await sendAppointmentNewEmails(studentEmail, specialistEmail, {
+      const base = {
         date: formatDate(appointment.date),
         time: formatTime(appointment.time),
         specialistName: appointment.specialistName,
         studentName: appointment.studentName,
         department: appointment.department ?? '',
         modality: appointment.modality ?? '',
-        reason: appointment.motivo ?? undefined,
-      });
+      };
+
+      if (createdBySpecialist) {
+        if (studentEmail) {
+          await sendAppointmentConfirmedEmail(studentEmail, {
+            ...base,
+            meetingUrl: appointment.modality === 'Virtual' ? (specialist.meetingUrl ?? undefined) : undefined,
+            location: appointment.modality === 'Presencial' ? formatLocation(specialist.location) : undefined,
+          });
+        }
+        return;
+      }
+
+      if (!studentEmail || !specialistEmail) return;
+      await sendAppointmentNewEmails(studentEmail, specialistEmail, { ...base, reason: appointment.motivo ?? undefined });
     });
 
     res.status(201).json(appointment);
@@ -226,7 +258,7 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
-    const { status, notes, meetingUrl: bodyMeetingUrl } = req.body;
+    const { status, notes, meetingUrl: bodyMeetingUrl, locationId: bodyLocationId } = req.body;
 
     const current = await prisma.appointment.findFirst({ where: { id, ...orgScope(req.user) } });
     if (!current) {
@@ -244,11 +276,24 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       }
     }
 
+    // Los end-users solo pueden cancelar sus citas; confirmar o completar (y con
+    // ello fijar meetingUrl/ubicación) es exclusivo del especialista o admin.
+    if ((req.user?.role === 'alumno' || req.user?.role === 'usuario') && status !== 'Cancelada') {
+      return res.status(403).json({ error: 'Solo puedes cancelar tus citas' });
+    }
+
     const allowed = VALID_TRANSITIONS[current.status] ?? [];
     if (!allowed.includes(status)) {
       return res.status(422).json({
         error: `No se puede cambiar de "${current.status}" a "${status}"`,
       });
+    }
+
+    // El especialista/admin debe justificar la cancelación
+    if (status === 'Cancelada' && (req.user?.role === 'especialista' || req.user?.role === 'admin')) {
+      if (!(typeof notes === 'string' && notes.trim())) {
+        return res.status(400).json({ error: 'El motivo de cancelación es obligatorio.' });
+      }
     }
 
     if (status === 'Cancelada' && (req.user?.role === 'alumno' || req.user?.role === 'usuario')) {
@@ -269,12 +314,35 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       }
     }
 
-    // Resolver meetingUrl antes del update para guardarlo en la cita
+    // Saneamiento del enlace de videollamada (anti-XSS): solo se acepta http(s).
+    // El meetingUrl se renderiza como <a href> en correos y en el frontend, así que
+    // bloqueamos esquemas peligrosos (javascript:, data:, etc.) en el origen.
+    if (bodyMeetingUrl != null && String(bodyMeetingUrl).trim() !== '') {
+      let validUrl = false;
+      try {
+        const u = new URL(String(bodyMeetingUrl).trim());
+        validUrl = u.protocol === 'http:' || u.protocol === 'https:';
+      } catch { validUrl = false; }
+      if (!validUrl) {
+        return res.status(400).json({ error: 'El enlace de videollamada debe ser una URL http(s) válida.' });
+      }
+    }
+
+    // Resolver meetingUrl / ubicación antes del update para guardarlos en la cita
     let resolvedMeetingUrl: string | undefined;
-    if (status === 'Confirmada' && current.modality === 'Virtual') {
-      resolvedMeetingUrl = bodyMeetingUrl
-        || (await prisma.specialist.findUnique({ where: { id: current.specialistId } }))?.meetingUrl
-        || undefined;
+    let resolvedLocation: string | undefined;
+    if (status === 'Confirmada' && (current.modality === 'Virtual' || current.modality === 'Presencial')) {
+      const spec = await prisma.specialist.findUnique({ where: { id: current.specialistId }, include: { location: true } });
+      if (current.modality === 'Virtual') resolvedMeetingUrl = (typeof bodyMeetingUrl === 'string' ? bodyMeetingUrl.trim() : '') || spec?.meetingUrl || undefined;
+      if (current.modality === 'Presencial') {
+        // El especialista puede elegir la sede al confirmar; si no, usa su sede por defecto.
+        if (bodyLocationId) {
+          const loc = await prisma.orgLocation.findFirst({ where: { id: bodyLocationId, ...orgScope(req.user) } });
+          resolvedLocation = formatLocation(loc);
+        } else {
+          resolvedLocation = formatLocation(spec?.location);
+        }
+      }
     }
 
     const noteText = typeof notes === 'string' ? notes.trim() : '';
@@ -288,6 +356,7 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
           status,
           ...(status === 'Cancelada' && noteText && { cancellationReason: noteText }),
           ...(resolvedMeetingUrl !== undefined && { meetingUrl: resolvedMeetingUrl }),
+          ...(resolvedLocation !== undefined && { location: resolvedLocation }),
         },
       });
 
@@ -354,6 +423,7 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
         await sendAppointmentConfirmedEmail(studentEmail, {
           ...base,
           meetingUrl: resolvedMeetingUrl,
+          location: resolvedLocation,
         });
       }
 
@@ -386,6 +456,14 @@ router.patch('/:id/reschedule', verifyToken as any, async (req: AuthRequest, res
 
     if (!date || !time) {
       return res.status(400).json({ error: 'Fecha y hora son requeridas' });
+    }
+
+    // Mismo criterio que al crear: la nueva fecha/hora debe ser futura y válida
+    const [nh, nm] = String(time).split(':').map(Number);
+    const newDateTime = new Date(`${date}T00:00:00`);
+    newDateTime.setHours(nh, nm, 0, 0);
+    if (isNaN(newDateTime.getTime()) || newDateTime <= new Date()) {
+      return res.status(422).json({ error: 'No puedes reagendar a una fecha u hora que ya pasó.' });
     }
 
     let previousDate = '';

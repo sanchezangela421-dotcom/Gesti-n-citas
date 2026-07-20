@@ -120,6 +120,23 @@ export function useSpecialistsStore(setUsers: Dispatch<SetStateAction<User[]>>) 
     }
   }, []);
 
+  const updateSpecialistLocation = useCallback(async (specialistId: string, locationId: string | null) => {
+    try {
+      const res = await fetch(`${API}/specialists/${specialistId}/meeting-url`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ locationId }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const updated = await res.json();
+      setSpecialists(p => p.map(s => s.id === specialistId ? { ...updated, schedule: updated.schedules ?? [] } : s));
+      toast.success("Sede actualizada");
+    } catch (err) {
+      console.error("Error updating location:", err);
+      toast.error("No se pudo actualizar la sede.");
+    }
+  }, []);
+
   const removeScheduleSlot = useCallback((specialistId: string, slotId: string) => {
     // Optimistic update
     setSpecialists(p =>
@@ -147,5 +164,6 @@ export function useSpecialistsStore(setUsers: Dispatch<SetStateAction<User[]>>) 
     addScheduleSlot,
     removeScheduleSlot,
     updateMeetingUrl,
+    updateSpecialistLocation,
   };
 }

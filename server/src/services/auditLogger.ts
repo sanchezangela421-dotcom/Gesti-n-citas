@@ -17,10 +17,8 @@ export function writeAudit(entry: AuditEntry): void {
   });
 }
 
-export function getClientIp(req: { headers: any; socket: any }): string {
-  return (
-    req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
-    req.socket?.remoteAddress ||
-    'unknown'
-  );
+export function getClientIp(req: { ip?: string; socket?: any }): string {
+  // req.ip respeta 'trust proxy' (index.ts): detrás de nginx es la IP real del
+  // cliente y no puede falsificarse con un header X-Forwarded-For arbitrario.
+  return req.ip || req.socket?.remoteAddress || 'unknown';
 }

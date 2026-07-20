@@ -11,14 +11,24 @@ if (!fs.existsSync(uploadsPath)) {
   fs.mkdirSync(uploadsPath, { recursive: true });
 }
 
+// Extensión derivada del MIME permitido — NUNCA del nombre original del archivo:
+// un upload declarado image/png pero llamado "x.html" se guardaba como .html y
+// /uploads lo servía como HTML ejecutable (XSS almacenado en el dominio del API).
+const EXT_BY_MIME: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'application/pdf': '.pdf',
+};
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadsPath);
   },
   filename: (req, file, cb) => {
-    // Nombre único: timestamp + nombre original sanitizado
+    // Nombre único: timestamp + extensión segura según el tipo MIME
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
+    cb(null, uniqueSuffix + (EXT_BY_MIME[file.mimetype] ?? ''));
   }
 });
 

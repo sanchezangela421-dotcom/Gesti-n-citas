@@ -100,6 +100,7 @@ export interface AppointmentEmailData {
   modality: string;
   reason?: string;
   meetingUrl?: string;
+  location?: string;
 }
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));

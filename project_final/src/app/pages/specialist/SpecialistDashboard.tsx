@@ -1,20 +1,26 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import {
     Clock, CalendarCheck, CheckCircle2, Users, FileText, Megaphone,
     CalendarDays, Info, RefreshCw, Pencil, Trash2, Calendar,
-    Video, Plus, ExternalLink, Image as ImageIcon,
+    Video, Plus, MapPin,
     ClipboardList, ArrowRight, Lock, History, XCircle,
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
 import { AppShell } from "../../components/layout/AppShell";
-import { Btn, StatCard, Modal, MiniCalendar, StatusBadge, inputCls, EmptyState } from "../../components/ui";
+import { Btn, StatCard, Modal, MiniCalendar, StatusBadge, inputCls, EmptyState, Reveal } from "../../components/ui";
 import { DAYS_FULL } from "../../../constants";
 import { useReschedule, useActionModal } from "../../hooks";
 import { localISODate } from "../../../utils/date";
+import { API, authHeaders } from "../../../lib/api";
 import { PatientRecords } from "./PatientRecords";
-import type { Appointment } from "../../../types";
+import { ContentTab } from "./ContentTab";
+import { EventTab } from "./EventTab";
+import type { Appointment, OrgLocation } from "../../../types";
+
+// Referencia estable para el fallback de schedule (evita un array nuevo por render)
+const EMPTY_SCHEDULE: never[] = [];
 
 // ─── Schedule slot management hook ───────────────────────
 function useScheduleSlots(specId: string | undefined, schedule: any[]) {
@@ -23,7 +29,7 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
     const [show, setShow] = useState(false);
     const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
     const [newDay, setNewDay] = useState<number | string>(1);
-    const [newWeek, setNewWeek] = useState<number | string>("both");
+    const [newWeek, setNewWeek] = useState<number | string>("date");
     const [newStart, setNewStart] = useState("09:00");
     const [newEnd, setNewEnd] = useState("13:00");
     const [selectedBaseDate, setSelectedBaseDate] = useState<string | undefined>(undefined);
@@ -31,7 +37,7 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
     const openEditSlot = (slot: any) => {
         setEditingSlotId(slot.id);
         setNewDay(slot.dayOfWeek);
-        setNewWeek(slot.week === null || slot.week === undefined ? "both" : slot.week);
+        setNewWeek(slot.specificDate ? "date" : "0");
         setNewStart(slot.startTime);
         setNewEnd(slot.endTime);
         setSelectedBaseDate(slot.specificDate || undefined);
@@ -51,91 +57,78 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
     const save = () => {
         if (!specId) return;
 
-        // ── Modo semana completa: "Esta semana" (0) o "Próxima semana" (1) ──
-        if ((newWeek === "0" || newWeek === "1") && !editingSlotId) {
-            const weekOffset = parseInt(String(newWeek));
+        // ── "Esta semana": reparte el horario a los días hábiles (Lun-Vie) de la
+        //    semana del día seleccionado, creando slots de FECHA ESPECÍFICA.
+        //    (Antes se guardaban con week=0, marca relativa a "hoy" que hacía que
+        //    reaparecieran todas las semanas para siempre.) ──
+        if (newWeek === "0") {
             const todayM = new Date(); todayM.setHours(0, 0, 0, 0);
-            const dayShift = todayM.getDay() === 0 ? 1 : 1 - todayM.getDay();
-            const mondayOfWeek = new Date(todayM);
-            mondayOfWeek.setDate(todayM.getDate() + dayShift + weekOffset * 7);
+            // Semana ancla: la del día clickeado en el calendario (actual o próxima)
+            const base = selectedBaseDate ? new Date(selectedBaseDate + "T12:00:00") : new Date(todayM);
+            base.setHours(0, 0, 0, 0);
+            const dayShift = base.getDay() === 0 ? 1 : 1 - base.getDay();
+            const mondayOfWeek = new Date(base);
+            mondayOfWeek.setDate(base.getDate() + dayShift);
 
-            // Calcula los días hábiles (Lun-Vie) de la semana objetivo que no hayan pasado
-            const daysToCreate: number[] = [];
+            const daysToCreate: { dow: number; iso: string }[] = [];
             for (let i = 0; i < 5; i++) {
                 const dayDate = new Date(mondayOfWeek);
                 dayDate.setDate(mondayOfWeek.getDate() + i);
-                if (weekOffset === 0 && dayDate < todayM) continue; // saltar días pasados de esta semana
+                if (dayDate < todayM) continue; // saltar días ya pasados de la semana
                 const dow = i + 1; // 1=Lun … 5=Vie
-                const dayDate2 = new Date(mondayOfWeek);
-                dayDate2.setDate(mondayOfWeek.getDate() + i);
-                const isoForDay = localISODate(dayDate2);
+                const isoForDay = localISODate(dayDate);
                 const hasOverlap = schedule.some(s => {
-                    const sWeek = s.week === null ? undefined : s.week;
+                    if (editingSlotId && s.id === editingSlotId) return false; // ignorar el que se edita
                     return (
                         s.dayOfWeek === dow &&
-                        (sWeek === undefined || sWeek === weekOffset) &&
-                        (s.specificDate === null || s.specificDate === isoForDay) &&
+                        (s.specificDate === isoForDay ||
+                         (s.specificDate === null && s.week === null)) &&
                         newStart < s.endTime && newEnd > s.startTime
                     );
                 });
-                if (!hasOverlap) daysToCreate.push(dow);
+                if (!hasOverlap) daysToCreate.push({ dow, iso: isoForDay });
             }
 
             if (daysToCreate.length === 0) {
-                toast.error("Ya existe un horario solapado en todos los días de esa semana.");
+                toast.error("Ya existe un horario solapado en todos los días disponibles de esta semana.");
                 return;
             }
 
-            daysToCreate.forEach(dow =>
+            if (editingSlotId) removeScheduleSlot(specId, editingSlotId);
+            daysToCreate.forEach(({ dow, iso }) =>
                 addScheduleSlot(specId, {
                     dayOfWeek: dow,
                     startTime: newStart,
                     endTime: newEnd,
                     available: true,
-                    week: weekOffset,
-                    specificDate: undefined,
+                    week: undefined,
+                    specificDate: iso, // anclado a fecha: no "renace" en semanas futuras
                 })
             );
 
             setShow(false); setEditingSlotId(null);
-            toast.success(
-                `${daysToCreate.length} horarios agregados para ${weekOffset === 0 ? "esta semana" : "la próxima semana"}`
-            );
+            toast.success(`${daysToCreate.length} horario${daysToCreate.length === 1 ? "" : "s"} para esta semana`);
             return;
         }
 
-        // ── Modo día único: "Solo este día" o "Siempre" ──
+        // ── "Solo este día": un único slot de fecha específica ──
         const dayInt = parseInt(String(newDay));
-        const isSpecificDate = newWeek === "date";
-        const weekVal = newWeek === "both" || newWeek === "date" ? undefined : parseInt(String(newWeek));
+        if (!selectedBaseDate) { toast.error("Selecciona primero el día en el calendario."); return; }
 
-        // Calcular a qué weekOffset (0 o 1) pertenece selectedBaseDate
-        let weekOffsetForDate: number | undefined;
-        if (isSpecificDate && selectedBaseDate) {
-            const baseDate = new Date(selectedBaseDate + 'T12:00:00');
-            const todayW = new Date(); todayW.setHours(0, 0, 0, 0);
-            const shift = todayW.getDay() === 0 ? 1 : 1 - todayW.getDay();
-            const monCurrent = new Date(todayW); monCurrent.setDate(todayW.getDate() + shift);
-            const monNext = new Date(monCurrent); monNext.setDate(monCurrent.getDate() + 7);
-            const friCurrent = new Date(monCurrent); friCurrent.setDate(monCurrent.getDate() + 4);
-            const friNext = new Date(monNext); friNext.setDate(monNext.getDate() + 4);
-            if (baseDate >= monCurrent && baseDate <= friCurrent) weekOffsetForDate = 0;
-            else if (baseDate >= monNext && baseDate <= friNext) weekOffsetForDate = 1;
-        }
-
+        // Solapes: contra slots de la misma fecha o recurrentes semanales (week null)
         const hasOverlap = schedule.some(s => {
             if (editingSlotId && s.id === editingSlotId) return false;
             return (
                 s.dayOfWeek === dayInt &&
-                (isSpecificDate
-                    ? (s.specificDate === selectedBaseDate ||
-                       (s.specificDate === null && (s.week === null || s.week === weekOffsetForDate)))
-                    : (s.specificDate == null)) &&
+                (s.specificDate === selectedBaseDate ||
+                 (s.specificDate === null && s.week === null)) &&
                 newStart < s.endTime && newEnd > s.startTime
             );
         });
 
         if (hasOverlap) { toast.error("Ya existe un horario solapado para este rango."); return; }
+
+        const wasEditing = !!editingSlotId;
         if (editingSlotId) removeScheduleSlot(specId, editingSlotId);
 
         addScheduleSlot(specId, {
@@ -143,11 +136,11 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
             startTime: newStart,
             endTime: newEnd,
             available: true,
-            week: weekVal,
-            specificDate: isSpecificDate ? selectedBaseDate : undefined,
+            week: undefined,
+            specificDate: selectedBaseDate,
         });
         setShow(false); setEditingSlotId(null);
-        toast.success(editingSlotId ? "Horario actualizado" : "Horario agregado");
+        toast.success(wasEditing ? "Horario actualizado" : "Horario agregado");
     };
 
     return {
@@ -161,44 +154,87 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
 // ─── Component ───────────────────────────────────────────
 export function SpecialistDashboard() {
     const { user } = useAuth();
-    const { specialists, specialistsLoaded, getAppointments, addEvent, updateEvent, deleteEvent, addResource, updateResource, deleteResource, resources, events, getAvailableDays, getAvailableSlots, createAppointment, addNotification, updateMeetingUrl, activePeriod } = useStore();
+    const { specialists, specialistsLoaded, getAppointments, getAvailableDays, getAvailableSlots, createAppointment, addNotification, updateMeetingUrl, updateSpecialistLocation, activePeriod } = useStore();
 
-    const spec = specialists.find(s => s.userId === user?.id);
+    const [orgLocations, setOrgLocations] = useState<OrgLocation[]>([]);
+    useEffect(() => {
+        fetch(`${API}/locations`, { headers: authHeaders() })
+            .then(r => (r.ok ? r.json() : []))
+            .then(setOrgLocations)
+            .catch(() => { });
+    }, []);
+
+    const spec = useMemo(() => specialists.find(s => s.userId === user?.id), [specialists, user?.id]);
     const dept = user?.department || "Psicología";
 
     const [activeTab, setActiveTab] = useState("calendar");
     const [meetingUrlInput, setMeetingUrlInput] = useState(spec?.meetingUrl ?? "");
     const [virtualConfirmAppt, setVirtualConfirmAppt] = useState<Appointment | null>(null);
     const [virtualConfirmUrl, setVirtualConfirmUrl] = useState("");
+    const [presencialConfirmAppt, setPresencialConfirmAppt] = useState<Appointment | null>(null);
+    const [presencialConfirmLocationId, setPresencialConfirmLocationId] = useState("");
 
-    const allAppts = spec ? getAppointments({ specialistId: spec.id }) : [];
-    const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
-
-    // Citas pasadas que siguen abiertas (Pendiente o Confirmada sin cerrar)
-    const sinCerrar = allAppts.filter(a =>
-        (a.status === "Pendiente" || a.status === "Confirmada") &&
-        new Date(a.date + "T12:00:00") < todayMidnight
+    const allAppts = useMemo(
+        () => (spec ? getAppointments({ specialistId: spec.id }) : []),
+        [spec, getAppointments]
     );
+    // Medianoche de hoy — se fija una vez por montaje (estable para deps de useMemo).
+    const todayMidnight = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
 
-    // Pendientes solo de hoy en adelante
-    const pendientes = allAppts.filter(a =>
-        a.status === "Pendiente" && new Date(a.date + "T12:00:00") >= todayMidnight
-    );
-    const confirmadas = allAppts.filter(a => a.status === "Confirmada");
-    const completadas = allAppts.filter(a => a.status === "Completada");
-    const totalPatients = new Set(allAppts.map(a => a.studentName)).size;
+    // Buckets de citas en UNA sola pasada (antes: 5 .filter()/Set por render).
+    const { sinCerrar, pendientes, confirmadas, completadas, totalPatients } = useMemo(() => {
+        const sinCerrar: Appointment[] = [], pendientes: Appointment[] = [];
+        const confirmadas: Appointment[] = [], completadas: Appointment[] = [];
+        const patients = new Set<string>();
+        for (const a of allAppts) {
+            patients.add(a.studentName);
+            const isPast = new Date(a.date + "T12:00:00") < todayMidnight;
+            // Pasadas y aún abiertas (Pendiente o Confirmada) → requieren cierre
+            if ((a.status === "Pendiente" || a.status === "Confirmada") && isPast) sinCerrar.push(a);
+            // Pendientes solo de hoy en adelante
+            if (a.status === "Pendiente" && !isPast) pendientes.push(a);
+            if (a.status === "Confirmada") confirmadas.push(a);
+            if (a.status === "Completada") completadas.push(a);
+        }
+        return { sinCerrar, pendientes, confirmadas, completadas, totalPatients: patients.size };
+    }, [allAppts, todayMidnight]);
 
     // Calendar tab state
     const [selDate, setSelDate] = useState(new Date());
-    const apptDates = [...new Set(allAppts.filter(a => a.status !== "Cancelada").map(a => a.date))]
-        .map(d => new Date(d + "T12:00:00"))
-        .filter(d => d >= todayMidnight);
-    const dayAppts = allAppts.filter(a => a.date === localISODate(selDate) && a.status !== "Cancelada");
+    const apptDates = useMemo(
+        () => [...new Set(allAppts.filter(a => a.status !== "Cancelada").map(a => a.date))]
+            .map(d => new Date(d + "T12:00:00"))
+            .filter(d => d >= todayMidnight),
+        [allAppts, todayMidnight]
+    );
+    const dayAppts = useMemo(
+        () => allAppts.filter(a => a.date === localISODate(selDate) && a.status !== "Cancelada"),
+        [allAppts, selDate]
+    );
+
+    // Historial: citas raíz (Completada/Cancelada sin parentId), orden desc por fecha.
+    const historialAppts = useMemo(
+        () => allAppts
+            .filter(a => (a.status === "Completada" || a.status === "Cancelada") && !a.parentId)
+            .sort((a, b) => b.date.localeCompare(a.date)),
+        [allAppts]
+    );
+    // Mapa parentId → citas de seguimiento (cualquier estado).
+    const followUpsByParent = useMemo(
+        () => allAppts.reduce((acc, a) => {
+            if (a.parentId) {
+                if (!acc[a.parentId]) acc[a.parentId] = [];
+                acc[a.parentId].push(a);
+            }
+            return acc;
+        }, {} as Record<string, typeof allAppts>),
+        [allAppts]
+    );
 
     // Hooks
     const action = useActionModal();
     const resch = useReschedule("specialist");
-    const slots = useScheduleSlots(spec?.id, spec?.schedule ?? []);
+    const slots = useScheduleSlots(spec?.id, spec?.schedule ?? EMPTY_SCHEDULE);
 
     // ── Direct confirm (no modal) ───────────────────────────────
     const { updateAppointmentStatus } = useStore();
@@ -206,10 +242,21 @@ export function SpecialistDashboard() {
         if (appt.modality === "Virtual") {
             setVirtualConfirmAppt(appt);
             setVirtualConfirmUrl(spec?.meetingUrl ?? "");
+        } else if (appt.modality === "Presencial" && orgLocations.length > 0) {
+            setPresencialConfirmAppt(appt);
+            setPresencialConfirmLocationId(spec?.locationId ?? (orgLocations[0]?.id ?? ""));
         } else {
             updateAppointmentStatus(appt.id, "Confirmada", undefined);
             toast.success("Cita confirmada");
         }
+    };
+
+    const handleConfirmPresencial = () => {
+        if (!presencialConfirmAppt) return;
+        updateAppointmentStatus(presencialConfirmAppt.id, "Confirmada", undefined, false, undefined, presencialConfirmLocationId || undefined);
+        toast.success("Cita presencial confirmada");
+        setPresencialConfirmAppt(null);
+        setPresencialConfirmLocationId("");
     };
 
     const handleConfirmVirtual = async () => {
@@ -276,110 +323,8 @@ export function SpecialistDashboard() {
         setSeguimientoSlot(null);
     };
 
-    // Content form
-    const [ctitle, setCtitle] = useState("");
-    const [cdesc, setCdesc] = useState("");
-    const [ctype, setCtype] = useState("video");
-    const [curl, setCurl] = useState("");
-    const [cimgUrl, setCimgUrl] = useState("");
-    const [selectedFile, setSelectedFile] = useState<File | null>(null);
-
-    // Edit resource modal
-    const [editingResource, setEditingResource] = useState<any | null>(null);
-    const [editRTitle, setEditRTitle] = useState("");
-    const [editRDesc, setEditRDesc] = useState("");
-    const [editRUrl, setEditRUrl] = useState("");
-    const [editRFile, setEditRFile] = useState<File | null>(null);
-
-    const openEditResource = (r: any) => {
-        setEditingResource(r);
-        setEditRTitle(r.title);
-        setEditRDesc(r.description);
-        setEditRUrl(r.url === "#" ? "" : r.url);
-        setEditRFile(null);
-    };
-
-    const handleSaveResource = async () => {
-        if (!editingResource || !editRTitle) { toast.error("El título es obligatorio"); return; }
-        await updateResource(editingResource.id, {
-            title: editRTitle, description: editRDesc, url: editRUrl || "#",
-        }, editRFile || undefined);
-        toast.success("Recurso actualizado");
-        setEditingResource(null);
-    };
-
-    // Edit event modal
-    const [editingEvent, setEditingEvent] = useState<any | null>(null);
-    const [editEvTitle, setEditEvTitle] = useState("");
-    const [editEvDesc, setEditEvDesc] = useState("");
-    const [editEvDate, setEditEvDate] = useState("");
-    const [editEvTime, setEditEvTime] = useState("");
-    const [editEvType, setEditEvType] = useState("");
-    const [editEvRegUrl, setEditEvRegUrl] = useState("");
-    const [editEvImg, setEditEvImg] = useState<File | null>(null);
-
-    const openEditEvent = (ev: any) => {
-        setEditingEvent(ev);
-        setEditEvTitle(ev.title);
-        setEditEvDesc(ev.description);
-        setEditEvDate(ev.date);
-        setEditEvTime(ev.time);
-        setEditEvType(ev.type);
-        setEditEvRegUrl(ev.registrationUrl || "");
-        setEditEvImg(null);
-    };
-
-    const handleSaveEvent = async () => {
-        if (!editingEvent || !editEvTitle || !editEvDate) { toast.error("Título y fecha son obligatorios"); return; }
-        await updateEvent(editingEvent.id, {
-            title: editEvTitle, description: editEvDesc,
-            date: editEvDate, time: editEvTime, type: editEvType,
-            registrationUrl: editEvType === "taller" ? editEvRegUrl : undefined,
-        }, editEvImg || undefined);
-        toast.success("Evento actualizado");
-        setEditingEvent(null);
-    };
-
-    const handlePublishContent = () => {
-        if (!ctitle) { toast.error("El título es obligatorio"); return; }
-        if (ctype !== "image" && !curl && !selectedFile) {
-            toast.error("Agrega un enlace o sube un archivo"); return;
-        }
-        addResource({
-            department: dept,
-            type: ctype,
-            title: ctitle,
-            description: cdesc,
-            url: curl || "#",
-            imageUrl: cimgUrl || undefined,
-        }, selectedFile || undefined);
-        setCtitle(""); setCdesc(""); setCurl(""); setCimgUrl(""); setSelectedFile(null);
-    };
-
     // Historial pagination
     const [historialSpecPage, setHistorialSpecPage] = useState(0);
-
-    // Event form
-    const [evTitle, setEvTitle] = useState("");
-    const [evDesc, setEvDesc] = useState("");
-    const [evDate, setEvDate] = useState("");
-    const [evTime, setEvTime] = useState("");
-    const [evType, setEvType] = useState("taller");
-    const [evImg, setEvImg] = useState("");
-    const [evRegUrl, setEvRegUrl] = useState("");
-    const [selectedEventImg, setSelectedEventImg] = useState<File | null>(null);
-
-    const handlePublishEvent = () => {
-        if (!evTitle || !evDate) { toast.error("Título y fecha son obligatorios"); return; }
-        addEvent({
-            title: evTitle, description: evDesc, department: dept,
-            date: evDate, time: evTime, type: evType,
-            // Si hay archivo lo sube multer y el servidor pone la URL; si no, usar URL manual o default
-            imageUrl: selectedEventImg ? undefined : (evImg || "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=400&q=80"),
-            registrationUrl: evType === "taller" ? evRegUrl : undefined,
-        }, selectedEventImg || undefined);
-        setEvTitle(""); setEvDesc(""); setEvDate(""); setEvTime(""); setEvImg(""); setEvRegUrl(""); setSelectedEventImg(null);
-    };
 
     // Loading states
     if (!specialistsLoaded) return (
@@ -408,27 +353,13 @@ export function SpecialistDashboard() {
         { label: endUserTabLabel, value: totalPatients, icon: Users, gradient: "from-violet-500 to-violet-600" },
     ];
 
-    // Root appointments in history (Completada or Cancelada, no parentId)
-    const historialAppts = allAppts
-        .filter(a => (a.status === "Completada" || a.status === "Cancelada") && !a.parentId)
-        .sort((a, b) => b.date.localeCompare(a.date));
-
-    // Paginación del historial
+    // Paginación del historial (historialAppts y followUpsByParent ya memoizados arriba)
     const HISTORIAL_SPEC_PAGE_SIZE = 10;
     const historialSpecTotalPages = Math.ceil(historialAppts.length / HISTORIAL_SPEC_PAGE_SIZE);
     const pagedHistorialAppts = historialAppts.slice(
         historialSpecPage * HISTORIAL_SPEC_PAGE_SIZE,
         (historialSpecPage + 1) * HISTORIAL_SPEC_PAGE_SIZE
     );
-
-    // Map parentId → follow-up appointments (any status, not cancelled)
-    const followUpsByParent = allAppts.reduce((acc, a) => {
-        if (a.parentId) {
-            if (!acc[a.parentId]) acc[a.parentId] = [];
-            acc[a.parentId].push(a);
-        }
-        return acc;
-    }, {} as Record<string, typeof allAppts>);
 
     const sidebarTabs = [
         { key: "calendar", label: "Mi Calendario", icon: CalendarDays },
@@ -451,9 +382,11 @@ export function SpecialistDashboard() {
 
                 {/* Stats */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    {statsData.map(s => <StatCard key={s.label} {...s} />)}
+                    {statsData.map((s, i) => <StatCard key={s.label} index={i} {...s} />)}
                 </div>
 
+                {/* Contenido por pestaña — fade-up en cada cambio (key=activeTab) */}
+                <Reveal key={activeTab} className="space-y-8">
                 {/* Expedientes Tab */}
                 {activeTab === "expedientes" && (
                     <PatientRecords mySpecialistId={spec.id} endUserLabel={endUserLabel} />
@@ -673,6 +606,29 @@ export function SpecialistDashboard() {
                             </div>
                         </div>
 
+                        {/* Location config — el especialista ELIGE una sede del catálogo de la org (no escribe) */}
+                        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-6 shadow-sm">
+                            <div className="flex items-center gap-2 mb-3">
+                                <MapPin className="w-4 h-4 text-emerald-600" />
+                                <h4 className="font-bold text-slate-900 dark:text-white text-sm">Sede de atención presencial <span className="font-normal text-slate-400">(opcional)</span></h4>
+                            </div>
+                            <p className="text-slate-500 text-xs mb-3">Elige tu sede del catálogo de la organización. Se mostrará al alumno al confirmar citas presenciales.</p>
+                            {orgLocations.length === 0 ? (
+                                <p className="text-slate-400 text-xs italic">Tu organización aún no tiene sedes registradas. Pide al administrador que las agregue.</p>
+                            ) : (
+                                <select
+                                    value={spec?.locationId ?? ""}
+                                    onChange={e => spec && updateSpecialistLocation(spec.id, e.target.value || null)}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                >
+                                    <option value="">Sin sede asignada</option>
+                                    {orgLocations.map(l => (
+                                        <option key={l.id} value={l.id}>{l.name}{l.address ? ` — ${l.address}` : ""}</option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
+
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
                             <div>
                                 <h3 className="text-2xl font-bold text-slate-900 dark:text-white">Mis Horarios de Atención</h3>
@@ -733,8 +689,10 @@ export function SpecialistDashboard() {
 
                                             const daySlots = spec.schedule.filter((s: any) =>
                                                 s.specificDate === isoDate ||
+                                                // Recurrentes semanales legacy (week null); los slots de semana
+                                                // migraron a specificDate y ya no dependen del weekOffset
                                                 (s.specificDate === null && s.dayOfWeek === dow &&
-                                                    (s.week === undefined || s.week === null || s.week === weekOffset))
+                                                    (s.week === undefined || s.week === null))
                                             );
 
                                             return (
@@ -827,21 +785,9 @@ export function SpecialistDashboard() {
                                             },
                                             {
                                                 value: "0",
-                                                label: "Esta semana",
-                                                desc: `Añade ${slots.newStart}–${slots.newEnd} a todos los días hábiles disponibles de esta semana`,
+                                                label: "Toda la semana",
+                                                desc: `Añade ${slots.newStart}–${slots.newEnd} a los días hábiles restantes de la semana del día seleccionado`,
                                                 color: "indigo",
-                                            },
-                                            {
-                                                value: "1",
-                                                label: "Próxima semana",
-                                                desc: `Añade ${slots.newStart}–${slots.newEnd} a los 5 días hábiles de la próxima semana`,
-                                                color: "violet",
-                                            },
-                                            {
-                                                value: "both",
-                                                label: "Siempre (recurrente)",
-                                                desc: `Todos los ${DAYS_FULL[Number(slots.newDay)]} de forma permanente`,
-                                                color: "emerald",
                                             },
                                         ].map(opt => (
                                             <button
@@ -894,253 +840,14 @@ export function SpecialistDashboard() {
 
                 {/* Publish Content Tab */}
                 {activeTab === "content" && (
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
-                        {/* ── Form ── */}
-                        <div>
-                            <h3 className="text-2xl font-bold text-slate-900 mb-2">Publicar Material Educativo</h3>
-                            <p className="text-slate-500 font-medium mb-6">Comparte recursos con los {endUserTabLabel} de tu organización.</p>
-                            <div className="space-y-5 bg-slate-50 border border-slate-200 rounded-3xl p-6 shadow-sm">
-                                <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Título <span className="text-rose-500">*</span></label>
-                                    <input type="text" value={ctitle} onChange={e => setCtitle(e.target.value)} placeholder="Ej. Guía para el manejo de ansiedad" className={inputCls} />
-                                </div>
-                                <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Descripción</label>
-                                    <textarea value={cdesc} onChange={e => setCdesc(e.target.value)} className={`${inputCls} resize-none`} rows={3} />
-                                </div>
-                                <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Tipo de recurso</label>
-                                    <div className="grid grid-cols-3 gap-3">
-                                        {[
-                                            { key: "video", label: "Video", icon: Video, color: "rose" },
-                                            { key: "image", label: "Infografía", icon: ImageIcon, color: "emerald" },
-                                            { key: "link", label: "Enlace", icon: ExternalLink, color: "blue" },
-                                        ].map(t => (
-                                            <button key={t.key} onClick={() => { setCtype(t.key); setCurl(""); setSelectedFile(null); }}
-                                                className={`flex flex-col items-center gap-2 p-4 border-2 rounded-2xl cursor-pointer transition-all ${ctype === t.key ? `border-${t.color}-500 bg-${t.color}-50` : "border-slate-200 bg-white hover:border-slate-300"}`}>
-                                                <t.icon className={`w-6 h-6 ${ctype === t.key ? `text-${t.color}-600` : "text-slate-400"}`} />
-                                                <span className={`text-xs font-bold ${ctype === t.key ? `text-${t.color}-700` : "text-slate-500"}`}>{t.label}</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                                {ctype === "image" && (
-                                    <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">Imagen / Infografía <span className="text-rose-500">*</span></label>
-                                        <div className="relative flex items-center gap-4 p-4 bg-white border-2 border-dashed border-emerald-200 rounded-2xl hover:border-emerald-400 transition-colors cursor-pointer">
-                                            <input type="file" accept="image/*" onChange={e => setSelectedFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                                            {selectedFile ? (
-                                                <>
-                                                    <div className="w-16 h-16 rounded-xl bg-emerald-100 flex items-center justify-center border border-emerald-200 shrink-0"><ImageIcon className="w-7 h-7 text-emerald-500" /></div>
-                                                    <div><p className="text-sm font-bold text-slate-700">{selectedFile.name}</p><p className="text-xs text-slate-400">{(selectedFile.size / 1024).toFixed(1)} KB — haz clic para cambiar</p></div>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <div className="w-16 h-16 rounded-xl bg-emerald-50 flex items-center justify-center border border-emerald-100 shrink-0"><ImageIcon className="w-7 h-7 text-emerald-400" /></div>
-                                                    <div><p className="text-sm font-bold text-slate-700">Subir imagen o infografía</p><p className="text-xs text-slate-400">JPG, PNG, WEBP. Recomendado: 800×400px</p></div>
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                                {ctype === "video" && (
-                                    <div className="space-y-4">
-                                        <div>
-                                            <label className="block mb-1 text-slate-900 font-bold text-sm">Enlace del video <span className="text-rose-500">*</span></label>
-                                            <p className="text-xs text-slate-400 mb-2">Pega la URL de YouTube o Vimeo. Los {endUserTabLabel} verán el video integrado directamente en la plataforma.</p>
-                                            <input type="url" value={curl} onChange={e => setCurl(e.target.value)} placeholder="https://youtube.com/watch?v=... o https://vimeo.com/..." className={inputCls} />
-                                        </div>
-                                        <div>
-                                            <label className="block mb-2 text-slate-900 font-bold text-sm">Archivo adjunto (opcional)</label>
-                                            <div className="relative flex items-center gap-3 p-4 bg-white border border-slate-200 rounded-xl hover:border-rose-300 transition-colors cursor-pointer">
-                                                <input type="file" onChange={e => setSelectedFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                                                <Plus className="w-5 h-5 text-slate-400" />
-                                                <div>
-                                                    <p className="text-sm font-bold text-slate-700">{selectedFile ? selectedFile.name : "Subir archivo complementario"}</p>
-                                                    {selectedFile && <p className="text-xs text-slate-400">{(selectedFile.size / 1024).toFixed(1)} KB</p>}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                                {ctype === "link" && (
-                                    <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">URL del enlace <span className="text-rose-500">*</span></label>
-                                        <input type="url" value={curl} onChange={e => setCurl(e.target.value)} placeholder="https://..." className={inputCls} />
-                                    </div>
-                                )}
-                                <Btn onClick={handlePublishContent} size="lg" className="w-full">
-                                    <FileText className="w-5 h-5" /> Publicar Material
-                                </Btn>
-                            </div>
-                        </div>
-
-                        {/* ── Published resources for this dept ── */}
-                        <div>
-                            <h3 className="text-xl font-bold text-slate-900 mb-4">Material publicado — {dept}</h3>
-                            <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-                                {resources.filter(r => r.department === dept).length === 0 ? (
-                                    <div className="text-center py-12 text-slate-400 border-2 border-dashed border-slate-100 rounded-2xl">
-                                        <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                                        <p className="text-sm font-medium">Sin material publicado en {dept}</p>
-                                    </div>
-                                ) : (
-                                    resources.filter(r => r.department === dept).map(r => (
-                                        <div key={r.id} className="flex items-start gap-3 p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow group">
-                                            <div className={`p-2 rounded-lg shrink-0 ${r.type === "video" ? "bg-rose-50" : r.type === "link" ? "bg-blue-50" : "bg-emerald-50"}`}>
-                                                {r.type === "video" && <Video className="w-4 h-4 text-rose-500" />}
-                                                {r.type === "link" && <ExternalLink className="w-4 h-4 text-blue-500" />}
-                                                {r.type === "image" && <ImageIcon className="w-4 h-4 text-emerald-500" />}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-bold text-slate-800 truncate">{r.title}</p>
-                                                {r.description && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{r.description}</p>}
-                                                <span className="text-[0.65rem] uppercase tracking-wider font-bold text-slate-400">{r.type}</span>
-                                            </div>
-                                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 shrink-0 transition-all">
-                                                <button onClick={() => openEditResource(r)} title="Editar"
-                                                    className="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all cursor-pointer">
-                                                    <Pencil className="w-4 h-4" />
-                                                </button>
-                                                <button onClick={() => deleteResource(r.id)} title="Eliminar"
-                                                    className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all cursor-pointer">
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-                        </div>
-                    </div>
+                    <ContentTab dept={dept} endUserTabLabel={endUserTabLabel} />
                 )}
 
                 {/* Publish Event Tab */}
                 {activeTab === "event" && (
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
-                        {/* ── Form ── */}
-                        <div>
-                            <h3 className="text-2xl font-bold text-slate-900 mb-2">Publicar Evento o Taller</h3>
-                            <p className="text-slate-500 font-medium mb-6">Crea un banner que aparecerá en el carrusel principal de {endUserTabLabel}.</p>
-                            <div className="space-y-5 bg-slate-50 border border-slate-200 rounded-3xl p-6 shadow-sm">
-                                <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Formato</label>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        {["taller", "conferencia"].map(t => (
-                                            <button key={t} onClick={() => setEvType(t)}
-                                                className={`py-3 rounded-xl border-2 cursor-pointer capitalize font-bold text-sm transition-all ${evType === t ? "border-violet-600 bg-violet-50 text-violet-700 shadow-sm" : "border-slate-200 bg-white text-slate-500"}`}>
-                                                {t}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Título <span className="text-rose-500">*</span></label>
-                                    <input type="text" value={evTitle} onChange={e => setEvTitle(e.target.value)} placeholder="Ej. Taller de Organización" className={inputCls} />
-                                </div>
-                                <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Descripción</label>
-                                    <textarea value={evDesc} onChange={e => setEvDesc(e.target.value)} className={`${inputCls} resize-none`} rows={3} />
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">Fecha <span className="text-rose-500">*</span></label>
-                                        <input type="date" value={evDate} onChange={e => setEvDate(e.target.value)} className={inputCls} />
-                                    </div>
-                                    <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">Hora</label>
-                                        <input type="time" value={evTime} onChange={e => setEvTime(e.target.value)} className={inputCls} />
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block mb-2 text-slate-900 font-bold text-sm">Imagen de portada</label>
-                                    <div className="relative flex items-center gap-4 p-5 bg-white border border-slate-200 rounded-2xl hover:border-violet-400 transition-colors cursor-pointer">
-                                        <input type="file" accept="image/*" onChange={e => setSelectedEventImg(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                                        <div className="w-20 h-20 rounded-xl bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-100">
-                                            <ImageIcon className={`w-8 h-8 ${selectedEventImg ? "text-violet-400" : "text-slate-400"}`} />
-                                        </div>
-                                        <div>
-                                            <p className="text-sm font-bold text-slate-700">{selectedEventImg ? selectedEventImg.name : "Subir imagen"}</p>
-                                            <p className="text-xs text-slate-400">JPG, PNG. Recomendado: 800×400px</p>
-                                        </div>
-                                    </div>
-                                </div>
-                                {evType === "taller" && (
-                                    <div>
-                                        <label className="block mb-2 text-slate-900 font-bold text-sm">Enlace de registro <span className="text-rose-500">*</span></label>
-                                        <input type="url" value={evRegUrl} onChange={e => setEvRegUrl(e.target.value)} placeholder="https://forms.gle/..." className={inputCls} />
-                                    </div>
-                                )}
-                                <Btn onClick={handlePublishEvent} size="lg" className="w-full bg-violet-600 hover:bg-violet-700">
-                                    <Megaphone className="w-5 h-5" /> Publicar Evento
-                                </Btn>
-                            </div>
-                        </div>
-
-                        {/* ── Published events for this dept ── */}
-                        <div>
-                            <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
-                                <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center"><CheckCircle2 className="w-4 h-4 text-emerald-600" /></div>
-                                Eventos publicados — {dept} ({events.filter(e => e.department === dept).length})
-                            </h3>
-                            <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
-                                {events.filter(e => e.department === dept).length === 0 ? (
-                                    <div className="text-center py-12 text-slate-400 border-2 border-dashed border-slate-100 rounded-2xl">
-                                        <Megaphone className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                                        <p className="text-sm font-medium">Sin eventos publicados en {dept}</p>
-                                    </div>
-                                ) : (
-                                    events.filter(e => e.department === dept).map(ev => (
-                                        <div key={ev.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group">
-                                            {ev.imageUrl && (
-                                                <div className="h-28 bg-slate-100 overflow-hidden relative">
-                                                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900/50 to-transparent z-10" />
-                                                    <img src={ev.imageUrl} alt={ev.title} className="w-full h-full object-cover"
-                                                        onError={(e: React.SyntheticEvent<HTMLImageElement>) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                                                    <span className={`absolute bottom-2 left-2 z-20 px-2 py-0.5 rounded-md font-bold text-[0.6rem] uppercase ${ev.type === "conferencia" ? "bg-violet-500 text-white" : "bg-blue-500 text-white"}`}>
-                                                        {ev.type === "conferencia" ? "Conferencia" : "Taller"}
-                                                    </span>
-                                                    <div className="absolute top-2 right-2 z-20 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                                                        <button onClick={() => openEditEvent(ev)} title="Editar"
-                                                            className="p-1.5 bg-white/90 hover:bg-white text-blue-600 rounded-lg cursor-pointer shadow">
-                                                            <Pencil className="w-3.5 h-3.5" />
-                                                        </button>
-                                                        <button onClick={() => deleteEvent(ev.id)} title="Eliminar"
-                                                            className="p-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg cursor-pointer shadow">
-                                                            <Trash2 className="w-3.5 h-3.5" />
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            )}
-                                            <div className="p-3 flex items-start justify-between gap-2">
-                                                <div>
-                                                    <p className="text-slate-900 font-bold text-sm leading-tight">{ev.title}</p>
-                                                    <p className="text-slate-500 text-xs mt-1 flex items-center gap-1">
-                                                        <CalendarDays className="w-3 h-3" />
-                                                        {new Date(ev.date + "T12:00:00").toLocaleDateString("es-MX", { weekday: "short", day: "numeric", month: "short" })}
-                                                        {ev.time ? ` • ${ev.time}` : ""}
-                                                    </p>
-                                                </div>
-                                                {!ev.imageUrl && (
-                                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 shrink-0 transition-all">
-                                                        <button onClick={() => openEditEvent(ev)} title="Editar"
-                                                            className="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all cursor-pointer">
-                                                            <Pencil className="w-4 h-4" />
-                                                        </button>
-                                                        <button onClick={() => deleteEvent(ev.id)} title="Eliminar"
-                                                            className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all cursor-pointer">
-                                                            <Trash2 className="w-4 h-4" />
-                                                        </button>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-                        </div>
-                    </div>
+                    <EventTab dept={dept} endUserTabLabel={endUserTabLabel} />
                 )}
+                </Reveal>
 
                 {/* Virtual Confirm Modal */}
                 <Modal
@@ -1169,6 +876,42 @@ export function SpecialistDashboard() {
                         <div className="flex gap-3">
                             <Btn variant="ghost" onClick={() => setVirtualConfirmAppt(null)} className="flex-1">Cancelar</Btn>
                             <Btn onClick={handleConfirmVirtual} className="flex-1">
+                                <CheckCircle2 className="w-4 h-4" /> Confirmar cita
+                            </Btn>
+                        </div>
+                    </div>
+                </Modal>
+
+                {/* Presencial Confirm Modal */}
+                <Modal
+                    open={!!presencialConfirmAppt}
+                    onClose={() => setPresencialConfirmAppt(null)}
+                    title="Confirmar cita presencial"
+                    subtitle={presencialConfirmAppt ? `${presencialConfirmAppt.studentName} — ${presencialConfirmAppt.date} a las ${presencialConfirmAppt.time}` : ""}
+                    maxWidth="max-w-md"
+                >
+                    <div className="space-y-4">
+                        <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl flex items-start gap-2">
+                            <MapPin className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                            <p className="text-emerald-800 text-sm">El alumno verá la sede que elijas junto con la confirmación.</p>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-900 mb-2">Sede de atención</label>
+                            <select
+                                value={presencialConfirmLocationId}
+                                onChange={e => setPresencialConfirmLocationId(e.target.value)}
+                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            >
+                                <option value="">Sin sede específica</option>
+                                {orgLocations.map(l => (
+                                    <option key={l.id} value={l.id}>{l.name}{l.address ? ` — ${l.address}` : ""}</option>
+                                ))}
+                            </select>
+                            <p className="text-slate-400 text-xs mt-1">Solo puedes elegir entre las sedes de tu organización.</p>
+                        </div>
+                        <div className="flex gap-3">
+                            <Btn variant="ghost" onClick={() => setPresencialConfirmAppt(null)} className="flex-1">Cancelar</Btn>
+                            <Btn onClick={handleConfirmPresencial} className="flex-1">
                                 <CheckCircle2 className="w-4 h-4" /> Confirmar cita
                             </Btn>
                         </div>
@@ -1209,7 +952,7 @@ export function SpecialistDashboard() {
                             </>
                         ) : (
                             <div>
-                                <label className="block mb-2 text-slate-900 font-bold text-sm">Motivo de cancelación (opcional)</label>
+                                <label className="block mb-2 text-slate-900 font-bold text-sm">Motivo de cancelación <span className="text-rose-500">*</span></label>
                                 <textarea
                                     value={action.notes}
                                     onChange={e => action.setNotes(e.target.value)}
@@ -1222,7 +965,10 @@ export function SpecialistDashboard() {
                         <div className="flex gap-3">
                             <Btn variant="outline" onClick={action.close} className="flex-1">Cancelar</Btn>
                             <Btn
-                                onClick={() => action.confirm()}
+                                onClick={() => {
+                                    if (action.status === "Cancelada" && !action.notes.trim()) { toast.error("Indica el motivo de la cancelación."); return; }
+                                    action.confirm();
+                                }}
                                 className={`flex-1 text-white border-0 shadow-lg ${action.status === "Cancelada" ? "bg-rose-600 hover:bg-rose-700" : "bg-indigo-600 hover:bg-indigo-700"}`}
                             >
                                 {action.status === "Completada" ? "Finalizar Cita" : "Confirmar Cancelación"}
@@ -1345,86 +1091,6 @@ export function SpecialistDashboard() {
                             >
                                 <ArrowRight className="w-4 h-4" /> Confirmar Seguimiento
                             </Btn>
-                        </div>
-                    </div>
-                </Modal>
-
-                {/* ─── Edit Event Modal ─── */}
-                <Modal open={!!editingEvent} onClose={() => setEditingEvent(null)} title="Editar Evento" subtitle={editingEvent?.title} maxWidth="max-w-lg">
-                    <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-3">
-                            {["taller", "conferencia"].map(t => (
-                                <button key={t} onClick={() => setEditEvType(t)}
-                                    className={`py-2.5 rounded-xl border-2 cursor-pointer capitalize font-bold text-sm transition-all ${editEvType === t ? "border-violet-600 bg-violet-50 text-violet-700" : "border-slate-200 bg-white text-slate-500"}`}>
-                                    {t}
-                                </button>
-                            ))}
-                        </div>
-                        <div>
-                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Título <span className="text-rose-500">*</span></label>
-                            <input type="text" value={editEvTitle} onChange={e => setEditEvTitle(e.target.value)} className={inputCls} />
-                        </div>
-                        <div>
-                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Descripción</label>
-                            <textarea value={editEvDesc} onChange={e => setEditEvDesc(e.target.value)} rows={3} className={`${inputCls} resize-none`} />
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Fecha <span className="text-rose-500">*</span></label>
-                                <input type="date" value={editEvDate} onChange={e => setEditEvDate(e.target.value)} className={inputCls} />
-                            </div>
-                            <div>
-                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Hora</label>
-                                <input type="time" value={editEvTime} onChange={e => setEditEvTime(e.target.value)} className={inputCls} />
-                            </div>
-                        </div>
-                        {editEvType === "taller" && (
-                            <div>
-                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Enlace de Registro</label>
-                                <input type="url" value={editEvRegUrl} onChange={e => setEditEvRegUrl(e.target.value)} placeholder="https://forms.gle/..." className={inputCls} />
-                            </div>
-                        )}
-                        <div>
-                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Cambiar imagen (opcional)</label>
-                            <input type="file" accept="image/*" onChange={e => setEditEvImg(e.target.files?.[0] || null)}
-                                className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 cursor-pointer" />
-                            {editEvImg && <p className="text-xs text-slate-400 mt-1">{editEvImg.name}</p>}
-                        </div>
-                        <div className="flex gap-3 pt-2">
-                            <Btn variant="ghost" onClick={() => setEditingEvent(null)} className="flex-1">Cancelar</Btn>
-                            <Btn onClick={handleSaveEvent} className="flex-1 bg-violet-600 hover:bg-violet-700 text-white shadow-violet-600/20">Guardar Cambios</Btn>
-                        </div>
-                    </div>
-                </Modal>
-
-                {/* ─── Edit Resource Modal ─── */}
-                <Modal open={!!editingResource} onClose={() => setEditingResource(null)} title="Editar Recurso" subtitle={editingResource?.title} maxWidth="max-w-md">
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Título <span className="text-rose-500">*</span></label>
-                            <input type="text" value={editRTitle} onChange={e => setEditRTitle(e.target.value)} className={inputCls} />
-                        </div>
-                        <div>
-                            <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Descripción</label>
-                            <textarea value={editRDesc} onChange={e => setEditRDesc(e.target.value)} rows={3} className={`${inputCls} resize-none`} />
-                        </div>
-                        {editingResource?.type !== "image" && (
-                            <div>
-                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Enlace</label>
-                                <input type="url" value={editRUrl} onChange={e => setEditRUrl(e.target.value)} placeholder="https://..." className={inputCls} />
-                            </div>
-                        )}
-                        {editingResource?.type !== "link" && (
-                            <div>
-                                <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Cambiar archivo (opcional)</label>
-                                <input type="file" onChange={e => setEditRFile(e.target.files?.[0] || null)}
-                                    className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer" />
-                                {editRFile && <p className="text-xs text-slate-400 mt-1">{editRFile.name}</p>}
-                            </div>
-                        )}
-                        <div className="flex gap-3 pt-2">
-                            <Btn variant="ghost" onClick={() => setEditingResource(null)} className="flex-1">Cancelar</Btn>
-                            <Btn onClick={handleSaveResource} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20">Guardar Cambios</Btn>
                         </div>
                     </div>
                 </Modal>

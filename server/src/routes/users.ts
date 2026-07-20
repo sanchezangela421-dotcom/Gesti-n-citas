@@ -83,8 +83,11 @@ router.delete('/:id', verifyToken as any, async (req: AuthRequest, res) => {
     const user = await prisma.user.findFirst({ where: { id, ...orgScope(req.user) } });
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-    if (user.email === 'admin@instituto.edu.mx') {
-      return res.status(403).json({ error: 'No se puede eliminar el administrador principal' });
+    // Guarda por ROL (la anterior comparaba contra un email que ya no existe en el
+    // seed, dejando al admin real sin protección). La gestión de cuentas admin se
+    // hace desde el panel de superadmin, que tiene sus propias validaciones.
+    if (user.role === 'admin' || user.role === 'superadmin') {
+      return res.status(403).json({ error: 'Las cuentas de administrador no se pueden eliminar desde este panel' });
     }
 
     await prisma.user.delete({ where: { id } });

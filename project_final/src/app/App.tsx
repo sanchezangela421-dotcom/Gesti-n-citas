@@ -69,7 +69,7 @@ function LoadingScreen() {
 
 // ─── AppRouter ───────────────────────────────────────────
 function AppRouter() {
-  const { user, isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading, logout } = useAuth();
   const { fetchAll } = useStore();
 
   useEffect(() => {
@@ -78,6 +78,12 @@ function AppRouter() {
 
   const [view, setView] = useState<"login" | "register">("login");
   const [resetToken, setResetToken] = useState<string | null>(() => getResetToken());
+
+  // Activación / recuperación de contraseña: si hay token en la URL, cerrar cualquier
+  // sesión abierta para que al terminar se caiga en el login y no en el panel previo.
+  useEffect(() => {
+    if (resetToken && isAuthenticated) logout();
+  }, [resetToken, isAuthenticated, logout]);
 
   if (loading) return <LoadingScreen />;
 

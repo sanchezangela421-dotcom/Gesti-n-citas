@@ -63,8 +63,16 @@ export interface Specialist {
   active: boolean;
   shift?: string;
   meetingUrl?: string | null;
+  locationId?: string | null;   // sede asignada (del catálogo de la org)
   schedule: ScheduleSlot[];
   avatarUrl?: string | null;
+}
+
+export interface OrgLocation {
+  id: string;
+  name: string;
+  address?: string | null;
+  active: boolean;
 }
 
 export interface Appointment {
@@ -81,6 +89,7 @@ export interface Appointment {
   motivo: string;
   cancellationReason?: string | null; // motivo de cancelación (no confidencial)
   meetingUrl?: string | null;
+  location?: string | null;           // sede de la cita presencial (snapshot al confirmar)
   isFollowUp?: boolean;
   parentId?: string | null;
   periodId?: string | null;
@@ -145,6 +154,17 @@ export interface AppEvent {
   type: string;
   imageUrl?: string;
   registrationUrl?: string;
+  createdById?: string | null;
+  registeredCount?: number;   // inscritos (lo agrega el backend en GET /events)
+  isRegistered?: boolean;     // si el usuario actual está inscrito
+}
+
+export interface EventRegistrant {
+  id: string;
+  userId: string;
+  name: string;
+  email: string;
+  registeredAt: string;
 }
 
 export interface Resource {
@@ -201,13 +221,14 @@ export interface StoreContextType {
   appointments: Appointment[];
   getAppointments: (filters?: AppointmentFilters) => Appointment[];
   createAppointment: (req: { studentId: string; studentName?: string; specialistId: string; department: string; motivo: string; modality: string; preferredDate: string; preferredTime: string; isFollowUp?: boolean; parentId?: string }) => Promise<boolean>;
-  updateAppointmentStatus: (id: string, status: string, notes?: string, byStudent?: boolean, meetingUrl?: string) => void;
+  updateAppointmentStatus: (id: string, status: string, notes?: string, byStudent?: boolean, meetingUrl?: string, locationId?: string) => void;
   rescheduleAppointment: (id: string, newDate: string, newTime: string, byRole?: 'specialist' | 'student', modality?: string) => void;
   getAvailableSlots: (specialistId: string, dateStr: string) => Promise<AvailableSlot[]>;
   getAvailableDays: (specialistId: string, year: number, month: number) => Promise<Date[]>;
   addScheduleSlot: (specialistId: string, slot: Omit<ScheduleSlot, "id">) => void;
   removeScheduleSlot: (specialistId: string, slotId: string) => void;
   updateMeetingUrl: (specialistId: string, meetingUrl: string | null) => Promise<void>;
+  updateSpecialistLocation: (specialistId: string, locationId: string | null) => Promise<void>;
   events: AppEvent[];
   addEvent: (ev: Omit<AppEvent, "id">, file?: File) => Promise<void>;
   updateEvent: (id: string, data: Partial<Omit<AppEvent, "id">>, file?: File) => Promise<void>;

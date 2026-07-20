@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { orgScope } from '../lib/orgScope';
+import { localISODate } from '../lib/dates';
 
 const router = Router();
 
@@ -50,7 +51,9 @@ router.get('/active', readLimiter, verifyToken as any, async (req: AuthRequest, 
 
     if (!active) return res.json(null);
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    // Fecha local (TZ del servidor), no UTC: con toISOString el período se
+    // auto-cerraba 6 horas antes (desde las 18:00 hora de México).
+    const todayStr = localISODate();
     if (active.endDate && active.endDate < todayStr) {
       await prisma.reportPeriod.update({
         where: { id: active.id },
@@ -103,8 +106,10 @@ router.post('/', writeLimiter, verifyToken as any, async (req: AuthRequest, res)
 
     let absorbed = 0;
     if (absorbUnassigned) {
+      // Solo citas sin período DE ESTA organización: sin el scope se absorbían
+      // citas de todas las orgs hacia el período recién creado.
       const result = await prisma.appointment.updateMany({
-        where: { periodId: null },
+        where: { periodId: null, ...orgScope(req.user) },
         data: { periodId: period.id },
       });
       absorbed = result.count;
@@ -130,7 +135,9 @@ router.patch('/:id', writeLimiter, verifyToken as any, async (req: AuthRequest, 
   const { name, startDate, endDate } = req.body;
 
   try {
-    const period = await prisma.reportPeriod.findUnique({ where: { id } });
+    // findFirst + orgScope: sin el scope, un admin de otra organización podía
+    // editar/cerrar períodos ajenos con solo conocer el ID (IDOR).
+    const period = await prisma.reportPeriod.findFirst({ where: { id, ...orgScope(req.user) } });
     if (!period) {
       return res.status(404).json({ error: 'Período no encontrado' });
     }
@@ -174,7 +181,9 @@ router.post('/:id/close', writeLimiter, verifyToken as any, async (req: AuthRequ
   // nextPeriod?: { name: string; startDate: string; endDate?: string }
 
   try {
-    const period = await prisma.reportPeriod.findUnique({ where: { id } });
+    // findFirst + orgScope: sin el scope, un admin de otra organización podía
+    // editar/cerrar períodos ajenos con solo conocer el ID (IDOR).
+    const period = await prisma.reportPeriod.findFirst({ where: { id, ...orgScope(req.user) } });
     if (!period) {
       return res.status(404).json({ error: 'Período no encontrado' });
     }
@@ -183,7 +192,7 @@ router.post('/:id/close', writeLimiter, verifyToken as any, async (req: AuthRequ
     }
 
     const now = new Date();
-    const closingDate = endDate ?? now.toISOString().split('T')[0];
+    const closingDate = endDate ?? localISODate(now);
 
     const result = await prisma.$transaction(async (tx) => {
       const closed = await tx.reportPeriod.update({
@@ -203,6 +212,9 @@ router.post('/:id/close', writeLimiter, verifyToken as any, async (req: AuthRequ
             startDate: nextPeriod.startDate,
             endDate: nextPeriod.endDate ?? null,
             status: 'activo',
+            // Hereda la organización del período que se cierra; sin esto el
+            // período nuevo quedaba global (null) y desaparecía de las vistas de la org.
+            organizationId: period.organizationId,
           },
         });
       }

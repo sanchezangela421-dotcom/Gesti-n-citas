@@ -24,10 +24,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     users:           usersStore.users,
     addNotification: notificationsStore.addNotification,
   });
-  const contentStore = useContentStore({
-    users:           usersStore.users,
-    addNotification: notificationsStore.addNotification,
-  });
+  const contentStore = useContentStore();
 
   // ── Período activo ─────────────────────────────────────
   const [activePeriod, setActivePeriod] = useState<ReportPeriod | null>(null);
@@ -203,6 +200,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     addScheduleSlot: specialistsStore.addScheduleSlot,
     removeScheduleSlot: specialistsStore.removeScheduleSlot,
     updateMeetingUrl: specialistsStore.updateMeetingUrl,
+    updateSpecialistLocation: specialistsStore.updateSpecialistLocation,
     // appointments
     appointments: appointmentsStore.appointments,
     getAppointments: appointmentsStore.getAppointments,
@@ -239,6 +237,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     specialistsStore.addSpecialist, specialistsStore.updateSpecialist,
     specialistsStore.removeSpecialist, specialistsStore.addScheduleSlot,
     specialistsStore.removeScheduleSlot, specialistsStore.updateMeetingUrl,
+    specialistsStore.updateSpecialistLocation,
     appointmentsStore.appointments, appointmentsStore.getAppointments,
     appointmentsStore.createAppointment, appointmentsStore.updateAppointmentStatus,
     appointmentsStore.rescheduleAppointment,

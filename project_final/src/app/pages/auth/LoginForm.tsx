@@ -11,9 +11,13 @@ const DEPARTMENTS = [
     { name: "Nutrición", icon: Apple, gradient: "from-amber-500 to-orange-500" },
 ];
 
-const DEMO_ACCOUNTS = [
-    { role: "Admin", email: "admin@instituto.edu.mx", pass: "admin123", badge: "bg-slate-100 text-slate-600" },
-];
+// Atajos de login SOLO para desarrollo (deben coincidir con prisma/seed.ts).
+// En el build de producción la lista queda vacía y la sección no se renderiza.
+const DEMO_ACCOUNTS = import.meta.env.DEV ? [
+    { role: "Admin", email: "admin@mail.com", pass: "Admin1234", badge: "bg-slate-100 text-slate-600" },
+    { role: "Especialista", email: "especialista@mail.com", pass: "Admin1234", badge: "bg-blue-100 text-blue-600" },
+    { role: "Alumno", email: "alumno@mail.com", pass: "Admin1234", badge: "bg-emerald-100 text-emerald-600" },
+] : [];
 
 type View = "login" | "forgot" | "reset";
 
@@ -444,25 +448,27 @@ export function LoginForm({ onSwitchToRegister }: { onSwitchToRegister: () => vo
                             </div>
                         </form>
 
-                        {/* Demo accounts */}
-                        <div className="mt-8 border-t border-slate-100 pt-8">
-                            <p className="text-xs font-semibold text-slate-400 text-center uppercase tracking-wider mb-4">Cuentas de acceso rápido</p>
-                            <div className="flex flex-col gap-2.5">
-                                {DEMO_ACCOUNTS.map(c => (
-                                    <button
-                                        key={c.role}
-                                        onClick={() => demoLogin(c.email, c.pass)}
-                                        className="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all group cursor-pointer text-left"
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wide ${c.badge}`}>{c.role}</span>
-                                            <span className="text-sm font-medium text-slate-700 group-hover:text-slate-900 truncate max-w-[180px]">{c.email}</span>
-                                        </div>
-                                        <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-slate-500 transition-colors shrink-0" />
-                                    </button>
-                                ))}
+                        {/* Demo accounts — solo en desarrollo */}
+                        {DEMO_ACCOUNTS.length > 0 && (
+                            <div className="mt-8 border-t border-slate-100 pt-8">
+                                <p className="text-xs font-semibold text-slate-400 text-center uppercase tracking-wider mb-4">Cuentas de acceso rápido (dev)</p>
+                                <div className="flex flex-col gap-2.5">
+                                    {DEMO_ACCOUNTS.map(c => (
+                                        <button
+                                            key={c.role}
+                                            onClick={() => demoLogin(c.email, c.pass)}
+                                            className="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all group cursor-pointer text-left"
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wide ${c.badge}`}>{c.role}</span>
+                                                <span className="text-sm font-medium text-slate-700 group-hover:text-slate-900 truncate max-w-[180px]">{c.email}</span>
+                                            </div>
+                                            <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-slate-500 transition-colors shrink-0" />
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
-                        </div>
+                        )}
                     </div>
 
                     <p className="text-center mt-8 text-slate-500 text-sm">

@@ -40,6 +40,8 @@ model Organization {
   notifications      Notification[]
   registrationFields RegistrationField[]
   clinicalNotes      ClinicalNote[]
+  eventRegistrations EventRegistration[]
+  locations          OrgLocation[]
 }
 
 // Campos personalizados que cada org pide al registrarse
@@ -107,6 +109,8 @@ model User {
   studentAppointments Appointment[]  @relation("StudentAppointments")
   notifications       Notification[]
   clinicalNotes       ClinicalNote[] @relation("StudentClinicalNotes")
+  createdEvents       AppEvent[]     @relation("CreatedEvents")
+  eventRegistrations  EventRegistration[]
 
   @@index([organizationId, role])
   @@index([organizationId, email])
@@ -122,6 +126,8 @@ model Specialist {
   active         Boolean       @default(true)
   shift          String?
   meetingUrl     String?
+  locationId     String?       // sede asignada (del catálogo de la organización)
+  location       OrgLocation?  @relation(fields: [locationId], references: [id], onDelete: SetNull)
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   createdAt      DateTime      @default(now())
@@ -144,8 +150,8 @@ model ScheduleSlot {
   startTime    String
   endTime      String
   available    Boolean    @default(true)
-  week         Int?
-  specificDate String?
+  week         Int?       // LEGACY, siempre null: los slots "de semana" se anclan con specificDate (migración 20260719000000)
+  specificDate String?    // fecha concreta "YYYY-MM-DD"; null = recurrente semanal
 }
 
 model ReportPeriod {
@@ -182,6 +188,7 @@ model Appointment {
   motivo         String
   cancellationReason String?   // motivo de cancelación (NO confidencial; visible al alumno)
   meetingUrl     String?
+  location       String?       // lugar de la cita presencial (snapshot al confirmar)
   isFollowUp     Boolean       @default(false)
   parentId       String?
   parent         Appointment?  @relation("AppointmentFollowUps", fields: [parentId], references: [id], onDelete: SetNull)
@@ -210,13 +217,49 @@ model AppEvent {
   type            String
   imageUrl        String?
   registrationUrl String?
+  createdById     String?
+  createdBy       User?         @relation("CreatedEvents", fields: [createdById], references: [id], onDelete: SetNull)
   organizationId  String?
   organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
+  registrations   EventRegistration[]
+
   @@index([organizationId, date])
   @@index([organizationId, type])
+}
+
+// Inscripción de un usuario a un evento/conferencia (vincula usuario ↔ evento)
+model EventRegistration {
+  id             String        @id @default(uuid())
+  eventId        String
+  event          AppEvent      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  createdAt      DateTime      @default(now())
+
+  @@unique([eventId, userId])
+  @@index([eventId])
+  @@index([organizationId, userId])
+}
+
+// Sede/ubicación física de una organización (catálogo para citas presenciales)
+model OrgLocation {
+  id             String        @id @default(uuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String       // "Campus Centro", "Edificio A — Consultorio 3"
+  address        String?      // dirección o referencia completa
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  specialists    Specialist[]
+
+  @@index([organizationId, active])
 }
 
 model Resource {

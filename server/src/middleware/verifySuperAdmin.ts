@@ -22,11 +22,10 @@ export interface SuperAdminRequest extends Request {
 }
 
 function getClientIp(req: Request): string {
-  return (
-    (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
-    req.socket?.remoteAddress ||
-    'unknown'
-  );
+  // req.ip respeta 'trust proxy' (index.ts): detrás de nginx es la IP real del
+  // cliente. Antes se leía X-Forwarded-For directamente, lo que permitía a un
+  // atacante falsificar una IP permitida y saltarse el allowlist.
+  return req.ip || req.socket?.remoteAddress || 'unknown';
 }
 
 export const verifySuperAdmin = async (req: SuperAdminRequest, res: Response, next: NextFunction) => {

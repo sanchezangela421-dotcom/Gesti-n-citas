@@ -28,6 +28,8 @@ services:
       BACKEND_URL:             ${BACKEND_URL:-http://localhost/api}
       ALLOWED_EMAIL_DOMAIN:    ${ALLOWED_EMAIL_DOMAIN:-mail.com}
       SUPERADMIN_ALLOWED_IPS:  ${SUPERADMIN_ALLOWED_IPS:-}
+      TRUST_PROXY:             ${TRUST_PROXY:-1}
+      TZ:                      ${TZ:-America/Monterrey}
       SMTP_HOST:               ${SMTP_HOST}
       SMTP_PORT:               ${SMTP_PORT:-587}
       SMTP_USER:               ${SMTP_USER}

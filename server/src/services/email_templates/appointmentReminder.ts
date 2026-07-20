@@ -1,4 +1,4 @@
-import { wrap, header, footer, appointmentBox, ctaButton, infoBanner } from './base';
+import { wrap, header, footer, appointmentBox, ctaButton, infoBanner, escapeHtml, safeUrl } from './base';
 
 interface ReminderData {
   date: string;
@@ -18,7 +18,7 @@ export function appointmentReminderStudentTemplate(
   const virtualBanner = data.meetingUrl
     ? infoBanner(
         `🎥 Tu cita es <strong>virtual</strong>. Enlace de videollamada:<br/>
-        <a href="${data.meetingUrl}" style="color:#1d4ed8;word-break:break-all;">${data.meetingUrl}</a>`,
+        <a href="${escapeHtml(safeUrl(data.meetingUrl))}" style="color:#1d4ed8;word-break:break-all;">${escapeHtml(data.meetingUrl)}</a>`,
         { bg: '#eff6ff', border: '#bfdbfe', color: '#1e40af' }
       )
     : '';
@@ -26,7 +26,7 @@ export function appointmentReminderStudentTemplate(
   return wrap(`
     ${header('Recuerda: tienes una cita mañana', 'linear-gradient(135deg,#1e3a5f,#4c1d95)')}
     <div style="padding:32px;">
-      <p style="color:#334155;font-size:15px;">Hola <strong>${studentName}</strong>,</p>
+      <p style="color:#334155;font-size:15px;">Hola <strong>${escapeHtml(studentName)}</strong>,</p>
       <p style="color:#475569;font-size:14px;line-height:1.6;">
         Te recordamos que tienes una cita programada para <strong>mañana</strong> en
         <strong>Synkros</strong>. ¡No olvides prepararla con tiempo!
@@ -54,7 +54,7 @@ export function appointmentReminderSpecialistTemplate(
   return wrap(`
     ${header('Recuerda: tienes una cita mañana', 'linear-gradient(135deg,#1e3a5f,#4c1d95)')}
     <div style="padding:32px;">
-      <p style="color:#334155;font-size:15px;">Hola <strong>${specialistName}</strong>,</p>
+      <p style="color:#334155;font-size:15px;">Hola <strong>${escapeHtml(specialistName)}</strong>,</p>
       <p style="color:#475569;font-size:14px;line-height:1.6;">
         Te recordamos que tienes una cita programada para <strong>mañana</strong> en
         <strong>Synkros</strong>.
