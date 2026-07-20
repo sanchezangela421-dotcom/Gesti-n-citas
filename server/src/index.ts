@@ -9,6 +9,12 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Detrás de nginx (docker-compose) hay exactamente 1 proxy inverso. Sin esto,
+// req.ip es la IP del proxy: el rate limit se comparte entre TODOS los usuarios
+// y el allowlist de IPs del superadmin se puede falsificar vía X-Forwarded-For.
+// Configurable por env para otras topologías (0 = sin proxy, 2 = CDN + nginx…).
+app.set('trust proxy', Number(process.env.TRUST_PROXY ?? 1));
+
 // ── Security middleware ──────────────────────────────────────
 app.use(helmet());
 app.use(cors({
@@ -39,6 +45,8 @@ const authLimiter = rateLimit({
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
 app.use('/api/auth/forgot-password', authLimiter);
+// También limita el reenvío de verificación: cada request dispara un correo
+app.use('/api/auth/resend-verification', authLimiter);
 app.use('/uploads', (req, res, next) => {
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   next();

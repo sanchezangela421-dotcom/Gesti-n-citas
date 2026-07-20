@@ -171,7 +171,7 @@ export function AdminEventsTab({ endUserTabLabel }: { endUserTabLabel: string })
                         </h3>
                         {/* Dept filter tabs */}
                         <div className="flex gap-2 mb-4 flex-wrap">
-                            {["Todos", "Psicología", "Tutorías", "Nutrición", "General"].map(d => (
+                            {["Todos", "Psicología", "Tutorías", "Nutrición"].map(d => (
                                 <button key={d} onClick={() => setEventsDeptTab(d)}
                                     className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all cursor-pointer ${eventsDeptTab === d ? "bg-violet-600 text-white border-violet-600" : "bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:border-violet-400"}`}>
                                     {d}

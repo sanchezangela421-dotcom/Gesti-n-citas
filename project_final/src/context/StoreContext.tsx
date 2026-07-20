@@ -24,10 +24,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     users:           usersStore.users,
     addNotification: notificationsStore.addNotification,
   });
-  const contentStore = useContentStore({
-    users:           usersStore.users,
-    addNotification: notificationsStore.addNotification,
-  });
+  const contentStore = useContentStore();
 
   // ── Período activo ─────────────────────────────────────
   const [activePeriod, setActivePeriod] = useState<ReportPeriod | null>(null);

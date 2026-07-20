@@ -175,30 +175,14 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
   ) => {
     // Capture original values before optimistic update for rollback
     let original: { date: string; time: string; modality: string; status: string } | null = null;
+    let capturedAppt: Appointment | null = null;
 
+    // Optimistic update — only state, NO notifications yet
     setAppointments(p => {
       const appt = p.find(a => a.id === id);
       if (appt) {
         original = { date: appt.date, time: appt.time, modality: appt.modality, status: appt.status };
-        const newModality = modality ?? appt.modality;
-        const modalityChanged = modality && modality !== appt.modality;
-        if (byRole === "specialist") {
-          addNotification(appt.studentId, {
-            title: "Cita Reagendada",
-            message: `Tu cita con ${appt.specialistName} fue reagendada para el ${new Date(newDate + "T12:00:00").toLocaleDateString()} a las ${newTime}.`,
-            type: "reschedule",
-          });
-        } else if (byRole === "student") {
-          // Use specialist.userId (User model ID), not specialist.id (Specialist model ID)
-          const specUserId = specialists.find(s => s.id === appt.specialistId)?.userId;
-          if (specUserId) {
-            addNotification(specUserId, {
-              title: "Cita Reagendada por Alumno",
-              message: `${appt.studentName} reagendó su cita para el ${new Date(newDate + "T12:00:00").toLocaleDateString()} a las ${newTime}.${modalityChanged ? ` Modalidad: ${newModality}.` : ""}`,
-              type: "reschedule",
-            });
-          }
-        }
+        capturedAppt = appt;
       }
       return p.map(a => a.id === id ? { ...a, date: newDate, time: newTime, ...(byRole === "student" && { status: "Pendiente" }), ...(modality && { modality }) } : a);
     });
@@ -212,6 +196,28 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || "Error al reagendar la cita");
       }
+      // Notify ONLY after server confirms the change
+      if (!capturedAppt) return;
+      const appt = capturedAppt;
+      const newModality = modality ?? appt.modality;
+      const modalityChanged = modality && modality !== appt.modality;
+      if (byRole === "specialist") {
+        addNotification(appt.studentId, {
+          title: "Cita Reagendada",
+          message: `Tu cita con ${appt.specialistName} fue reagendada para el ${new Date(newDate + "T12:00:00").toLocaleDateString()} a las ${newTime}.`,
+          type: "reschedule",
+        });
+      } else if (byRole === "student") {
+        // Use specialist.userId (User model ID), not specialist.id (Specialist model ID)
+        const specUserId = specialists.find(s => s.id === appt.specialistId)?.userId;
+        if (specUserId) {
+          addNotification(specUserId, {
+            title: "Cita Reagendada por Alumno",
+            message: `${appt.studentName} reagendó su cita para el ${new Date(newDate + "T12:00:00").toLocaleDateString()} a las ${newTime}.${modalityChanged ? ` Modalidad: ${newModality}.` : ""}`,
+            type: "reschedule",
+          });
+        }
+      }
     }).catch(err => {
       console.error("Error rescheduling appointment:", err);
       toast.error(err.message || "No se pudo reagendar la cita.");
@@ -219,7 +225,7 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
         setAppointments(p => p.map(a => a.id === id ? { ...a, ...original! } : a));
       }
     });
-  }, [addNotification]);
+  }, [addNotification, specialists]);
 
   return {
     appointments,

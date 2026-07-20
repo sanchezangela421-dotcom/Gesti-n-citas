@@ -57,15 +57,20 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
     const save = () => {
         if (!specId) return;
 
-        // ── "Esta semana": reparte el horario a los días hábiles (Lun-Vie) de la semana actual.
-        //    Funciona al agregar Y al editar (al editar se quita primero el slot original). ──
+        // ── "Esta semana": reparte el horario a los días hábiles (Lun-Vie) de la
+        //    semana del día seleccionado, creando slots de FECHA ESPECÍFICA.
+        //    (Antes se guardaban con week=0, marca relativa a "hoy" que hacía que
+        //    reaparecieran todas las semanas para siempre.) ──
         if (newWeek === "0") {
             const todayM = new Date(); todayM.setHours(0, 0, 0, 0);
-            const dayShift = todayM.getDay() === 0 ? 1 : 1 - todayM.getDay();
-            const mondayOfWeek = new Date(todayM);
-            mondayOfWeek.setDate(todayM.getDate() + dayShift);
+            // Semana ancla: la del día clickeado en el calendario (actual o próxima)
+            const base = selectedBaseDate ? new Date(selectedBaseDate + "T12:00:00") : new Date(todayM);
+            base.setHours(0, 0, 0, 0);
+            const dayShift = base.getDay() === 0 ? 1 : 1 - base.getDay();
+            const mondayOfWeek = new Date(base);
+            mondayOfWeek.setDate(base.getDate() + dayShift);
 
-            const daysToCreate: number[] = [];
+            const daysToCreate: { dow: number; iso: string }[] = [];
             for (let i = 0; i < 5; i++) {
                 const dayDate = new Date(mondayOfWeek);
                 dayDate.setDate(mondayOfWeek.getDate() + i);
@@ -74,15 +79,14 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
                 const isoForDay = localISODate(dayDate);
                 const hasOverlap = schedule.some(s => {
                     if (editingSlotId && s.id === editingSlotId) return false; // ignorar el que se edita
-                    const sWeek = s.week === null ? undefined : s.week;
                     return (
                         s.dayOfWeek === dow &&
-                        (sWeek === undefined || sWeek === 0) &&
-                        (s.specificDate === null || s.specificDate === isoForDay) &&
+                        (s.specificDate === isoForDay ||
+                         (s.specificDate === null && s.week === null)) &&
                         newStart < s.endTime && newEnd > s.startTime
                     );
                 });
-                if (!hasOverlap) daysToCreate.push(dow);
+                if (!hasOverlap) daysToCreate.push({ dow, iso: isoForDay });
             }
 
             if (daysToCreate.length === 0) {
@@ -91,14 +95,14 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
             }
 
             if (editingSlotId) removeScheduleSlot(specId, editingSlotId);
-            daysToCreate.forEach(dow =>
+            daysToCreate.forEach(({ dow, iso }) =>
                 addScheduleSlot(specId, {
                     dayOfWeek: dow,
                     startTime: newStart,
                     endTime: newEnd,
                     available: true,
-                    week: 0,
-                    specificDate: undefined,
+                    week: undefined,
+                    specificDate: iso, // anclado a fecha: no "renace" en semanas futuras
                 })
             );
 
@@ -111,24 +115,13 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
         const dayInt = parseInt(String(newDay));
         if (!selectedBaseDate) { toast.error("Selecciona primero el día en el calendario."); return; }
 
-        // weekOffset (0/1) al que pertenece la fecha — para detectar solapes con slots de semana
-        let weekOffsetForDate: number | undefined;
-        const baseDate = new Date(selectedBaseDate + 'T12:00:00');
-        const todayW = new Date(); todayW.setHours(0, 0, 0, 0);
-        const shift = todayW.getDay() === 0 ? 1 : 1 - todayW.getDay();
-        const monCurrent = new Date(todayW); monCurrent.setDate(todayW.getDate() + shift);
-        const monNext = new Date(monCurrent); monNext.setDate(monCurrent.getDate() + 7);
-        const friCurrent = new Date(monCurrent); friCurrent.setDate(monCurrent.getDate() + 4);
-        const friNext = new Date(monNext); friNext.setDate(monNext.getDate() + 4);
-        if (baseDate >= monCurrent && baseDate <= friCurrent) weekOffsetForDate = 0;
-        else if (baseDate >= monNext && baseDate <= friNext) weekOffsetForDate = 1;
-
+        // Solapes: contra slots de la misma fecha o recurrentes semanales (week null)
         const hasOverlap = schedule.some(s => {
             if (editingSlotId && s.id === editingSlotId) return false;
             return (
                 s.dayOfWeek === dayInt &&
                 (s.specificDate === selectedBaseDate ||
-                 (s.specificDate === null && (s.week === null || s.week === weekOffsetForDate))) &&
+                 (s.specificDate === null && s.week === null)) &&
                 newStart < s.endTime && newEnd > s.startTime
             );
         });
@@ -696,8 +689,10 @@ export function SpecialistDashboard() {
 
                                             const daySlots = spec.schedule.filter((s: any) =>
                                                 s.specificDate === isoDate ||
+                                                // Recurrentes semanales legacy (week null); los slots de semana
+                                                // migraron a specificDate y ya no dependen del weekOffset
                                                 (s.specificDate === null && s.dayOfWeek === dow &&
-                                                    (s.week === undefined || s.week === null || s.week === weekOffset))
+                                                    (s.week === undefined || s.week === null))
                                             );
 
                                             return (
@@ -790,8 +785,8 @@ export function SpecialistDashboard() {
                                             },
                                             {
                                                 value: "0",
-                                                label: "Esta semana",
-                                                desc: `Añade ${slots.newStart}–${slots.newEnd} a los días hábiles disponibles de esta semana`,
+                                                label: "Toda la semana",
+                                                desc: `Añade ${slots.newStart}–${slots.newEnd} a los días hábiles restantes de la semana del día seleccionado`,
                                                 color: "indigo",
                                             },
                                         ].map(opt => (

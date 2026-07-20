@@ -126,17 +126,20 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'El alumno y el especialista pertenecen a organizaciones distintas' });
     }
 
-    // Rechazar citas en fecha/hora pasada
+    // Rechazar citas en fecha/hora pasada o con formato inválido (una fecha
+    // malformada produce NaN, y NaN <= now es false: sin el isNaN se colaba)
     const [h, m] = data.time.split(':').map(Number);
     const apptDateTime = new Date(`${data.date}T00:00:00`);
     apptDateTime.setHours(h, m, 0, 0);
-    if (apptDateTime <= new Date()) {
+    if (isNaN(apptDateTime.getTime()) || apptDateTime <= new Date()) {
       return res.status(422).json({ error: 'No puedes agendar una cita en una fecha u hora que ya pasó.' });
     }
 
-    // Obtener período activo para etiquetar la cita (fuera de la tx para no bloquear)
+    // Obtener período activo DE LA ORGANIZACIÓN para etiquetar la cita (fuera de
+    // la tx para no bloquear). Sin el scope, con varias orgs activas la cita se
+    // etiquetaba con el período de otra organización.
     const activePeriod = await prisma.reportPeriod.findFirst({
-      where: { status: 'activo' },
+      where: { status: 'activo', ...scope },
       select: { id: true },
     });
 
@@ -271,6 +274,12 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       if (!spec || current.specialistId !== spec.id) {
         return res.status(403).json({ error: 'Sin permisos sobre esta cita' });
       }
+    }
+
+    // Los end-users solo pueden cancelar sus citas; confirmar o completar (y con
+    // ello fijar meetingUrl/ubicación) es exclusivo del especialista o admin.
+    if ((req.user?.role === 'alumno' || req.user?.role === 'usuario') && status !== 'Cancelada') {
+      return res.status(403).json({ error: 'Solo puedes cancelar tus citas' });
     }
 
     const allowed = VALID_TRANSITIONS[current.status] ?? [];
@@ -447,6 +456,14 @@ router.patch('/:id/reschedule', verifyToken as any, async (req: AuthRequest, res
 
     if (!date || !time) {
       return res.status(400).json({ error: 'Fecha y hora son requeridas' });
+    }
+
+    // Mismo criterio que al crear: la nueva fecha/hora debe ser futura y válida
+    const [nh, nm] = String(time).split(':').map(Number);
+    const newDateTime = new Date(`${date}T00:00:00`);
+    newDateTime.setHours(nh, nm, 0, 0);
+    if (isNaN(newDateTime.getTime()) || newDateTime <= new Date()) {
+      return res.status(422).json({ error: 'No puedes reagendar a una fecha u hora que ya pasó.' });
     }
 
     let previousDate = '';

@@ -102,8 +102,11 @@ src/
 
 ## � Cuentas para Pruebas
 
+Credenciales del seed de desarrollo (`server/prisma/seed.ts` — solo entorno local):
+
 | Rol | Email | Password |
 | :--- | :--- | :--- |
-| **Administrador** | `admin@instituto.edu.mx` | `admin123` |
-| **Alumno** | `alumno@instituto.edu.mx` | `alumno123` |
-| **Especialista** | `psicologo@instituto.edu.mx` | `esp123` |
+| **SuperAdmin** | `superadmin@gestioncitas.app` | `Admin1234` |
+| **Administrador** | `admin@mail.com` | `Admin1234` |
+| **Especialista** | `especialista@mail.com` | `Admin1234` |
+| **Alumno** | `alumno@mail.com` | `Admin1234` |

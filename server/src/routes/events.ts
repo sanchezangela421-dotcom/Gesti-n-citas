@@ -1,10 +1,46 @@
 import { Router } from 'express';
+import { UserRole } from '@prisma/client';
 import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { upload } from '../middleware/upload';
 import { orgScope } from '../lib/orgScope';
 
 const router = Router();
+
+/**
+ * Notificación in-app "nuevo evento" para todos los end-users de la organización
+ * del evento, en una sola operación (createMany). Antes esto lo hacía el frontend
+ * con un POST /notifications por alumno: cientos de requests desde el navegador
+ * del admin que chocaban con el rate limit y dejaban alumnos sin notificar.
+ * Fire-and-forget: un fallo aquí no debe tirar la creación del evento.
+ */
+function notifyOrgAboutEvent(event: { id: string; title: string; department: string; date: string; time: string; organizationId: string | null }) {
+  (async () => {
+    const recipients = await prisma.user.findMany({
+      where: {
+        role: { in: [UserRole.alumno, UserRole.usuario] },
+        organizationId: event.organizationId,
+      },
+      select: { id: true },
+    });
+    if (recipients.length === 0) return;
+
+    const dateStr = new Date(event.date + 'T12:00:00')
+      .toLocaleDateString('es-MX', { day: 'numeric', month: 'long' });
+    const timeNow = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+
+    await prisma.notification.createMany({
+      data: recipients.map(u => ({
+        userId: u.id,
+        title: `Nuevo evento: ${event.title}`,
+        message: `Se publicó un nuevo evento de ${event.department}: "${event.title}" el ${dateStr}${event.time ? ` a las ${event.time}` : ''}.`,
+        time: timeNow,
+        type: 'event',
+        organizationId: event.organizationId,
+      })),
+    });
+  })().catch(err => console.error('[events] Error creando notificaciones del evento:', err));
+}
 
 // GET /api/events
 router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
@@ -67,6 +103,8 @@ router.post('/', verifyToken as any, upload.single('image'), async (req: AuthReq
         organizationId: req.user?.organizationId ?? null,
       }
     });
+
+    notifyOrgAboutEvent(event);
 
     res.status(201).json(event);
   } catch (error) {

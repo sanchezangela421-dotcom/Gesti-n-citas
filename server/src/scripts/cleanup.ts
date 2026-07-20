@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, UserRole } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -25,18 +25,17 @@ async function main() {
     await prisma.specialist.deleteMany();
     console.log('- Especialistas eliminados');
 
-    // Borrar todos los usuarios EXCEPTO el administrador maestro para no bloquear el acceso
+    // Conservar admins y superadmins por ROL (no por email hardcodeado: el filtro
+    // anterior apuntaba a un correo que ya no existe y borraba las cuentas reales)
     const deletedUsers = await prisma.user.deleteMany({
       where: {
-        NOT: {
-          email: 'admin@instituto.edu.mx'
-        }
+        role: { notIn: [UserRole.admin, UserRole.superadmin] }
       }
     });
-    console.log(`- ${deletedUsers.count} Usuarios eliminados (excepto admin principal)`);
+    console.log(`- ${deletedUsers.count} Usuarios eliminados (se conservan admins y superadmins)`);
 
     console.log('\n✅ Base de datos reseteada a estado casi-cero.');
-    console.log('💡 Los datos iniciales "hardcodeados" están en "server/src/seed.ts".');
+    console.log('💡 Para repoblar datos de prueba: pnpm db:seed (server/prisma/seed.ts).');
   } catch (error) {
     console.error('❌ Error durante la limpieza:', error);
   } finally {

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
+import { orgScope } from '../lib/orgScope';
 
 const router = Router();
 
@@ -28,6 +29,14 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
     const actorRole = req.user?.role;
     const actorId   = req.user!.id;
     const { userId, title, message, type } = req.body;
+
+    // El destinatario debe pertenecer a la organización del actor (antes un admin
+    // podía notificar a usuarios de cualquier org) y la notificación queda
+    // etiquetada con la organización para el aislamiento multi-tenant.
+    const target = await prisma.user.findFirst({ where: { id: userId, ...orgScope(req.user) } });
+    if (!target) {
+      return res.status(404).json({ error: 'Usuario destino no encontrado' });
+    }
 
     if (actorRole === 'especialista') {
       const spec = await prisma.specialist.findFirst({ where: { userId: actorId } });
@@ -63,6 +72,7 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
         type,
         time: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
         read: false,
+        organizationId: target.organizationId,
       },
     });
     res.status(201).json(notification);

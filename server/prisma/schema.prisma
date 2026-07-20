@@ -150,8 +150,8 @@ model ScheduleSlot {
   startTime    String
   endTime      String
   available    Boolean    @default(true)
-  week         Int?
-  specificDate String?
+  week         Int?       // LEGACY, siempre null: los slots "de semana" se anclan con specificDate (migración 20260719000000)
+  specificDate String?    // fecha concreta "YYYY-MM-DD"; null = recurrente semanal
 }
 
 model ReportPeriod {

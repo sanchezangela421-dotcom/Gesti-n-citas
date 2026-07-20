@@ -76,6 +76,11 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'El formato del correo no es válido' });
     }
 
+    // Mismo mínimo que reset-password y change-password
+    if (typeof data.password !== 'string' || data.password.length < 6) {
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+    }
+
     // Validate institutional email domain
     const allowedDomain = process.env.ALLOWED_EMAIL_DOMAIN;
     if (allowedDomain && data.email) {

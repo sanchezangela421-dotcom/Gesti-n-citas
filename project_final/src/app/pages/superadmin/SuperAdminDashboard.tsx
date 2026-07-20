@@ -752,7 +752,7 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                     {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                                 </select>
                                 <button
-                                    onClick={() => { setCreateUserForm({ name: "", email: "", password: "", role: "alumno", organizationId: "" }); setShowCreateUser(true); }}
+                                    onClick={() => { setCreateUserForm({ name: "", email: "", role: "alumno", organizationId: "" }); setShowCreateUser(true); }}
                                     className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-3 py-1.5 rounded-lg transition-colors"
                                 >
                                     <Plus className="w-4 h-4" /> Nuevo usuario

@@ -1,14 +1,9 @@
 import { useState, useCallback } from "react";
 import { API, authHeaders, authOnlyHeaders, getImageUrl } from "../lib/api";
-import type { AppEvent, AppNotification, Resource, User } from "../types";
+import type { AppEvent, Resource } from "../types";
 import { toast } from "sonner";
 
-interface ContentStoreDeps {
-  users: User[];
-  addNotification: (userId: string, notif: Omit<AppNotification, "id" | "time" | "read">) => void;
-}
-
-export function useContentStore({ users, addNotification }: ContentStoreDeps) {
+export function useContentStore() {
   const [events, setEvents] = useState<AppEvent[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
 
@@ -47,23 +42,12 @@ export function useContentStore({ users, addNotification }: ContentStoreDeps) {
       const newEv = await res.json();
       setEvents(p => [{ ...newEv, imageUrl: getImageUrl(newEv.imageUrl) }, ...p]);
       toast.success("Evento publicado exitosamente");
-
-      // Notify all students about the new event
-      const dateStr = new Date(ev.date + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "long" });
-      users
-        .filter(u => u.role === "alumno" || u.role === "usuario")
-        .forEach(student => {
-          addNotification(student.id, {
-            title: `Nuevo evento: ${ev.title}`,
-            message: `Se publicó un nuevo evento de ${ev.department}: "${ev.title}" el ${dateStr} a las ${ev.time}.`,
-            type: "event",
-          });
-        });
+      // La notificación in-app a los alumnos la crea el backend (una sola operación)
     } catch (err) {
       console.error("Error adding event:", err);
       toast.error("No se pudo publicar el evento.");
     }
-  }, [users, addNotification]);
+  }, []);
 
   const addResource = useCallback(async (r: Omit<Resource, "id">, file?: File) => {
     try {
