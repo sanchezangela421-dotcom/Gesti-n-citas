@@ -37,11 +37,29 @@ export const verifyToken = async (req: AuthRequest, res: Response, next: NextFun
     // que un cambio de rol o de organización surte efecto sin esperar a que expire el JWT.
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
-      select: { id: true, email: true, role: true, organizationId: true, tokenVersion: true },
+      select: {
+        id: true, email: true, role: true, organizationId: true,
+        tokenVersion: true, deletedAt: true,
+        organization: { select: { active: true } },
+      },
     });
 
     if (!user || user.tokenVersion !== (decoded.tokenVersion ?? 0)) {
       return res.status(401).json({ error: 'Sesión inválida. Inicia sesión nuevamente.' });
+    }
+
+    // Baja lógica: la cuenta sigue existiendo (el expediente la necesita) pero ya
+    // no puede operar. Se valida aquí y no solo en el login para cortar de
+    // inmediato las sesiones que ya estaban abiertas al momento de la baja.
+    if (user.deletedAt) {
+      return res.status(401).json({ code: 'ACCOUNT_DEACTIVATED', error: 'Esta cuenta fue dada de baja.' });
+    }
+
+    // Organización suspendida: se corta el acceso a TODA la organización de
+    // inmediato, sin esperar a que caduquen los JWTs ya emitidos. El superadmin
+    // queda exento (no pertenece a ninguna org y es quien puede reactivarla).
+    if (user.role !== 'superadmin' && user.organization && !user.organization.active) {
+      return res.status(401).json({ code: 'ORGANIZATION_SUSPENDED', error: 'El acceso de tu organización está suspendido.' });
     }
 
     req.user = {

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { orgScope } from '../lib/orgScope';
+import { sanitizeOptionalHttpUrl } from '../lib/urls';
 import { getCallerSpecialist } from '../lib/clinicalAccess';
 import { writeAudit, getClientIp } from '../services/auditLogger';
 import {
@@ -114,13 +115,20 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
 
     // Cargar alumno y especialista validando que existan dentro del alcance del usuario.
     // Derivar nombre/departamento/organización de la BD impide que el cliente los falsifique.
+    // `deletedAt: null` en ambos lados: no se puede agendar con una persona dada
+    // de baja ni a nombre de ella (su cuenta existe solo por retención documental).
     const scope = orgScope(caller);
     const [student, specialist] = await Promise.all([
-      prisma.user.findFirst({ where: { id: studentId, ...scope } }),
-      prisma.specialist.findFirst({ where: { id: data.specialistId, ...scope }, include: { location: true } }),
+      prisma.user.findFirst({ where: { id: studentId, deletedAt: null, ...scope } }),
+      prisma.specialist.findFirst({ where: { id: data.specialistId, deletedAt: null, ...scope }, include: { location: true } }),
     ]);
     if (!student || !specialist) {
       return res.status(404).json({ error: 'Alumno o especialista no disponible en tu organización' });
+    }
+    // Inactivo = no admite citas nuevas (conserva las que ya tenía). Se valida en
+    // el servidor y no solo ocultándolo en la lista: el cliente no es la autoridad.
+    if (!specialist.active) {
+      return res.status(409).json({ error: 'Este especialista no está disponible para nuevas citas.' });
     }
     if (student.organizationId !== specialist.organizationId) {
       return res.status(403).json({ error: 'El alumno y el especialista pertenecen a organizaciones distintas' });
@@ -314,18 +322,11 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       }
     }
 
-    // Saneamiento del enlace de videollamada (anti-XSS): solo se acepta http(s).
-    // El meetingUrl se renderiza como <a href> en correos y en el frontend, así que
-    // bloqueamos esquemas peligrosos (javascript:, data:, etc.) en el origen.
-    if (bodyMeetingUrl != null && String(bodyMeetingUrl).trim() !== '') {
-      let validUrl = false;
-      try {
-        const u = new URL(String(bodyMeetingUrl).trim());
-        validUrl = u.protocol === 'http:' || u.protocol === 'https:';
-      } catch { validUrl = false; }
-      if (!validUrl) {
-        return res.status(400).json({ error: 'El enlace de videollamada debe ser una URL http(s) válida.' });
-      }
+    // Saneamiento del enlace de videollamada (anti-XSS): solo se acepta http(s),
+    // porque se renderiza como <a href> en correos y en el frontend.
+    const safeBodyUrl = sanitizeOptionalHttpUrl(bodyMeetingUrl);
+    if (!safeBodyUrl.ok) {
+      return res.status(400).json({ error: 'El enlace de videollamada debe ser una URL http(s) válida.' });
     }
 
     // Resolver meetingUrl / ubicación antes del update para guardarlos en la cita
@@ -333,7 +334,7 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
     let resolvedLocation: string | undefined;
     if (status === 'Confirmada' && (current.modality === 'Virtual' || current.modality === 'Presencial')) {
       const spec = await prisma.specialist.findUnique({ where: { id: current.specialistId }, include: { location: true } });
-      if (current.modality === 'Virtual') resolvedMeetingUrl = (typeof bodyMeetingUrl === 'string' ? bodyMeetingUrl.trim() : '') || spec?.meetingUrl || undefined;
+      if (current.modality === 'Virtual') resolvedMeetingUrl = safeBodyUrl.value || spec?.meetingUrl || undefined;
       if (current.modality === 'Presencial') {
         // El especialista puede elegir la sede al confirmar; si no, usa su sede por defecto.
         if (bodyLocationId) {

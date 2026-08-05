@@ -40,6 +40,18 @@ router.post('/login', async (req, res) => {
       return res.status(403).json({ error: 'Credenciales inválidas' });
     }
 
+    // Cuenta dada de baja: la fila se conserva por retención del expediente, pero
+    // no puede volver a operar hasta que un administrador la reactive.
+    if (user.deletedAt) {
+      return res.status(403).json({ code: 'ACCOUNT_DEACTIVATED', error: 'Esta cuenta fue dada de baja. Contacta al administrador de tu organización.' });
+    }
+
+    // Organización suspendida: suspender un tenant debe dejar fuera también a los
+    // usuarios que ya existían, no solo impedir registros nuevos.
+    if (user.organization && !user.organization.active) {
+      return res.status(403).json({ code: 'ORGANIZATION_SUSPENDED', error: 'El acceso de tu organización está suspendido. Contacta a soporte.' });
+    }
+
     // Block unverified end-users (alumno y usuario)
     if ((user.role === 'alumno' || user.role === 'usuario') && !user.emailVerified) {
       return res.status(403).json({ code: 'EMAIL_NOT_VERIFIED', error: 'Debes verificar tu correo antes de iniciar sesión.' });
@@ -183,7 +195,8 @@ router.post('/resend-verification', async (req, res) => {
     const user = await prisma.user.findUnique({ where: { email } });
 
     // Always respond OK to avoid leaking which emails exist
-    if (!user || user.emailVerified) {
+    // (las cuentas dadas de baja tampoco reciben correo, pero la respuesta no lo revela)
+    if (!user || user.emailVerified || user.deletedAt) {
       return res.json({ message: 'Si el correo existe y no está verificado, recibirás un nuevo enlace.' });
     }
 
@@ -212,7 +225,8 @@ router.post('/forgot-password', async (req, res) => {
     const user = await prisma.user.findUnique({ where: { email } });
 
     // Always respond OK to avoid leaking which emails exist
-    if (!user) {
+    // (las cuentas dadas de baja tampoco reciben correo, pero la respuesta no lo revela)
+    if (!user || user.deletedAt) {
       return res.json({ message: 'Si el correo existe, recibirás un enlace para restablecer tu contraseña.' });
     }
 
@@ -248,7 +262,9 @@ router.post('/reset-password', async (req, res) => {
       where: { resetPasswordToken: token }
     });
 
-    if (!user) {
+    // Una cuenta dada de baja no puede reactivarse a sí misma por el enlace de
+    // recuperación: la reactivación es una decisión del administrador.
+    if (!user || user.deletedAt) {
       return res.status(400).json({ code: 'INVALID_TOKEN', error: 'El enlace no es válido.' });
     }
 

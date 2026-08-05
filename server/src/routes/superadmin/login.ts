@@ -34,8 +34,8 @@ router.post('/', loginLimiter, async (req, res) => {
 
     const user = await prisma.user.findUnique({ where: { email } });
 
-    // Respuesta genérica — no revela si el email existe o el rol
-    if (!user || user.role !== 'superadmin') {
+    // Respuesta genérica — no revela si el email existe, el rol, ni si fue dado de baja
+    if (!user || user.role !== 'superadmin' || user.deletedAt) {
       writeAudit({
         actorId:      'unknown',
         actorRole:    'unknown',

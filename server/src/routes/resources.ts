@@ -3,6 +3,9 @@ import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { upload } from '../middleware/upload';
 import { orgScope } from '../lib/orgScope';
+import { sanitizeOptionalHttpUrl } from '../lib/urls';
+
+const INVALID_URL = 'El enlace del recurso debe ser una URL http(s) válida.';
 
 const router = Router();
 
@@ -36,6 +39,10 @@ router.post('/', verifyToken as any, upload.single('file'), async (req: AuthRequ
       return res.status(400).json({ error: 'title y department son requeridos' });
     }
 
+    // El alumno abre este enlace desde su panel: solo http(s) (anti-XSS almacenado)
+    const safeUrl = sanitizeOptionalHttpUrl(url);
+    if (!safeUrl.ok) return res.status(400).json({ error: INVALID_URL });
+
     // Route the uploaded file correctly depending on resource type:
     //   image  → store as imageUrl (it IS the visual content)
     //   others → store as fileUrl  (downloadable attachment)
@@ -55,7 +62,7 @@ router.post('/', verifyToken as any, upload.single('file'), async (req: AuthRequ
         type: type || 'articulo',
         title,
         description: description || '',
-        url: url || '#',
+        url: safeUrl.value ?? '#',
         imageUrl,
         fileUrl,
         fileName,
@@ -88,7 +95,11 @@ router.patch('/:id', verifyToken as any, upload.single('file'), async (req: Auth
     if (type !== undefined)         data.type = type;
     if (title !== undefined)        data.title = title;
     if (description !== undefined)  data.description = description;
-    if (url !== undefined)          data.url = url;
+    if (url !== undefined) {
+      const safeUrl = sanitizeOptionalHttpUrl(url);
+      if (!safeUrl.ok) return res.status(400).json({ error: INVALID_URL });
+      data.url = safeUrl.value ?? '#';
+    }
     if (req.body.imageUrl !== undefined) data.imageUrl = req.body.imageUrl;
 
     if (req.file) {
