@@ -1,0 +1,14 @@
+{
+  // El tsconfig base solo incluye `src/` porque es lo que se compila a `dist/`.
+  // Este añade las pruebas para que también se comprueben sus tipos, sin que
+  // acaben en el build de producción.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // El base fija rootDir en src/ para emitir a dist/; aquí no se emite nada,
+    // así que se amplía a la raíz para poder abarcar también tests/.
+    "rootDir": ".",
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/**/*", "tests/**/*", "vitest.config.mts"]
+}

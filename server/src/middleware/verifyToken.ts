@@ -44,15 +44,23 @@ export const verifyToken = async (req: AuthRequest, res: Response, next: NextFun
       },
     });
 
-    if (!user || user.tokenVersion !== (decoded.tokenVersion ?? 0)) {
+    if (!user) {
       return res.status(401).json({ error: 'Sesión inválida. Inicia sesión nuevamente.' });
     }
 
     // Baja lógica: la cuenta sigue existiendo (el expediente la necesita) pero ya
     // no puede operar. Se valida aquí y no solo en el login para cortar de
     // inmediato las sesiones que ya estaban abiertas al momento de la baja.
+    //
+    // Va ANTES de tokenVersion a propósito: dar de baja incrementa tokenVersion,
+    // así que el orden inverso respondía siempre "sesión inválida" y la persona
+    // nunca llegaba a enterarse de que su cuenta fue dada de baja.
     if (user.deletedAt) {
       return res.status(401).json({ code: 'ACCOUNT_DEACTIVATED', error: 'Esta cuenta fue dada de baja.' });
+    }
+
+    if (user.tokenVersion !== (decoded.tokenVersion ?? 0)) {
+      return res.status(401).json({ error: 'Sesión inválida. Inicia sesión nuevamente.' });
     }
 
     // Organización suspendida: se corta el acceso a TODA la organización de

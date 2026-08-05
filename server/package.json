@@ -13,8 +13,11 @@
     "dev": "nodemon src/index.ts",
     "build": "prisma generate && tsc",
     "lint": "eslint src/",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:seed": "ts-node prisma/seed.ts",
-    "db:cleanup": "ts-node src/scripts/cleanup.ts"
+    "db:cleanup": "ts-node src/scripts/cleanup.ts",
+    "typecheck": "tsc -p tsconfig.test.json"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
