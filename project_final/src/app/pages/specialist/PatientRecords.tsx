@@ -105,11 +105,29 @@ export function PatientRecords({ mySpecialistId, endUserLabel }: PatientRecordsP
                 </button>
 
                 <div>
-                    <h3 className="text-2xl font-bold text-slate-900 dark:text-white">{selected.studentName}</h3>
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-2xl font-bold text-slate-900 dark:text-white">{selected.studentName}</h3>
+                        {(record?.inactive ?? selected.inactive) && (
+                            <span className="text-[0.65rem] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-700 uppercase tracking-wider">
+                                Paciente inactivo
+                            </span>
+                        )}
+                    </div>
                     <p className="text-slate-500 dark:text-slate-400 font-medium mt-1 text-sm">
                         Expediente {record ? `· ${record.department}` : ""} · {selected.total} {selected.total === 1 ? "sesión" : "sesiones"}
                     </p>
                 </div>
+
+                {(record?.inactive ?? selected.inactive) && (
+                    <div className="flex items-start gap-3 p-3.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
+                        <ClipboardList className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+                        <p className="text-slate-600 dark:text-slate-300 text-xs leading-relaxed">
+                            Esta persona fue <span className="font-bold">dada de baja</span>. Su expediente se conserva
+                            por obligación legal de retención y sigue siendo consultable, pero ya no es posible agendar
+                            nuevas sesiones con ella.
+                        </p>
+                    </div>
+                )}
 
                 <div className="flex items-start gap-3 p-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl">
                     <Lock className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />

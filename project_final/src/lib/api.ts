@@ -29,6 +29,11 @@ export function superAdminHeaders(): Record<string, string> {
   return base;
 }
 
+/** Mensaje legible de un error capturado, con texto de respaldo si no lo trae. */
+export function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
 /**
  * Convierte una ruta relativa de upload (/uploads/...) a URL absoluta.
  * URLs externas (http/https) se devuelven tal cual.

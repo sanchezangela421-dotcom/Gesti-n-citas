@@ -380,6 +380,22 @@ export function SpecialistDashboard() {
                     <p className="text-slate-500 dark:text-slate-400 mt-1 font-medium">{spec.name} — Gestión de citas y agenda</p>
                 </div>
 
+                {/* Inactivo: explica por qué dejaron de llegar solicitudes, en lugar
+                    de que el especialista lo interprete como una falla del sistema. */}
+                {!spec.active && (
+                    <div className="flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
+                        <Info className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
+                        <div className="text-sm">
+                            <p className="font-bold text-slate-800 dark:text-slate-100">Tu perfil está marcado como inactivo</p>
+                            <p className="text-slate-600 dark:text-slate-300 mt-0.5 leading-relaxed">
+                                No estás recibiendo solicitudes nuevas y no apareces en la agenda de los usuarios.
+                                Puedes seguir atendiendo y cerrando tus citas actuales. Si crees que es un error,
+                                contacta al administrador de tu organización.
+                            </p>
+                        </div>
+                    </div>
+                )}
+
                 {/* Stats */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     {statsData.map((s, i) => <StatCard key={s.label} index={i} {...s} />)}

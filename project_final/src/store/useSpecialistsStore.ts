@@ -1,5 +1,5 @@
 import { useState, useCallback, type Dispatch, type SetStateAction } from "react";
-import { API, authHeaders } from "../lib/api";
+import { API, authHeaders, errorMessage } from "../lib/api";
 import type { Specialist, ScheduleSlot, SpecialistInput, User } from "../types";
 import { toast } from "sonner";
 
@@ -70,15 +70,57 @@ export function useSpecialistsStore(setUsers: Dispatch<SetStateAction<User[]>>) 
     }
   }, [refreshUsers]);
 
-  const removeSpecialist = useCallback(async (id: string) => {
+  /**
+   * Da de BAJA al especialista (no lo borra: sus notas clínicas y su historial de
+   * citas se conservan). El servidor cancela sus citas abiertas y avisa a los
+   * pacientes; aquí solo se refleja el resultado.
+   */
+  const removeSpecialist = useCallback(async (id: string, reason?: string) => {
     try {
-      const res = await fetch(`${API}/specialists/${id}`, { method: "DELETE", headers: authHeaders() });
-      if (!res.ok) throw new Error(await res.text());
+      const res = await fetch(`${API}/specialists/${id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ reason }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "No se pudo dar de baja al especialista.");
+      }
+      const { cancelledAppointments = 0 } = await res.json().catch(() => ({}));
       setSpecialists(p => p.filter(s => s.id !== id));
       refreshUsers();
+      toast.success(
+        cancelledAppointments > 0
+          ? `Especialista dado de baja. Se cancelaron ${cancelledAppointments} cita${cancelledAppointments === 1 ? "" : "s"} y se avisó a los pacientes.`
+          : "Especialista dado de baja."
+      );
     } catch (err) {
-      console.error("Error removing specialist:", err);
-      toast.error("No se pudo eliminar el especialista.");
+      console.error("Error deactivating specialist:", err);
+      toast.error(errorMessage(err, "No se pudo dar de baja al especialista."));
+    }
+  }, [refreshUsers]);
+
+  /** Revierte la baja. Las citas canceladas NO se reabren. */
+  const restoreSpecialist = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`${API}/specialists/${id}/restore`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "No se pudo reactivar al especialista.");
+      }
+      const restored = await res.json();
+      setSpecialists(p => {
+        const next = { ...restored, schedule: restored.schedules ?? [] };
+        return p.some(s => s.id === id) ? p.map(s => s.id === id ? next : s) : [...p, next];
+      });
+      refreshUsers();
+      toast.success("Especialista reactivado.");
+    } catch (err) {
+      console.error("Error restoring specialist:", err);
+      toast.error(errorMessage(err, "No se pudo reactivar al especialista."));
     }
   }, [refreshUsers]);
 
@@ -88,8 +130,13 @@ export function useSpecialistsStore(setUsers: Dispatch<SetStateAction<User[]>>) 
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(slot),
     })
-      .then(res => {
-        if (!res.ok) throw new Error();
+      .then(async res => {
+        if (!res.ok) {
+          // El servidor explica el motivo (solape, fecha pasada, rango inválido);
+          // mostrarlo evita el genérico "no se pudo" que no dice qué corregir.
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || "No se pudo agregar el horario.");
+        }
         return res.json();
       })
       .then(newSlot => {
@@ -99,7 +146,7 @@ export function useSpecialistsStore(setUsers: Dispatch<SetStateAction<User[]>>) 
       })
       .catch(err => {
         console.error("Error adding schedule slot:", err);
-        toast.error("No se pudo agregar el horario.");
+        toast.error(errorMessage(err, "No se pudo agregar el horario."));
       });
   }, []);
 
@@ -161,6 +208,7 @@ export function useSpecialistsStore(setUsers: Dispatch<SetStateAction<User[]>>) 
     addSpecialist,
     updateSpecialist,
     removeSpecialist,
+    restoreSpecialist,
     addScheduleSlot,
     removeScheduleSlot,
     updateMeetingUrl,

@@ -26,7 +26,7 @@ import { API, authHeaders } from "../../../lib/api";
 import { calcularEdad } from "../../../utils/date";
 import { AdminContentTab } from "./AdminContentTab";
 import { AdminEventsTab } from "./AdminEventsTab";
-import type { Appointment, Specialist, OrgLocation } from "../../../types";
+import type { Appointment, Specialist, OrgLocation, User } from "../../../types";
 
 // ─── ReportPeriod type ────────────────────────────────────────────────────────
 interface ReportPeriod {
@@ -654,6 +654,11 @@ export function AdminDashboard() {
     const [editingSpec, setEditingSpec] = useState<Specialist | null>(null);
     const [editPass, setEditPass] = useState("");
 
+    // Bajas: nunca se borra a nadie, así que la confirmación lo explica y pide motivo
+    const [deactivatingSpec, setDeactivatingSpec] = useState<Specialist | null>(null);
+    const [deactivatingUser, setDeactivatingUser] = useState<User | null>(null);
+    const [deactivateReason, setDeactivateReason] = useState("");
+
     // Sedes de la organización (catálogo) — solo el admin las da de alta
     const [orgLocations, setOrgLocations] = useState<OrgLocation[]>([]);
     const [newLocName, setNewLocName] = useState("");
@@ -1078,7 +1083,7 @@ export function AdminDashboard() {
                                                 </span>
                                                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                                     <button onClick={() => setEditingSpec(esp)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors"><Pencil className="w-4 h-4" /></button>
-                                                    <button onClick={() => { if (confirm(`¿Eliminar a ${esp.name}?`)) { removeSpecialist(esp.id); toast.success("Especialista eliminado"); } }}
+                                                    <button onClick={() => setDeactivatingSpec(esp)} title="Dar de baja"
                                                         className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"><XCircle className="w-4 h-4" /></button>
                                                 </div>
                                             </div>
@@ -1172,7 +1177,7 @@ export function AdminDashboard() {
                                                 )}
                                                 <td className="px-6 py-4 text-slate-500 text-sm">{u.email}</td>
                                                 <td className="px-6 py-4">
-                                                    <button onClick={() => { if (confirm(`¿Eliminar a ${u.name}?`)) { deleteUser(u.id); toast.success(`${endUserLabel} eliminado`); } }}
+                                                    <button onClick={() => setDeactivatingUser(u)} title="Dar de baja"
                                                         className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer">
                                                         <XCircle className="w-4 h-4" />
                                                     </button>
@@ -1880,6 +1885,62 @@ export function AdminDashboard() {
                             </div>
                         </div>
                     )}
+                </Modal>
+
+                {/* ── Baja de personas ─────────────────────────────────────────
+                    No es un borrado: la cuenta y su historial clínico se conservan
+                    por obligación legal de retención. El modal lo dice explícitamente
+                    para que el admin sepa qué está haciendo realmente. */}
+                <Modal
+                    open={!!(deactivatingSpec || deactivatingUser)}
+                    onClose={() => { setDeactivatingSpec(null); setDeactivatingUser(null); setDeactivateReason(""); }}
+                    title={deactivatingSpec ? "Dar de baja al especialista" : `Dar de baja al ${endUserLabel.toLowerCase()}`}
+                >
+                    <div className="space-y-5">
+                        <p className="text-slate-700 dark:text-slate-300 text-sm">
+                            Estás por dar de baja a <strong>{deactivatingSpec?.name ?? deactivatingUser?.name}</strong>.
+                        </p>
+
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 p-4 text-sm space-y-2">
+                            <p className="text-slate-700 dark:text-slate-200">
+                                <strong>Perderá el acceso de inmediato</strong> y sus citas pendientes o confirmadas
+                                se cancelarán avisando a la otra parte por correo.
+                            </p>
+                            <p className="text-slate-600 dark:text-slate-300">
+                                Su expediente clínico y su historial de citas <strong>se conservan</strong>: la ley
+                                obliga a resguardarlos. La cuenta puede reactivarse después.
+                            </p>
+                        </div>
+
+                        <div>
+                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">
+                                Motivo <span className="text-slate-400 font-normal">(se incluye en el aviso de cancelación)</span>
+                            </label>
+                            <input
+                                type="text"
+                                value={deactivateReason}
+                                onChange={e => setDeactivateReason(e.target.value)}
+                                placeholder="Ej. Cambio de adscripción"
+                                className={inputCls}
+                            />
+                        </div>
+
+                        <div className="flex gap-3">
+                            <Btn variant="ghost" className="flex-1"
+                                onClick={() => { setDeactivatingSpec(null); setDeactivatingUser(null); setDeactivateReason(""); }}>
+                                Cancelar
+                            </Btn>
+                            <Btn className="flex-1 bg-rose-600 hover:bg-rose-700 text-white border-0"
+                                onClick={() => {
+                                    const reason = deactivateReason.trim() || undefined;
+                                    if (deactivatingSpec) removeSpecialist(deactivatingSpec.id, reason);
+                                    else if (deactivatingUser) deleteUser(deactivatingUser.id, reason);
+                                    setDeactivatingSpec(null); setDeactivatingUser(null); setDeactivateReason("");
+                                }}>
+                                <XCircle className="w-4 h-4 mr-2" /> Dar de baja
+                            </Btn>
+                        </div>
+                    </div>
                 </Modal>
 
             </div>
