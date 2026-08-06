@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../src/db';
-import { startTestServer, stopTestServer, api, tokenFor } from './helpers/api';
+import { startTestServer, stopTestServer, api, tokenFor, waitFor } from './helpers/api';
 import { createOrg, createUser, createSpecialist, createAppointment, createClinicalNote } from './helpers/factories';
 
 /**
@@ -181,12 +181,17 @@ describe('escritura de notas', () => {
 
     await api('GET', `/api/patients/${student.id}/record`, { token: tokenFor(authorUser) });
 
-    // writeAudit es fire-and-forget: se espera un instante a que la escritura cierre
-    await new Promise(r => setTimeout(r, 300));
-    const logs = await prisma.auditLog.findMany({
-      where: { action: 'CLINICAL_RECORD_VIEWED', targetId: student.id },
-    });
-    expect(logs.length).toBeGreaterThan(0);
+    // writeAudit es fire-and-forget: se sondea hasta que la escritura cierre,
+    // en vez de dormir un tiempo fijo que fallaría bajo carga.
+    const logs = await waitFor(
+      async () => {
+        const found = await prisma.auditLog.findMany({
+          where: { action: 'CLINICAL_RECORD_VIEWED', targetId: student.id },
+        });
+        return found.length > 0 ? found : null;
+      },
+      { label: 'el registro de auditoría del expediente' },
+    );
     expect(logs[0].actorId).toBe(authorUser.id);
   });
 });

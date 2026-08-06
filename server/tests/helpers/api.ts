@@ -61,6 +61,31 @@ export async function api<T = any>(
 }
 
 /**
+ * Espera a que una condición se cumpla, sondeando hasta agotar el plazo.
+ *
+ * Varios efectos del servidor son fire-and-forget a propósito (avisos por
+ * correo, notificaciones, auditoría): la respuesta HTTP no espera a que
+ * terminen. Dormir un tiempo fijo hace la prueba intermitente — pasa en una
+ * máquina rápida y falla bajo carga, que es peor que no tenerla.
+ */
+export async function waitFor<T>(
+  probe: () => Promise<T | null | undefined | false>,
+  opts: { timeoutMs?: number; intervalMs?: number; label?: string } = {},
+): Promise<T> {
+  const { timeoutMs = 10_000, intervalMs = 50, label = 'la condición esperada' } = opts;
+  const deadline = Date.now() + timeoutMs;
+
+  for (;;) {
+    const result = await probe();
+    if (result) return result as T;
+    if (Date.now() >= deadline) {
+      throw new Error(`Tiempo agotado (${timeoutMs} ms) esperando ${label}.`);
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+}
+
+/**
  * Firma un JWT como lo haría el login. Evita tener que pasar por /auth/login en
  * cada test, que además exige contraseñas y verificación de correo.
  */

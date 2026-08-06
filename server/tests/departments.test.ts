@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../src/db';
-import { startTestServer, stopTestServer, api, tokenFor } from './helpers/api';
+import { startTestServer, stopTestServer, api, tokenFor, waitFor } from './helpers/api';
 import { createOrg, createUser, createSpecialist, createAppointment, isoDaysFromNow } from './helpers/factories';
 
 /**
@@ -238,29 +238,49 @@ describe('gestión desde el panel de superadmin', () => {
       body: { departments: ['Psicología', 'Tutorías'] },
     });
 
-    // El aviso es fire-and-forget: se espera a que cierren las escrituras
-    await new Promise(r => setTimeout(r, 800));
-
-    const delAlumno = await prisma.notification.findMany({ where: { userId: student.id } });
-    expect(delAlumno.length).toBeGreaterThan(0);
+    // El aviso es fire-and-forget: se sondea hasta que aparezca, en vez de
+    // dormir un tiempo fijo que fallaría bajo carga.
+    const delAlumno = await waitFor(
+      async () => {
+        const n = await prisma.notification.findMany({ where: { userId: student.id } });
+        return n.length > 0 ? n : null;
+      },
+      { label: 'la notificación al alumno' },
+    );
     expect(delAlumno[0].message).toContain('Nutrición');
     // El mensaje deja claro que su cita se mantiene
     expect(delAlumno[0].message).toContain('se mantiene');
 
-    const delEspecialista = await prisma.notification.findMany({ where: { userId: specUser.id } });
+    const delEspecialista = await waitFor(
+      async () => {
+        const n = await prisma.notification.findMany({ where: { userId: specUser.id } });
+        return n.length > 0 ? n : null;
+      },
+      { label: 'la notificación al especialista' },
+    );
     expect(delEspecialista.length).toBeGreaterThan(0);
   });
 
   it('no avisa a quien no tiene cita en ese departamento', async () => {
     const org = await createOrg();
     const ajeno = await createUser({ organizationId: org.id });
+    // Un afectado real sirve de señal: cuando SU aviso llega, el proceso ya
+    // recorrió a todos los destinatarios. Sin esta ancla habría que dormir un
+    // tiempo fijo, y "no pasó nada" sería indistinguible de "aún no pasa".
+    const afectado = await createUser({ organizationId: org.id });
+    const { specialist } = await createSpecialist({ organizationId: org.id, department: 'Nutrición' });
+    await createAppointment({ student: afectado, specialist, organizationId: org.id, status: 'Confirmada' });
     const token = await superadminToken();
 
     await api('PATCH', `/api/superadmin/organizations/${org.id}`, {
       token,
       body: { departments: ['Psicología'] },
     });
-    await new Promise(r => setTimeout(r, 500));
+
+    await waitFor(
+      async () => (await prisma.notification.count({ where: { userId: afectado.id } })) > 0 || null,
+      { label: 'el aviso al usuario afectado' },
+    );
 
     expect(await prisma.notification.count({ where: { userId: ajeno.id } })).toBe(0);
   });

@@ -93,6 +93,20 @@ jobs:
         working-directory: server
         run: pnpm install --frozen-lockfile
 
+      # El cliente de Prisma se genera a partir del schema y NO está versionado:
+      # sin este paso, `@prisma/client` no exporta PrismaClient, UserRole ni
+      # Prisma, y el typecheck cae con decenas de errores en cascada.
+      #
+      # Va aquí y no se delega al postinstall a propósito: pnpm solo ejecuta
+      # scripts de build de dependencias aprobadas, y con la store cacheada
+      # puede no llegar a correr. Un artefacto del que depende toda la
+      # compilación no debe quedar a merced de un efecto secundario.
+      - name: Generar cliente Prisma
+        working-directory: server
+        run: pnpm exec prisma generate
+        env:
+          DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/gestion_citas"
+
       # Los reportes se siguen generando para el resumen, pero el paso ya NO
       # termina en "|| true": antes ninguna de estas puertas podía poner el
       # pipeline en rojo, así que no protegían de nada.

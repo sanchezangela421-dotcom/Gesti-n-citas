@@ -23,7 +23,10 @@ export default async function globalSetup() {
     );
   }
 
-  execSync('npx prisma migrate deploy', {
+  // `pnpm exec` y no `npx`: npx puede intentar descargar el paquete de la red si
+  // no lo resuelve en local, lo que en CI convierte un fallo de resolución en una
+  // descarga silenciosa. El proyecto declara pnpm en `packageManager`.
+  execSync('pnpm exec prisma migrate deploy', {
     cwd: process.cwd(),
     env: { ...process.env, DATABASE_URL: testUrl },
     stdio: 'pipe',
