@@ -1075,7 +1075,7 @@ export function AdminDashboard() {
                                         <option>Todos</option>{departments.map(d => <option key={d}>{d}</option>)}
                                     </select>
                                     <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-sm font-medium text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600/20">
-                                        <option>Todos</option><option>Pendiente</option><option>Confirmada</option><option>Completada</option><option>Cancelada</option><option>Sin cerrar</option>
+                                        <option>Todos</option><option>Pendiente</option><option>Confirmada</option><option>Completada</option><option>Cancelada</option><option>No asistió</option><option>Sin cerrar</option>
                                     </select>
                                 </div>
                             </div>

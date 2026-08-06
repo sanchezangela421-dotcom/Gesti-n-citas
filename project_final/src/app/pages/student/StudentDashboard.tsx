@@ -146,7 +146,7 @@ export function StudentDashboard() {
         [appointments, activePeriod]
     );
     const historial = useMemo(
-        () => appointments.filter(a => a.status === "Completada" || a.status === "Cancelada"),
+        () => appointments.filter(a => a.status === "Completada" || a.status === "Cancelada" || a.status === "No asistió"),
         [appointments]
     );
 

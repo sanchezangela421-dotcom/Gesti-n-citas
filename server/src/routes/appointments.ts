@@ -13,6 +13,7 @@ import {
   sendCancelledByStudentEmail,
   sendRescheduledBySpecialistEmail,
   sendRescheduledByStudentEmail,
+  sendAppointmentMissedEmail,
 } from '../services/email';
 
 const router = Router();
@@ -263,11 +264,23 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
 
 // ── PATCH /api/appointments/:id/status ───────────────────────────────────────
 
+export const MISSED = 'No asistió';
+
+/**
+ * Transiciones permitidas.
+ *
+ * `No asistió` solo sale de `Confirmada`, nunca de `Pendiente`: una cita que
+ * el especialista jamás confirmó y venció sin atenderse no es una falta del
+ * alumno —puede que ni supiera que estaba en pie—, así que registrarla como
+ * inasistencia le echaría encima un incumplimiento ajeno. Desde Pendiente lo
+ * correcto es cancelar indicando el motivo.
+ */
 const VALID_TRANSITIONS: Record<string, string[]> = {
   'Pendiente':  ['Confirmada', 'Cancelada'],
-  'Confirmada': ['Completada', 'Cancelada'],
+  'Confirmada': ['Completada', 'Cancelada', MISSED],
   'Completada': [],
   'Cancelada':  [],
+  [MISSED]:     [],
 };
 
 router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) => {
@@ -302,6 +315,20 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       return res.status(422).json({
         error: `No se puede cambiar de "${current.status}" a "${status}"`,
       });
+    }
+
+    // Solo el personal registra una inasistencia, y solo después de la hora de
+    // la cita: marcarla antes sería dar por perdida una sesión que aún no ocurre.
+    if (status === MISSED) {
+      if (req.user?.role !== 'especialista' && req.user?.role !== 'admin') {
+        return res.status(403).json({ error: 'Solo el especialista puede registrar una inasistencia.' });
+      }
+      const [h, m] = current.time.split(':').map(Number);
+      const apptDateTime = new Date(`${current.date}T00:00:00`);
+      apptDateTime.setHours(h, m, 0, 0);
+      if (apptDateTime > new Date()) {
+        return res.status(422).json({ error: 'No puedes registrar una inasistencia antes de la hora de la cita.' });
+      }
     }
 
     // El especialista/admin debe justificar la cancelación
@@ -412,6 +439,22 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
     const cancelReason = notes ?? undefined;
     const actorRole = req.user?.role;
 
+    // Notificación in-app de la inasistencia. Se crea en el servidor —y no desde
+    // el navegador como el resto— para que quede registrada aunque el especialista
+    // cierre la pestaña justo después.
+    if (status === MISSED) {
+      prisma.notification.create({
+        data: {
+          userId: appointment.studentId,
+          title: 'Tu cita se cerró',
+          message: `No pudiste asistir a tu cita de ${appointment.department} del ${formatDate(appointment.date)}. Puedes agendar una nueva cuando lo necesites.`,
+          time: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+          type: 'info',
+          organizationId: appointment.organizationId,
+        },
+      }).catch(err => console.error('[appointments] Error notificando la inasistencia:', err));
+    }
+
     // Emails según el nuevo status
     fireEmail(async () => {
       const { studentEmail, specialistEmail } = await getPartyEmails(
@@ -444,6 +487,12 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
         if ((actorRole === 'especialista' || actorRole === 'admin') && studentEmail) {
           await sendCancelledBySpecialistEmail(studentEmail, { ...base, reason: cancelReason });
         }
+      }
+
+      // Inasistencia: se avisa al alumno para que sepa que la cita ya no está
+      // en pie y que puede volver a agendar cuando quiera.
+      if (status === MISSED && studentEmail) {
+        await sendAppointmentMissedEmail(studentEmail, base);
       }
     });
 

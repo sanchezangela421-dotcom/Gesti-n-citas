@@ -58,6 +58,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         confirmadas: a.filter(x => x.status === "Confirmada").length,
         completadas: a.filter(x => x.status === "Completada").length,
         canceladas:  a.filter(x => x.status === "Cancelada").length,
+        noAsistio:   a.filter(x => x.status === "No asistió").length,
         byDept: {
           Psicología: a.filter(x => x.department === "Psicología").length,
           Tutorías:   a.filter(x => x.department === "Tutorías").length,

@@ -1,4 +1,4 @@
-# Plan de pruebas — retención del expediente, bajas, departamentos y estadísticas
+# Plan de pruebas — retención, bajas, departamentos, inasistencias y estadísticas
 
 Guía para el equipo de QA. Cubre los cambios de la rama `laloFixes`.
 
@@ -47,6 +47,9 @@ Migraciones que introduce esta rama:
 | `20260804000000_clinical_retention_soft_delete` | `User.deletedAt` y las claves foráneas del expediente pasan a `RESTRICT` |
 | `20260805000000_org_contracted_departments` | `Organization.departments` (las organizaciones existentes conservan los tres) |
 
+El estado **No asistió** no aparece aquí porque no necesita migración: el estado
+de una cita se guarda como texto, no como tipo cerrado en la base de datos.
+
 **(3)** El seed es **destructivo si ya hay datos** (hace `upsert` sobre la
 organización TECNL). Sobre una base con datos reales, sáltalo.
 
@@ -79,7 +82,7 @@ Todas con contraseña **`Admin1234`**:
 
 ```bash
 cd server
-pnpm test          # 121 pruebas
+pnpm test          # 132 pruebas
 ```
 
 Crea y migra sola una base aparte con sufijo `_test`. No toca la de desarrollo.
@@ -303,7 +306,76 @@ nacimiento"*.
 
 ---
 
-### Bloque E — Correos 🟠
+### Bloque E — Inasistencias 🟠
+
+> Antes una cita solo podía acabar *Completada* o *Cancelada*, así que "el
+> usuario no vino" era indistinguible de "el especialista olvidó cerrarla".
+> El estado **No asistió** separa por fin las dos cosas.
+
+#### E1 · Registrar una inasistencia 🟠
+
+**Precondición:** una cita **Confirmada** cuya fecha y hora **ya pasaron**.
+
+1. Entrar como el especialista asignado → *Mi Calendario*.
+2. En esa cita, pulsar **"No asistió"**.
+
+**Resultado esperado:**
+- El modal explica que se avisará al usuario invitándole a agendar de nuevo.
+- La cita queda como **No asistió**, con etiqueta gris (no roja).
+- El usuario recibe **correo** y notificación en la campana.
+- El correo **no reprocha**: informa de que la cita se cerró y le invita a
+  volver a agendar. ⚠️ Si el tono suena a regaño, repórtalo: es intencional que
+  no lo sea.
+
+#### E2 · No se puede marcar antes de tiempo 🟠
+
+1. Buscar una cita **Confirmada** con fecha **futura**.
+
+**Resultado esperado:** el botón *"No asistió"* **no aparece**. No se puede dar
+por perdida una sesión que todavía puede ocurrir.
+
+#### E3 · Una cita nunca confirmada no genera inasistencia 🟠
+
+**Precondición:** una cita **Pendiente** cuya fecha ya pasó.
+
+**Resultado esperado:** tampoco aparece la opción. Si el especialista nunca la
+confirmó, el usuario pudo no saber que seguía en pie: la falta no es suya. Lo
+correcto ahí es cancelarla indicando el motivo.
+
+#### E4 · El usuario no puede marcarse a sí mismo 🔴
+
+1. Entrar como el **usuario** y revisar sus citas pasadas.
+
+**Resultado esperado:** no tiene ninguna opción para marcarse como no asistido.
+Solo puede cancelar, y con las reglas de siempre.
+
+#### E5 · Es un estado final 🟡
+
+1. Sobre una cita ya marcada como *No asistió*, intentar completarla o cancelarla.
+
+**Resultado esperado:** no se permite. Igual que *Completada* y *Cancelada*, es
+un estado terminal.
+
+#### E6 · No genera nota clínica 🟡
+
+1. Tras registrar la inasistencia, abrir el expediente de ese usuario.
+
+**Resultado esperado:** esa sesión **no** tiene nota clínica asociada: no hubo
+sesión que anotar. Si el especialista quiere dejar constancia, lo hará en la
+siguiente.
+
+#### E7 · Aparece como categoría propia 🟠
+
+1. Como **admin** → estadísticas y listado de citas.
+
+**Resultado esperado:**
+- Existe el filtro **No asistió** en el listado.
+- Las inasistencias **no** se suman a las canceladas: son cosas distintas.
+- La cita aparece en el historial del usuario y en el del especialista.
+
+---
+
+### Bloque F — Correos 🟠
 
 Se actualizó **nodemailer de la versión 8 a la 9** (cambio de versión mayor).
 Conviene revisar en Mailtrap que todos los correos siguen llegando con su
@@ -311,23 +383,24 @@ formato: **logo visible**, asunto correcto y enlaces que funcionan.
 
 | # | Correo | Cómo dispararlo |
 |---|---|---|
-| E1 | Verificación de cuenta | Registrarse |
-| E2 | Recuperar contraseña | "¿Olvidaste tu contraseña?" |
-| E3 | Invitación de cuenta | Admin crea un especialista |
-| E4 | Solicitud de cita | Alumno agenda |
-| E5 | Cita confirmada | Especialista confirma |
-| E6 | Cita cancelada | Especialista cancela con motivo |
-| E7 | Cita reagendada | Alumno o especialista reagenda |
-| E8 | Baja de especialista | Caso A1 |
-| E9 | Departamento retirado | Caso C1 |
+| F1 | Verificación de cuenta | Registrarse |
+| F2 | Recuperar contraseña | "¿Olvidaste tu contraseña?" |
+| F3 | Invitación de cuenta | Admin crea un especialista |
+| F4 | Solicitud de cita | Alumno agenda |
+| F5 | Cita confirmada | Especialista confirma |
+| F6 | Cita cancelada | Especialista cancela con motivo |
+| F7 | Cita reagendada | Alumno o especialista reagenda |
+| F8 | Baja de especialista | Caso A1 |
+| F9 | Departamento retirado | Caso C1 |
+| F10 | Inasistencia registrada | Caso E1 |
 
-En **E6** y **E8**, escribir un motivo con caracteres especiales
+En **F6** y **F8**, escribir un motivo con caracteres especiales
 (`<b>prueba</b> & "comillas"`) y comprobar que el correo lo muestra **como
 texto literal**, sin interpretarlo como formato.
 
 ---
 
-### Bloque F — Regresión 🟠
+### Bloque G — Regresión 🟠
 
 Recorrido completo, para confirmar que nada de lo anterior rompió el flujo:
 

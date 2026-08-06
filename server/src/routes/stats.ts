@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { orgScope } from '../lib/orgScope';
+import { MISSED } from './appointments';
 
 const router = Router();
 
@@ -36,13 +37,14 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
         ? { ...scope, periodId: periodId as string }
         : { ...scope };
 
-    const [totalAppointments, pendientes, confirmadas, completadas, canceladas] =
+    const [totalAppointments, pendientes, confirmadas, completadas, canceladas, noAsistio] =
       await Promise.all([
         prisma.appointment.count({ where }),
         prisma.appointment.count({ where: { ...where, status: 'Pendiente' } }),
         prisma.appointment.count({ where: { ...where, status: 'Confirmada' } }),
         prisma.appointment.count({ where: { ...where, status: 'Completada' } }),
         prisma.appointment.count({ where: { ...where, status: 'Cancelada' } }),
+        prisma.appointment.count({ where: { ...where, status: MISSED } }),
       ]);
 
     // Citas por departamento
@@ -144,6 +146,7 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
         confirmadas,
         completadas,
         canceladas,
+        noAsistio,
         byDept,
       },
       charts: {
