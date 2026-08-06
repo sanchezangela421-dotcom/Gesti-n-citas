@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import { SuperAdminRequest } from '../../middleware/verifySuperAdmin';
 import { writeAudit, getClientIp } from '../../services/auditLogger';
+import { ALL_DEPARTMENTS, parseContractedDepartments } from '../../lib/departments';
+import { notifyDepartmentDisabled } from '../../services/departmentNotices';
 import { upload } from '../../middleware/upload';
 
 const VALID_FIELD_TYPES = ['text', 'number', 'select', 'date', 'radio'];
@@ -67,7 +69,7 @@ router.post('/', async (req: SuperAdminRequest, res) => {
 router.patch('/:id', async (req: SuperAdminRequest, res) => {
   try {
     const id = req.params.id as string;
-    const { name, type, plan, active, userRoleLabel } = req.body;
+    const { name, type, plan, active, userRoleLabel, departments } = req.body;
 
     const org = await prisma.organization.findUnique({ where: { id } });
     if (!org) return res.status(404).json({ error: 'Organización no encontrada' });
@@ -79,7 +81,28 @@ router.patch('/:id', async (req: SuperAdminRequest, res) => {
     if (active !== undefined)        data.active        = active;
     if (userRoleLabel !== undefined) data.userRoleLabel = userRoleLabel.trim() || 'Usuario';
 
+    // Departamentos contratados. Se calculan los que se retiran ANTES de guardar,
+    // para poder avisar a quien tiene una cita abierta en ellos.
+    let removed: string[] = [];
+    if (departments !== undefined) {
+      const parsed = parseContractedDepartments(departments);
+      if (!parsed) {
+        return res.status(400).json({
+          error: `Departamentos inválidos. Valores permitidos: ${ALL_DEPARTMENTS.join(', ')}.`,
+        });
+      }
+      removed = org.departments.filter(d => !parsed.includes(d));
+      data.departments = parsed;
+    }
+
     const updated = await prisma.organization.update({ where: { id }, data });
+
+    // Retirar un departamento NO cancela nada: las citas ya agendadas se
+    // respetan y solo se bloquean las nuevas. Se avisa por correo para que
+    // nadie intente reservar en vano ni dude de si su cita sigue en pie.
+    for (const department of removed) {
+      notifyDepartmentDisabled(updated, department);
+    }
 
     writeAudit({
       actorId: req.actor!.id,

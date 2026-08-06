@@ -1,6 +1,16 @@
 import React from 'react';
 import { Brain, GraduationCap, Apple } from "lucide-react";
 
+/**
+ * Catálogo de departamentos de la plataforma. Es FIJO por decisión de producto:
+ * son el servicio que ofrece Synkros, no algo que cada organización define.
+ *
+ * Lo que sí varía es cuáles tiene contratados cada organización
+ * (`Organization.departments`). Para pintar selectores usa `useDepartments()`,
+ * que devuelve solo los contratados; esta lista es el universo posible.
+ */
+export const ALL_DEPARTMENTS = ["Psicología", "Tutorías", "Nutrición"] as const;
+
 export const DEPT_CONFIG: Record<string, { color: string; bg: string; border: string; icon: React.ComponentType<any> }> = {
   "Psicología": { color: "#2563EB", bg: "bg-[#dbeafe]", border: "border-[#93c5fd]", icon: Brain },
   "Tutorías": { color: "#16A34A", bg: "bg-[#dcfce7]", border: "border-[#86efac]", icon: GraduationCap },

@@ -18,7 +18,16 @@ import { useAuth } from "../../../context/AuthContext";
 import { AppShell } from "../../components/layout/AppShell";
 import { Btn, StatCard, Avatar, StatusBadge, Modal, inputCls, EmptyState, Reveal } from "../../components/ui";
 import { Calendar } from "../../components/ui/calendar";
-import { DEPT_CONFIG } from "../../../constants";
+import { DEPT_CONFIG, ALL_DEPARTMENTS } from "../../../constants";
+import { useDepartments } from "../../hooks/useDepartments";
+
+// Presentación de las tarjetas de descarga de reporte, por departamento del
+// catálogo. Cuáles se muestran lo decide la lista de contratados.
+const REPORT_CARD_STYLE: Record<string, { icon: typeof Brain; gradient: string }> = {
+    "Psicología": { icon: Brain, gradient: "from-blue-500 to-indigo-600" },
+    "Tutorías": { icon: GraduationCap, gradient: "from-emerald-500 to-teal-600" },
+    "Nutrición": { icon: Apple, gradient: "from-rose-500 to-orange-500" },
+};
 import { PIE_COLORS } from "../../../data/mockData";
 import { useActionModal } from "../../hooks";
 import { useTheme } from "../../hooks/useTheme";
@@ -207,7 +216,7 @@ const AGE_RANGES = [
 ];
 
 // ─── PDF report (pure jsPDF + autoTable, no canvas capture) ──────────────────
-async function generatePDFReport(deptReport: string, allAppts: Appointment[], users: { id: string; carrera?: string; genero?: string; semestre?: number; fechaNacimiento?: string }[], periodName?: string, isSchool?: boolean, userRoleLabel?: string) {
+async function generatePDFReport(deptReport: string, allAppts: Appointment[], users: { id: string; carrera?: string; genero?: string; semestre?: number; fechaNacimiento?: string }[], periodName?: string, isSchool?: boolean, userRoleLabel?: string, departments: string[] = [...ALL_DEPARTMENTS]) {
     const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
         import("jspdf"),
         import("jspdf-autotable"),
@@ -401,7 +410,7 @@ async function generatePDFReport(deptReport: string, allAppts: Appointment[], us
     };
 
     if (deptReport === "Reporte Global") {
-        const depts = ["Psicología", "Tutorías", "Nutrición"];
+        const depts = departments;
         depts.forEach((dept, i) => {
             addStatsPage(dept, allAppts.filter(a => a.department === dept), i === 0);
         });
@@ -472,6 +481,8 @@ async function generatePDFReport(deptReport: string, allAppts: Appointment[], us
 export function AdminDashboard() {
     const { dark } = useTheme();
     const { user: authUser } = useAuth();
+    // Solo los departamentos que la organización tiene contratados
+    const departments = useDepartments();
     const tooltipStyle = dark
         ? { borderRadius: "12px", border: "1px solid #334155", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.4)", backgroundColor: "#1e293b", color: "#f1f5f9" }
         : { borderRadius: "12px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" };
@@ -647,7 +658,7 @@ export function AdminDashboard() {
 
     // Specialist form
     const [newName, setNewName] = useState("");
-    const [newDept, setNewDept] = useState("Psicología");
+    const [newDept, setNewDept] = useState(departments[0] ?? "Psicología");
     const [newEmail, setNewEmail] = useState("");
     const [, setNewSched] = useState("");
     const [newShift, setNewShift] = useState("Matutino");
@@ -733,7 +744,7 @@ export function AdminDashboard() {
     ).length;
 
     const deptChartData = useMemo(() => {
-        const depts = ["Psicología", "Tutorías", "Nutrición"];
+        const depts = departments;
         const result: Record<string, any> = {};
         depts.forEach(d => {
             const dAppts = allAppts.filter(a => a.department === d);
@@ -971,7 +982,7 @@ export function AdminDashboard() {
                                         ))}
                                     </select>
                                     <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-sm font-medium text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600/20">
-                                        <option>Todos</option><option>Psicología</option><option>Tutorías</option><option>Nutrición</option>
+                                        <option>Todos</option>{departments.map(d => <option key={d}>{d}</option>)}
                                     </select>
                                     <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-sm font-medium text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600/20">
                                         <option>Todos</option><option>Pendiente</option><option>Confirmada</option><option>Completada</option><option>Cancelada</option><option>Sin cerrar</option>
@@ -1105,7 +1116,7 @@ export function AdminDashboard() {
                                             <div>
                                                 <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Departamento</label>
                                                 <select value={newDept} onChange={e => setNewDept(e.target.value)} className={inputCls}>
-                                                    <option>Psicología</option><option>Tutorías</option><option>Nutrición</option>
+                                                    {departments.map(d => <option key={d}>{d}</option>)}
                                                 </select>
                                             </div>
                                             <div>
@@ -1244,7 +1255,7 @@ export function AdminDashboard() {
                                     </div>
                                     {/* Tabs de departamento */}
                                     <div className="flex bg-white dark:bg-slate-800 rounded-xl p-1 border border-slate-200 dark:border-slate-700 shadow-sm">
-                                        {["Global", "Psicología", "Tutorías", "Nutrición"].map(v => (
+                                        {["Global", ...departments].map(v => (
                                             <button key={v} onClick={() => setStatsView(v)}
                                                 className={`px-4 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer ${statsView === v ? "bg-blue-600 text-white shadow-md shadow-blue-600/20" : "text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-700"}`}>
                                                 {v}
@@ -1271,7 +1282,7 @@ export function AdminDashboard() {
                                                 <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
                                                     <div className="flex items-center justify-between mb-6">
                                                         <h4 className="text-slate-900 dark:text-white font-bold text-lg">Citas por Mes{isGlobal ? " y Departamento" : ""}</h4>
-                                                        <button onClick={() => downloadChartAsImage(refs.monthly, `Tendencias_${statsView}`, isGlobal ? "Citas por Mes y Departamento" : `Citas por Mes — ${statsView}`, dark, isGlobal ? [{ label: "Psicología", color: "#2563EB" }, { label: "Tutorías", color: "#16A34A" }, { label: "Nutrición", color: "#EA580C" }] : undefined)}
+                                                        <button onClick={() => downloadChartAsImage(refs.monthly, `Tendencias_${statsView}`, isGlobal ? "Citas por Mes y Departamento" : `Citas por Mes — ${statsView}`, dark, isGlobal ? departments.map(d => ({ label: d, color: DEPT_CONFIG[d]?.color ?? "#64748b" })) : undefined)}
                                                             className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all cursor-pointer" title="Descargar como imagen">
                                                             <Download className="w-5 h-5" />
                                                         </button>
@@ -1285,12 +1296,12 @@ export function AdminDashboard() {
                                                                 <Tooltip cursor={cursorStyle} contentStyle={tooltipStyle} />
                                                                 {isGlobal ? (
                                                                     <>
-                                                                        <Bar dataKey="Psicología" fill="#2563EB" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                                                                        <Bar dataKey="Tutorías" fill="#16A34A" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                                                                        <Bar dataKey="Nutrición" fill="#EA580C" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                                                                        {departments.map(d => (
+                                                                            <Bar key={d} dataKey={d} fill={DEPT_CONFIG[d]?.color ?? "#64748b"} radius={[4, 4, 0, 0]} maxBarSize={40} />
+                                                                        ))}
                                                                     </>
                                                                 ) : (
-                                                                    <Bar dataKey={statsView} fill={statsView === "Psicología" ? "#2563EB" : statsView === "Tutorías" ? "#16A34A" : "#EA580C"} radius={[4, 4, 0, 0]} maxBarSize={50} />
+                                                                    <Bar dataKey={statsView} fill={DEPT_CONFIG[statsView]?.color ?? "#64748b"} radius={[4, 4, 0, 0]} maxBarSize={50} />
                                                                 )}
                                                             </BarChart>
                                                         </ResponsiveContainer>
@@ -1584,9 +1595,11 @@ export function AdminDashboard() {
                                     return (
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                                             {[
-                                                { label: "Psicología", icon: Brain, gradient: "from-blue-500 to-indigo-600" },
-                                                { label: "Tutorías", icon: GraduationCap, gradient: "from-emerald-500 to-teal-600" },
-                                                { label: "Nutrición", icon: Apple, gradient: "from-rose-500 to-orange-500" },
+                                                ...departments.map(d => ({
+                                                    label: d,
+                                                    icon: REPORT_CARD_STYLE[d]?.icon ?? FileText,
+                                                    gradient: REPORT_CARD_STYLE[d]?.gradient ?? "from-slate-500 to-slate-700",
+                                                })),
                                                 { label: "Reporte Global", icon: FileText, gradient: "from-violet-600 to-purple-700" },
                                             ].map(r => (
                                                 <div key={r.label} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 text-center hover:shadow-xl transition-all flex flex-col h-full">
@@ -1599,7 +1612,7 @@ export function AdminDashboard() {
                                                         {pdfPeriodName ? `Período: ${pdfPeriodName}` : "Todos los períodos"}
                                                         {" · "}{(r.label === "Reporte Global" ? pdfAppts : pdfAppts.filter(a => a.department === r.label)).length} citas
                                                     </p>
-                                                    <Btn onClick={() => generatePDFReport(r.label, pdfAppts, users, pdfPeriodName, isSchool, endUserLabel)} variant="outline" className="w-full">
+                                                    <Btn onClick={() => generatePDFReport(r.label, pdfAppts, users, pdfPeriodName, isSchool, endUserLabel, departments)} variant="outline" className="w-full">
                                                         <Download className="w-4 h-4 mr-2" /> PDF Export
                                                     </Btn>
                                                 </div>
@@ -1700,7 +1713,7 @@ export function AdminDashboard() {
                             <div>
                                 <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Departamento</label>
                                 <select value={editingSpec?.department || ""} onChange={e => setEditingSpec(p => p ? { ...p, department: e.target.value } : null)} className={inputCls}>
-                                    <option>Psicología</option><option>Tutorías</option><option>Nutrición</option>
+                                    {departments.map(d => <option key={d}>{d}</option>)}
                                 </select>
                             </div>
                         </div>

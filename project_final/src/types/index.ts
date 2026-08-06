@@ -19,6 +19,8 @@ export interface Organization {
   slug: string;
   type: string;
   userRoleLabel?: string;
+  /** Departamentos contratados. El catálogo es fijo; esto dice cuáles tiene activos. */
+  departments?: string[];
   logoUrl?: string | null;
 }
 

@@ -27,6 +27,11 @@ model Organization {
   plan          String   @default("free")
   active        Boolean  @default(true)
   userRoleLabel String   @default("Usuario") // "Alumno" | "Paciente" | "Empleado"
+  // Departamentos contratados. El catálogo es FIJO a nivel de plataforma (ver
+  // lib/departments.ts); aquí solo se guarda cuáles tiene activos cada
+  // organización. Por eso es una lista de nombres y no una tabla con relaciones:
+  // no hay departamentos propios que modelar.
+  departments   String[] @default(["Psicología", "Tutorías", "Nutrición"])
   logoUrl       String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

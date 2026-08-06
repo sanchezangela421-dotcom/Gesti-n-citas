@@ -3,6 +3,7 @@ import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { orgScope } from '../lib/orgScope';
 import { sanitizeOptionalHttpUrl } from '../lib/urls';
+import { isDepartmentContracted } from '../lib/departments';
 import { getCallerSpecialist } from '../lib/clinicalAccess';
 import { writeAudit, getClientIp } from '../services/auditLogger';
 import {
@@ -129,6 +130,12 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
     // el servidor y no solo ocultándolo en la lista: el cliente no es la autoridad.
     if (!specialist.active) {
       return res.status(409).json({ error: 'Este especialista no está disponible para nuevas citas.' });
+    }
+
+    // Departamento no contratado: se dejan de aceptar citas nuevas, pero las ya
+    // agendadas siguen su curso (se avisó por correo al desactivarlo).
+    if (!(await isDepartmentContracted(specialist.organizationId, specialist.department))) {
+      return res.status(409).json({ error: `El departamento de ${specialist.department} no está disponible en tu organización.` });
     }
     if (student.organizationId !== specialist.organizationId) {
       return res.status(403).json({ error: 'El alumno y el especialista pertenecen a organizaciones distintas' });

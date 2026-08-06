@@ -2,16 +2,20 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Video, Image as ImageIcon, ExternalLink, Plus, FileText, Pencil, Trash2 } from "lucide-react";
 import { useStore } from "../../../context/StoreContext";
+import { useDepartments } from "../../hooks/useDepartments";
 import { Btn, Modal, inputCls } from "../../components/ui";
 import type { Resource } from "../../../types";
 
 // Pestaña "Publicar Contenido" del admin — aislada para que escribir en el formulario
 // no re-renderice las gráficas/listas del resto del dashboard.
 export function AdminContentTab() {
+    // Solo los departamentos que la organizacion tiene contratados
+    const departments = useDepartments();
+
     const { addResource, updateResource, deleteResource, resources } = useStore();
 
     // Tab de departamento para ver el material publicado
-    const [contentDeptTab, setContentDeptTab] = useState("Psicología");
+    const [contentDeptTab, setContentDeptTab] = useState(departments[0] ?? "Psicología");
 
     // Content form
     const [ctitle, setCtitle] = useState("");
@@ -19,7 +23,7 @@ export function AdminContentTab() {
     const [ctype, setCtype] = useState("video");
     const [curl, setCurl] = useState("");
     const [cimgUrl] = useState("");
-    const [cdept, setCdept] = useState("Psicología");
+    const [cdept, setCdept] = useState(departments[0] ?? "Psicología");
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
     // Edit resource modal
@@ -77,7 +81,7 @@ export function AdminContentTab() {
                         <div>
                             <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Departamento</label>
                             <select value={cdept} onChange={e => setCdept(e.target.value)} className={inputCls}>
-                                <option>Psicología</option><option>Tutorías</option><option>Nutrición</option>
+                                {departments.map(d => <option key={d}>{d}</option>)}
                             </select>
                         </div>
                     </div>
@@ -181,7 +185,7 @@ export function AdminContentTab() {
                     <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-4">Material publicado</h3>
                     {/* Dept tabs */}
                     <div className="flex gap-2 mb-4 flex-wrap">
-                        {["Psicología", "Tutorías", "Nutrición"].map(d => (
+                        {departments.map(d => (
                             <button key={d} onClick={() => setContentDeptTab(d)}
                                 className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-all cursor-pointer ${contentDeptTab === d ? "bg-blue-600 text-white border-blue-600" : "bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:border-blue-400"}`}>
                                 {d}

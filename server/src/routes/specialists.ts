@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { orgScope } from '../lib/orgScope';
 import { sanitizeOptionalHttpUrl } from '../lib/urls';
+import { contractedDepartments, isDepartmentContracted } from '../lib/departments';
 import { localISODate } from '../lib/dates';
 import { sendAccountInvitation } from '../services/email';
 import { cancelOpenAppointments, notifyCancelledByDeactivation } from '../services/deactivation';
@@ -19,7 +20,6 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const department = req.query.department as string | undefined;
     const where: any = { ...orgScope(req.user) };
-    if (department) where.department = department;
 
     // Los dados de baja se ocultan por defecto. Solo el admin puede pedirlos
     // explícitamente (?includeDeleted=1) para poder reactivarlos desde su panel.
@@ -31,7 +31,33 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
     // Los usuarios finales no deben verlo, porque no pueden reservar con él; el
     // admin sí lo ve, para poder reactivarlo, y el propio especialista también,
     // porque su dashboard se resuelve a partir de esta lista.
-    if (req.user?.role === 'alumno' || req.user?.role === 'usuario') where.active = true;
+    const isEndUser = req.user?.role === 'alumno' || req.user?.role === 'usuario';
+
+    if (isEndUser) {
+      where.active = true;
+
+      // Mismo criterio para un departamento que la organización dejó de
+      // contratar: desaparece del selector, pero el especialista conserva su
+      // acceso y sus citas ya agendadas.
+      const org = req.user?.organizationId
+        ? await prisma.organization.findUnique({
+            where: { id: req.user.organizationId },
+            select: { departments: true },
+          })
+        : null;
+      const allowed = contractedDepartments(org);
+
+      // El filtro ?department= se intersecta con lo contratado, no lo sustituye:
+      // pedir explícitamente un departamento dado de baja no debe saltarse el límite.
+      if (department) {
+        if (!allowed.includes(department)) return res.json([]);
+        where.department = department;
+      } else {
+        where.department = { in: allowed };
+      }
+    } else if (department) {
+      where.department = department;
+    }
 
     const specialists = await prisma.specialist.findMany({
       where,
@@ -59,6 +85,10 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
 
     if (!name || !email || !department) {
       return res.status(400).json({ error: 'Faltan campos obligatorios' });
+    }
+
+    if (!(await isDepartmentContracted(req.user?.organizationId, department))) {
+      return res.status(409).json({ error: `Tu organización no tiene contratado el departamento de ${department}.` });
     }
 
     if (!EMAIL_REGEX.test(email)) {
@@ -137,6 +167,13 @@ router.patch('/:id', verifyToken as any, async (req: AuthRequest, res) => {
 
     const specialist = await prisma.specialist.findFirst({ where: { id, deletedAt: null, ...orgScope(req.user) } });
     if (!specialist) return res.status(404).json({ error: 'No encontrado' });
+
+    // Cambiar de departamento solo hacia uno contratado; el actual se respeta
+    // aunque haya dejado de estarlo (el especialista conserva su agenda).
+    if (department && department !== specialist.department
+        && !(await isDepartmentContracted(specialist.organizationId, department))) {
+      return res.status(409).json({ error: `Tu organización no tiene contratado el departamento de ${department}.` });
+    }
 
     const hashedPassword = password ? await bcrypt.hash(password, 10) : undefined;
 
@@ -353,9 +390,13 @@ router.get('/:id/available-slots', verifyToken as any, async (req: AuthRequest, 
 
     if (!specialist) return res.status(404).json({ error: 'No encontrado' });
 
-    // Un especialista marcado como inactivo no admite reservas nuevas: se responde
-    // sin horarios en lugar de 404 para que el calendario simplemente aparezca vacío.
+    // Sin reservas nuevas si el especialista está inactivo o si su departamento
+    // dejó de estar contratado. Se responde sin horarios en lugar de 404 para
+    // que el calendario simplemente aparezca vacío.
     if (!specialist.active) return res.json([]);
+    if (!(await isDepartmentContracted(specialist.organizationId, specialist.department))) {
+      return res.json([]);
+    }
 
     // Slots de fecha específica + recurrentes semanales (week null).
     // La marca week=0/1 era relativa a "hoy" (los slots de semana reaparecían

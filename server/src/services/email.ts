@@ -21,6 +21,10 @@ import {
   appointmentReminderSpecialistTemplate,
 } from './email_templates/appointmentReminder';
 import { accountInvitationTemplate } from './email_templates/accountInvitation';
+import {
+  departmentDisabledUserTemplate,
+  departmentDisabledSpecialistTemplate,
+} from './email_templates/departmentDisabled';
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
@@ -255,6 +259,42 @@ export async function sendAppointmentReminderEmails(
       modality: data.modality,
       appUrl: APP_URL,
     }),
+    attachments: [LOGO_ATTACHMENT],
+  });
+}
+
+// ── Departamentos ─────────────────────────────────────────────────────────────
+
+/** Aviso al usuario: su organización retira un departamento. Su cita se respeta. */
+export async function sendDepartmentDisabledUserEmail(
+  email: string,
+  userName: string,
+  data: {
+    department: string;
+    orgName: string;
+    pending?: { date: string; time: string; specialistName: string };
+  },
+) {
+  await transporter.sendMail({
+    from: FROM,
+    to: email,
+    subject: `${data.department} deja de estar disponible — Synkros`,
+    html: departmentDisabledUserTemplate(userName, { ...data, appUrl: APP_URL }),
+    attachments: [LOGO_ATTACHMENT],
+  });
+}
+
+/** Aviso al especialista: deja de recibir citas, pero conserva agenda y acceso. */
+export async function sendDepartmentDisabledSpecialistEmail(
+  email: string,
+  specialistName: string,
+  data: { department: string; orgName: string; openAppointments: number },
+) {
+  await transporter.sendMail({
+    from: FROM,
+    to: email,
+    subject: `${data.department} deja de estar disponible — Synkros`,
+    html: departmentDisabledSpecialistTemplate(specialistName, { ...data, appUrl: APP_URL }),
     attachments: [LOGO_ATTACHMENT],
   });
 }

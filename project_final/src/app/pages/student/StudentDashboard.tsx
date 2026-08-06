@@ -13,6 +13,7 @@ import { AppShell } from "../../components/layout/AppShell";
 import { Btn, StatCard, TabNav, Modal, MiniCalendar, StatusBadge, Avatar, EmptyState, Stagger, StaggerItem } from "../../components/ui";
 import { DEPT_CONFIG, DEPT_REASONS } from "../../../constants";
 import { useAppointmentWizard, useReschedule, useCancelAppointment } from "../../hooks";
+import { useDepartments } from "../../hooks/useDepartments";
 import type { AppEvent } from "../../../types";
 
 function getVideoEmbedUrl(url: string): string | null {
@@ -41,13 +42,23 @@ function getVideoEmbedUrl(url: string): string | null {
 // ── Carousel static slides ────────────────────────────────
 interface CarouselSlide extends AppEvent { gradient?: string; _static?: boolean; }
 
-const WELCOME_SLIDE: CarouselSlide = {
+/** Portada del carrusel. Enumera los departamentos realmente contratados: fijar
+ *  el texto anunciaba servicios que la organización podía no ofrecer. */
+const welcomeSlide = (orgName: string, departments: string[]): CarouselSlide => ({
     id: "__welcome__", _static: true,
-    type: "bienvenida", department: "TECNL", date: "", time: "",
-    title: "Sistema de Citas TECNL",
-    description: "Agenda citas con Psicología, Tutorías y Nutrición. Tu bienestar académico es nuestra prioridad.",
+    type: "bienvenida", department: orgName, date: "", time: "",
+    title: `Sistema de Citas ${orgName}`,
+    description: departments.length > 0
+        ? `Agenda citas con ${formatList(departments)}. Tu bienestar es nuestra prioridad.`
+        : "Tu bienestar es nuestra prioridad.",
     gradient: "from-blue-950 via-slate-900 to-teal-900",
-};
+});
+
+/** "A, B y C" — separador final en español, no la coma de Oxford del inglés. */
+function formatList(items: string[]): string {
+    if (items.length <= 1) return items[0] ?? "";
+    return `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`;
+}
 
 const PLACEHOLDER_SLIDE: CarouselSlide = {
     id: "__placeholder__", _static: true,
@@ -57,20 +68,24 @@ const PLACEHOLDER_SLIDE: CarouselSlide = {
     gradient: "from-slate-900 via-indigo-950 to-slate-900",
 };
 
-// Dept data for wizard step 1
-const DEPARTMENTS = [
-    { key: "Psicología", icon: Brain, color: "from-blue-500 to-blue-700" },
-    { key: "Tutorías", icon: GraduationCap, color: "from-emerald-500 to-teal-600" },
-    { key: "Nutrición", icon: Apple, color: "from-amber-500 to-orange-500" },
-];
+// Presentación de cada departamento del catálogo (icono y color). Qué
+// departamentos se muestran lo decide useDepartments() según lo contratado.
+const DEPARTMENT_STYLE: Record<string, { icon: typeof Brain; color: string }> = {
+    "Psicología": { icon: Brain, color: "from-blue-500 to-blue-700" },
+    "Tutorías": { icon: GraduationCap, color: "from-emerald-500 to-teal-600" },
+    "Nutrición": { icon: Apple, color: "from-amber-500 to-orange-500" },
+};
 
 export function StudentDashboard() {
     const { user } = useAuth();
+    const departments = useDepartments();
     const { getAppointments, events, resources, activePeriod } = useStore();
 
     // ── UI state ──────────────────────────────────────────
     const [activeApptTab, setActiveApptTab] = useState("proximas");
-    const [activeResTab, setActiveResTab] = useState("Psicología");
+    // Arranca en el primer departamento contratado: fijarlo a "Psicología"
+    // dejaba la pestaña de recursos vacía en una organización que no lo tuviera.
+    const [activeResTab, setActiveResTab] = useState(departments[0] ?? "Psicología");
     const [activeBannerIndex, setActiveBannerIndex] = useState(0);
     const [showResources, setShowResources] = useState(false);
     const [previewImg, setPreviewImg] = useState<{ url: string; title: string } | null>(null);
@@ -159,8 +174,11 @@ export function StudentDashboard() {
 
     // ── Carousel slides (welcome always first; placeholder when no events) ──
     const slides: CarouselSlide[] = useMemo(
-        () => [WELCOME_SLIDE, ...(events.length > 0 ? events : [PLACEHOLDER_SLIDE])],
-        [events]
+        () => [
+            welcomeSlide(user?.organization?.name ?? "Synkros", departments),
+            ...(events.length > 0 ? events : [PLACEHOLDER_SLIDE]),
+        ],
+        [events, user?.organization?.name, departments]
     );
 
     // ── Banner auto-rotation ──────────────────────────────
@@ -287,7 +305,7 @@ export function StudentDashboard() {
                                                             </Btn>
                                                         </div>
                                                         <div className="flex items-center justify-center gap-6 pt-4 border-t border-white/10 w-fit mx-auto">
-                                                            {["Psicología", "Tutorías", "Nutrición"].map(d => (
+                                                            {departments.map(d => (
                                                                 <span key={d} className="text-white/50 text-xs font-black uppercase tracking-widest">{d}</span>
                                                             ))}
                                                         </div>
@@ -566,15 +584,19 @@ export function StudentDashboard() {
                         <div className="space-y-4">
                             <p className="font-bold text-slate-900 text-lg">¿Con qué departamento?</p>
                             <div className="grid gap-3">
-                                {DEPARTMENTS.map(d => (
-                                    <button key={d.key} onClick={() => wizard.chooseDept(d.key)}
-                                        className={`flex items-center gap-4 p-4 rounded-2xl border-2 transition-all cursor-pointer text-left ${wizard.selDept === d.key ? "border-blue-600 bg-blue-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>
-                                        <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${d.color} flex items-center justify-center shrink-0`}>
-                                            <d.icon className="w-6 h-6 text-white" />
-                                        </div>
-                                        <p className="font-bold text-slate-900 text-base">{d.key}</p>
-                                    </button>
-                                ))}
+                                {departments.map(dept => {
+                                    const style = DEPARTMENT_STYLE[dept];
+                                    const Icon = style?.icon ?? Brain;
+                                    return (
+                                        <button key={dept} onClick={() => wizard.chooseDept(dept)}
+                                            className={`flex items-center gap-4 p-4 rounded-2xl border-2 transition-all cursor-pointer text-left ${wizard.selDept === dept ? "border-blue-600 bg-blue-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>
+                                            <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${style?.color ?? "from-slate-500 to-slate-700"} flex items-center justify-center shrink-0`}>
+                                                <Icon className="w-6 h-6 text-white" />
+                                            </div>
+                                            <p className="font-bold text-slate-900 text-base">{dept}</p>
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </div>
                     )}
