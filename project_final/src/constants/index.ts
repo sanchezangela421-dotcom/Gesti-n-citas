@@ -33,13 +33,6 @@ export const STATUS_BADGE_CONFIG: Record<string, { cls: string }> = {
   Cancelada: { cls: "bg-[#fef2f2] text-[#dc2626]" },
 };
 
-export const CAREERS = [
-  "Ingeniería Ambiental",
-  "Ingeniería en Gestión Empresarial",
-  "Ing. Mecatrónica",
-  "Ing. Electrónica",
-  "Ing. Electromecánica",
-  "Ing. Industrial",
-  "Ing. en Sistemas Computacionales",
-  "Ing. en Semiconductores"
-];
+// La lista de carreras vivía aquí fija a TECNL. Ya no se usa: cada organización
+// define sus campos de registro (RegistrationField) y el formulario los pinta
+// dinámicamente. El seed conserva su propia copia para poblar los de TECNL.
