@@ -23,6 +23,61 @@ import { useDepartments } from "../../hooks/useDepartments";
 
 // Presentación de las tarjetas de descarga de reporte, por departamento del
 // catálogo. Cuáles se muestran lo decide la lista de contratados.
+/** Campo de registro de la organización que sirve para agrupar estadísticas. */
+interface GroupableField { key: string; label: string }
+
+/**
+ * Claves con gráfica propia hecha a mano, que por eso NO se grafican de forma
+ * genérica: duplicarían la que ya existe. Semestre y edad además necesitan un
+ * tratamiento que el mecanismo genérico no da (orden numérico y rangos etarios).
+ */
+const FIELDS_WITH_OWN_CHART = new Set(['carrera', 'genero', 'semestre', 'fechaNacimiento']);
+
+/**
+ * Distribución de citas por el valor de un campo de registro de la organización.
+ *
+ * Sustituye a las gráficas fijas por carrera o género: cada organización define
+ * sus propios campos y aquí se agrupa por lo que haya definido. Solo tiene
+ * sentido con campos de conjunto cerrado (select y radio); agrupar por un texto
+ * libre daría una barra por respuesta.
+ *
+ * Devuelve null si NADIE tiene valor: la gráfica solo diría "No especificado"
+ * para todos, y mostrar eso es peor que no mostrar nada — parece un dato real.
+ */
+function distributionByField(
+    appts: Appointment[],
+    usersById: Map<string, { metadata?: Record<string, string> | null }>,
+    field: GroupableField,
+): { key: string; label: string; data: { name: string; value: number }[] } | null {
+    const counts: Record<string, number> = {};
+    let withValue = 0;
+
+    for (const a of appts) {
+        const raw = usersById.get(a.studentId)?.metadata?.[field.key];
+        const value = typeof raw === "string" ? raw.trim() : "";
+        if (value) withValue++;
+        const name = value || "No especificado";
+        counts[name] = (counts[name] || 0) + 1;
+    }
+
+    if (withValue === 0) return null;
+
+    return {
+        key: field.key,
+        label: field.label,
+        data: Object.entries(counts)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 8),
+    };
+}
+
+/** true si la gráfica tiene algún dato real y no solo "no especificado"/ceros. */
+function hasRealData(rows: { name: string; value: number }[] | undefined): boolean {
+    if (!rows?.length) return false;
+    return rows.some(r => r.value > 0 && !/^no esp/i.test(r.name));
+}
+
 const REPORT_CARD_STYLE: Record<string, { icon: typeof Brain; gradient: string }> = {
     "Psicología": { icon: Brain, gradient: "from-blue-500 to-indigo-600" },
     "Tutorías": { icon: GraduationCap, gradient: "from-emerald-500 to-teal-600" },
@@ -31,7 +86,7 @@ const REPORT_CARD_STYLE: Record<string, { icon: typeof Brain; gradient: string }
 import { PIE_COLORS } from "../../../data/mockData";
 import { useActionModal } from "../../hooks";
 import { useTheme } from "../../hooks/useTheme";
-import { API, authHeaders } from "../../../lib/api";
+import { API, API_BASE, authHeaders } from "../../../lib/api";
 import { calcularEdad } from "../../../utils/date";
 import { AdminContentTab } from "./AdminContentTab";
 import { AdminEventsTab } from "./AdminEventsTab";
@@ -670,6 +725,26 @@ export function AdminDashboard() {
     const [deactivatingUser, setDeactivatingUser] = useState<User | null>(null);
     const [deactivateReason, setDeactivateReason] = useState("");
 
+    // Campos de registro de la organización que sirven para agrupar: solo los de
+    // conjunto cerrado (select/radio). De aquí salen las gráficas demográficas,
+    // que antes estaban fijas a los campos de una escuela.
+    const [groupableFields, setGroupableFields] = useState<GroupableField[]>([]);
+    useEffect(() => {
+        const slug = authUser?.organization?.slug;
+        if (!slug) return;
+        fetch(`${API_BASE}/api/public/organizations/${slug}/fields`)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                const fields: Array<{ key: string; label: string; type: string }> = data?.registrationFields ?? [];
+                setGroupableFields(
+                    fields
+                        .filter(f => (f.type === "select" || f.type === "radio") && !FIELDS_WITH_OWN_CHART.has(f.key))
+                        .map(f => ({ key: f.key, label: f.label }))
+                );
+            })
+            .catch(() => { /* sin campos dinámicos: se muestran solo las gráficas de la cita */ });
+    }, [authUser?.organization?.slug]);
+
     // Sedes de la organización (catálogo) — solo el admin las da de alta
     const [orgLocations, setOrgLocations] = useState<OrgLocation[]>([]);
     const [newLocName, setNewLocName] = useState("");
@@ -743,6 +818,13 @@ export function AdminDashboard() {
         new Date(a.date + "T12:00:00") < todayMidnightAdmin
     ).length;
 
+    // Índice por id: las gráficas recorren miles de citas y buscar el alumno con
+    // un find() por cada una convierte el cálculo en cuadrático.
+    const usersById = useMemo(
+        () => new Map(users.map(u => [u.id, u as { metadata?: Record<string, string> | null }])),
+        [users]
+    );
+
     const deptChartData = useMemo(() => {
         const depts = departments;
         const result: Record<string, any> = {};
@@ -789,10 +871,14 @@ export function AdminDashboard() {
                     return na - nb;
                 }),
                 edad: AGE_RANGES.map(r => ({ name: r.label, value: edaMap[r.label] ?? 0 })),
+                // Distribuciones por los campos que definio la organizacion
+                byField: groupableFields
+                    .map(f => distributionByField(dAppts, usersById, f))
+                    .filter((x): x is NonNullable<typeof x> => x !== null),
             };
         });
         return result;
-    }, [allAppts, users]);
+    }, [allAppts, users, usersById, departments, groupableFields]);
 
     // Demographic data for Global view (computed client-side)
     const globalDemoData = useMemo(() => {
@@ -819,8 +905,12 @@ export function AdminDashboard() {
                 return na - nb;
             }),
             edad: AGE_RANGES.map(r => ({ name: r.label, value: edaMap[r.label] ?? 0 })),
+            // Distribuciones por los campos que definió la organización
+            byField: groupableFields
+                .map(f => distributionByField(allAppts, usersById, f))
+                .filter((x): x is NonNullable<typeof x> => x !== null),
         };
-    }, [allAppts, users]);
+    }, [allAppts, users, usersById, groupableFields]);
 
     const filteredAppts = useMemo(() => allAppts.filter(a => {
         // Filtro por período
@@ -1352,6 +1442,27 @@ export function AdminDashboard() {
                                                     </div>
                                                 </div>
 
+                                                {/* Una gráfica por campo de registro de la organización.
+                                                    Sustituye a las fijas por carrera o género: cada
+                                                    organización define los suyos y aquí se agrupa por ellos.
+                                                    Los campos que nadie rellenó no se pintan. */}
+                                                {(data.byField ?? []).map((f: { key: string; label: string; data: { name: string; value: number }[] }) => (
+                                                    <div key={f.key} className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+                                                        <div className="flex items-center justify-between mb-6">
+                                                            <h4 className="text-slate-900 dark:text-white font-bold text-lg">Distribución por {f.label}</h4>
+                                                        </div>
+                                                        <ResponsiveContainer width="100%" height={320}>
+                                                            <BarChart data={f.data} layout="vertical" margin={{ top: 0, right: 30, left: 30, bottom: 0 }}>
+                                                                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                                                                <XAxis type="number" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                                                                <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: "#475569", fontWeight: 500 }} axisLine={false} tickLine={false} width={100} interval={0} />
+                                                                <Tooltip cursor={cursorStyle} contentStyle={tooltipStyle} />
+                                                                <Bar dataKey="value" fill="#8b5cf6" radius={[0, 4, 4, 0]} maxBarSize={24} />
+                                                            </BarChart>
+                                                        </ResponsiveContainer>
+                                                    </div>
+                                                ))}
+
                                                 {/* Por Carrera — school only */}
                                                 {isSchool && (
                                                 <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
@@ -1379,6 +1490,7 @@ export function AdminDashboard() {
 
                                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                                 {/* Por Género */}
+                                                {hasRealData(data.genero) && (
                                                 <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
                                                     <div className="flex items-center justify-between mb-6">
                                                         <h4 className="text-slate-900 dark:text-white font-bold text-lg">Distribución por Género</h4>
@@ -1398,6 +1510,7 @@ export function AdminDashboard() {
                                                         </ResponsiveContainer>
                                                     </div>
                                                 </div>
+                                                )}
 
                                                 {/* Por Semestre — school only */}
                                                 {isSchool && (
