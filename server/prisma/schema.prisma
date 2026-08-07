@@ -27,6 +27,11 @@ model Organization {
   plan          String   @default("free")
   active        Boolean  @default(true)
   userRoleLabel String   @default("Usuario") // "Alumno" | "Paciente" | "Empleado"
+  // Departamentos contratados. El catálogo es FIJO a nivel de plataforma (ver
+  // lib/departments.ts); aquí solo se guarda cuáles tiene activos cada
+  // organización. Por eso es una lista de nombres y no una tabla con relaciones:
+  // no hay departamentos propios que modelar.
+  departments   String[] @default(["Psicología", "Tutorías", "Nutrición"])
   logoUrl       String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -100,6 +105,7 @@ model User {
   resetPasswordToken          String?
   resetPasswordTokenExpiresAt DateTime?
   tokenVersion                Int       @default(0) // se incrementa para invalidar JWTs emitidos previamente
+  deletedAt                   DateTime? // baja lógica: la fila NUNCA se borra (retención NOM-004 del expediente)
   organizationId              String?
   organization                Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   createdAt                   DateTime  @default(now())
@@ -174,11 +180,14 @@ model ReportPeriod {
 
 model Appointment {
   id             String        @id @default(uuid())
+  // Restrict en ambas partes: la cita es el vínculo del expediente clínico, así que
+  // borrar al alumno o al especialista NO puede llevarse el historial por cascada.
+  // Las bajas son lógicas (User.deletedAt / Specialist.deletedAt), nunca físicas.
   studentId      String
-  student        User          @relation("StudentAppointments", fields: [studentId], references: [id], onDelete: Cascade)
+  student        User          @relation("StudentAppointments", fields: [studentId], references: [id], onDelete: Restrict)
   studentName    String
   specialistId   String
-  specialist     Specialist    @relation("SpecialistAppointments", fields: [specialistId], references: [id], onDelete: Cascade)
+  specialist     Specialist    @relation("SpecialistAppointments", fields: [specialistId], references: [id], onDelete: Restrict)
   specialistName String
   department     String
   date           String
@@ -306,12 +315,15 @@ model Notification {
 // de aplicación (org + departamento + relación de atención), nunca solo aquí.
 model ClinicalNote {
   id             String        @id @default(uuid())
+  // Todas las FKs de la nota son Restrict: el expediente clínico no se puede
+  // eliminar ni directa ni indirectamente (retención legal NOM-004). Es la última
+  // línea de defensa: aunque alguien ejecute un DELETE manual, la BD lo rechaza.
   appointmentId  String        @unique
-  appointment    Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  appointment    Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
   specialistId   String        // autor — Specialist.id
   specialist     Specialist    @relation(fields: [specialistId], references: [id], onDelete: Restrict)
   studentId      String        // paciente — denormalizado para el expediente
-  student        User          @relation("StudentClinicalNotes", fields: [studentId], references: [id], onDelete: Cascade)
+  student        User          @relation("StudentClinicalNotes", fields: [studentId], references: [id], onDelete: Restrict)
   department     String        // depto de atención — denormalizado para continuidad por depto
   organizationId String?       // aislamiento por organización
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)

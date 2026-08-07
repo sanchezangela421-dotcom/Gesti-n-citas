@@ -19,6 +19,8 @@ export interface Organization {
   slug: string;
   type: string;
   userRoleLabel?: string;
+  /** Departamentos contratados. El catálogo es fijo; esto dice cuáles tiene activos. */
+  departments?: string[];
   logoUrl?: string | null;
 }
 
@@ -38,6 +40,8 @@ export interface User {
   organizationId?: string | null;
   organization?: Organization | null;
   metadata?: Record<string, string> | null;
+  /** Fecha de baja lógica. La cuenta se conserva por retención del expediente. */
+  deletedAt?: string | null;
 }
 
 export interface RegisterPayload {
@@ -66,6 +70,8 @@ export interface Specialist {
   locationId?: string | null;   // sede asignada (del catálogo de la org)
   schedule: ScheduleSlot[];
   avatarUrl?: string | null;
+  /** Fecha de baja lógica. El perfil se conserva porque firma notas clínicas. */
+  deletedAt?: string | null;
 }
 
 export interface OrgLocation {
@@ -103,6 +109,8 @@ export interface PatientSummary {
   studentName: string;
   lastSession: string;
   total: number;
+  /** Dado de baja: su expediente sigue disponible, pero ya no se puede agendar. */
+  inactive?: boolean;
 }
 
 export interface RecordNote {
@@ -130,6 +138,8 @@ export interface RecordSession {
 export interface PatientRecord {
   studentId: string;
   department: string;
+  /** Dado de baja: el expediente se conserva por retención legal (solo lectura). */
+  inactive?: boolean;
   timeline: RecordSession[];
 }
 
@@ -217,7 +227,9 @@ export interface StoreContextType {
   getSpecialistById: (id: string) => Specialist | null;
   addSpecialist: (data: SpecialistInput) => Promise<void>;
   updateSpecialist: (id: string, data: Partial<SpecialistInput>) => Promise<void>;
-  removeSpecialist: (id: string) => Promise<void>;
+  /** Baja lógica: conserva notas clínicas e historial. Cancela citas abiertas. */
+  removeSpecialist: (id: string, reason?: string) => Promise<void>;
+  restoreSpecialist: (id: string) => Promise<void>;
   appointments: Appointment[];
   getAppointments: (filters?: AppointmentFilters) => Appointment[];
   createAppointment: (req: { studentId: string; studentName?: string; specialistId: string; department: string; motivo: string; modality: string; preferredDate: string; preferredTime: string; isFollowUp?: boolean; parentId?: string }) => Promise<boolean>;
@@ -252,7 +264,9 @@ export interface StoreContextType {
   markNotificationsRead: (userId: string) => void;
   deleteNotification: (userId: string, notifId: string) => void;
   clearAllNotifications: (userId: string) => void;
-  deleteUser: (id: string) => Promise<void>;
+  /** Baja lógica: conserva el expediente clínico. Cancela citas abiertas. */
+  deleteUser: (id: string, reason?: string) => Promise<void>;
+  restoreUser: (id: string) => Promise<void>;
   fetchAll: () => Promise<void>;
   isOnline: boolean;
 }

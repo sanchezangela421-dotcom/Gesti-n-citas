@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
+import { toast } from "sonner";
 import { AuthContextType, RegisterPayload, User } from "../types";
 import { API_BASE } from "../lib/api";
 
@@ -40,6 +41,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const userData = await res.json();
         setUser(userData);
       } else {
+        // Cuenta dada de baja mientras la sesión seguía abierta: se avisa en vez
+        // de devolver al login en silencio, que parecería un error de la app.
+        const body = await res.json().catch(() => ({}));
+        if (body.code === 'ACCOUNT_DEACTIVATED') {
+          toast.error('Tu cuenta fue dada de baja. Contacta al administrador de tu organización.');
+        } else if (body.code === 'ORGANIZATION_SUSPENDED') {
+          toast.error('El acceso de tu organización está suspendido. Contacta a soporte.');
+        }
         localStorage.removeItem('token');
       }
     } catch (e) {

@@ -2,8 +2,27 @@ import { Router } from 'express';
 import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { orgScope } from '../lib/orgScope';
+import { MISSED } from './appointments';
 
 const router = Router();
+
+const UNSPECIFIED_CAREER = 'Otras / No especificada';
+
+/**
+ * Carrera de un alumno.
+ *
+ * Se lee la columna legacy `carrera` y, si está vacía, el campo dinámico del
+ * mismo nombre en `metadata`: las organizaciones definen sus propios campos de
+ * registro (RegistrationField), y solo las que usan la clave `carrera` llenan
+ * además la columna. Sin este respaldo, los alumnos dados de alta por otras
+ * vías caían todos en "no especificada".
+ */
+function careerOf(user: { carrera: string | null; metadata: unknown }): string {
+  if (user.carrera?.trim()) return user.carrera.trim();
+  const meta = user.metadata as Record<string, unknown> | null;
+  const fromMeta = meta && typeof meta.carrera === 'string' ? meta.carrera.trim() : '';
+  return fromMeta || UNSPECIFIED_CAREER;
+}
 
 // GET /api/stats?periodId=<id>
 // Si se pasa periodId, filtra las citas de ese período.
@@ -18,13 +37,14 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
         ? { ...scope, periodId: periodId as string }
         : { ...scope };
 
-    const [totalAppointments, pendientes, confirmadas, completadas, canceladas] =
+    const [totalAppointments, pendientes, confirmadas, completadas, canceladas, noAsistio] =
       await Promise.all([
         prisma.appointment.count({ where }),
         prisma.appointment.count({ where: { ...where, status: 'Pendiente' } }),
         prisma.appointment.count({ where: { ...where, status: 'Confirmada' } }),
         prisma.appointment.count({ where: { ...where, status: 'Completada' } }),
         prisma.appointment.count({ where: { ...where, status: 'Cancelada' } }),
+        prisma.appointment.count({ where: { ...where, status: MISSED } }),
       ]);
 
     // Citas por departamento
@@ -93,21 +113,27 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
       value: m._count.modality || 0,
     }));
 
-    // Por carrera
-    const apptsWithStudents = await prisma.appointment.findMany({
+    // Por carrera — se cuentan CITAS, no alumnos distintos.
+    //
+    // Antes se deduplicaban los studentId y se contaba uno por alumno, de modo
+    // que la misma gráfica daba números distintos según se leyera del servidor
+    // o del cálculo propio del panel de admin (que sí cuenta citas). El resto
+    // de gráficas de este endpoint cuentan citas, así que esta se alinea.
+    const apptStudents = await prisma.appointment.findMany({
       where,
       select: { studentId: true },
     });
-    const studentIds = [...new Set(apptsWithStudents.map(a => a.studentId))];
-    const registeredStudents = await prisma.user.findMany({
-      where: { id: { in: studentIds } },
-      select: { carrera: true },
+    const students = await prisma.user.findMany({
+      where: { id: { in: [...new Set(apptStudents.map(a => a.studentId))] } },
+      select: { id: true, carrera: true, metadata: true },
     });
+    const careerByStudent = new Map(students.map(s => [s.id, careerOf(s)]));
+
     const careerMap: Record<string, number> = {};
-    registeredStudents.forEach(s => {
-      const careerName = s.carrera || 'Otras / No especificada';
+    for (const a of apptStudents) {
+      const careerName = careerByStudent.get(a.studentId) ?? UNSPECIFIED_CAREER;
       careerMap[careerName] = (careerMap[careerName] || 0) + 1;
-    });
+    }
     const chartCarreras = Object.entries(careerMap)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
@@ -120,6 +146,7 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
         confirmadas,
         completadas,
         canceladas,
+        noAsistio,
         byDept,
       },
       charts: {

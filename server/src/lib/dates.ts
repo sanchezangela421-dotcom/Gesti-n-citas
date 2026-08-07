@@ -11,3 +11,19 @@ export function localISODate(d: Date = new Date()): string {
     `${String(d.getDate()).padStart(2, '0')}`
   );
 }
+
+/** "2026-08-04" → "martes, 4 de agosto de 2026" (para correos y notificaciones) */
+export function formatLongDate(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00');
+  return d.toLocaleDateString('es-MX', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  });
+}
+
+/** "14:30" → "2:30 PM" */
+export function formatTime12h(timeStr: string): string {
+  const [h, m] = timeStr.split(':').map(Number);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const hour12 = h % 12 || 12;
+  return `${hour12}:${m.toString().padStart(2, '0')} ${ampm}`;
+}

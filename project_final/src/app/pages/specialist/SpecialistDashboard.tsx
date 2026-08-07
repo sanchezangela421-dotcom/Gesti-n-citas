@@ -4,7 +4,7 @@ import {
     Clock, CalendarCheck, CheckCircle2, Users, FileText, Megaphone,
     CalendarDays, Info, RefreshCw, Pencil, Trash2, Calendar,
     Video, Plus, MapPin,
-    ClipboardList, ArrowRight, Lock, History, XCircle,
+    ClipboardList, ArrowRight, Lock, History, XCircle, UserX,
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
@@ -215,7 +215,7 @@ export function SpecialistDashboard() {
     // Historial: citas raíz (Completada/Cancelada sin parentId), orden desc por fecha.
     const historialAppts = useMemo(
         () => allAppts
-            .filter(a => (a.status === "Completada" || a.status === "Cancelada") && !a.parentId)
+            .filter(a => (a.status === "Completada" || a.status === "Cancelada" || a.status === "No asistió") && !a.parentId)
             .sort((a, b) => b.date.localeCompare(a.date)),
         [allAppts]
     );
@@ -379,6 +379,22 @@ export function SpecialistDashboard() {
                     <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Panel de {dept}</h1>
                     <p className="text-slate-500 dark:text-slate-400 mt-1 font-medium">{spec.name} — Gestión de citas y agenda</p>
                 </div>
+
+                {/* Inactivo: explica por qué dejaron de llegar solicitudes, en lugar
+                    de que el especialista lo interprete como una falla del sistema. */}
+                {!spec.active && (
+                    <div className="flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
+                        <Info className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
+                        <div className="text-sm">
+                            <p className="font-bold text-slate-800 dark:text-slate-100">Tu perfil está marcado como inactivo</p>
+                            <p className="text-slate-600 dark:text-slate-300 mt-0.5 leading-relaxed">
+                                No estás recibiendo solicitudes nuevas y no apareces en la agenda de los usuarios.
+                                Puedes seguir atendiendo y cerrando tus citas actuales. Si crees que es un error,
+                                contacta al administrador de tu organización.
+                            </p>
+                        </div>
+                    </div>
+                )}
 
                 {/* Stats */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -922,7 +938,9 @@ export function SpecialistDashboard() {
                 <Modal
                     open={!!action.appt && !!action.status && action.status !== "Confirmada"}
                     onClose={action.close}
-                    title={action.status === "Completada" ? "Finalizar Cita" : "Cancelar Cita"}
+                    title={action.status === "Completada" ? "Finalizar Cita"
+                        : action.status === "No asistió" ? "Registrar inasistencia"
+                        : "Cancelar Cita"}
                     subtitle={action.appt ? `${action.appt.studentName} — ${action.appt.date} a las ${action.appt.time}` : ""}
                     maxWidth="max-w-md"
                 >
@@ -950,6 +968,14 @@ export function SpecialistDashboard() {
                                     />
                                 </div>
                             </>
+                        ) : action.status === "No asistió" ? (
+                            <div className="flex items-start gap-3 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                                <Info className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+                                <p className="text-slate-600 text-xs leading-relaxed">
+                                    La cita se cerrará como <span className="font-bold">no asistida</span> y el horario quedará registrado como tal.
+                                    Se avisará al usuario, invitándole a agendar de nuevo cuando pueda. No se envía ningún reproche.
+                                </p>
+                            </div>
                         ) : (
                             <div>
                                 <label className="block mb-2 text-slate-900 font-bold text-sm">Motivo de cancelación <span className="text-rose-500">*</span></label>
@@ -971,7 +997,9 @@ export function SpecialistDashboard() {
                                 }}
                                 className={`flex-1 text-white border-0 shadow-lg ${action.status === "Cancelada" ? "bg-rose-600 hover:bg-rose-700" : "bg-indigo-600 hover:bg-indigo-700"}`}
                             >
-                                {action.status === "Completada" ? "Finalizar Cita" : "Confirmar Cancelación"}
+                                {action.status === "Completada" ? "Finalizar Cita"
+                                    : action.status === "No asistió" ? "Registrar inasistencia"
+                                    : "Confirmar Cancelación"}
                             </Btn>
                         </div>
                     </div>
@@ -1119,6 +1147,9 @@ function AppointmentCard({
     const todayM = new Date(); todayM.setHours(0, 0, 0, 0);
     const apptDateMidnight = new Date(appt.date + "T12:00:00");
     const isApptPast = apptDateMidnight < todayM;
+    // La hora de la cita ya pasó (no solo el día): antes de eso no tiene sentido
+    // dar por perdida una sesión que todavía puede ocurrir.
+    const isTimePast = apptDateTime < now;
     const hoursUntilAppt = (apptDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
     const isWithin24h = hoursUntilAppt >= 0 && hoursUntilAppt < 24;
     const isFollowUp = appt.isFollowUp || appt.motivo?.startsWith("Seguimiento:");
@@ -1179,6 +1210,13 @@ function AppointmentCard({
                             className="bg-indigo-600 hover:bg-indigo-700 text-white border-0 shadow-sm">
                             <CheckCircle2 className="w-3.5 h-3.5" /> Completar
                         </Btn>
+                        {/* Solo tras la hora de la cita: es la otra forma de cerrarla
+                            cuando el usuario no se presentó. */}
+                        {isTimePast && (
+                            <Btn size="sm" variant="ghost" onClick={() => onAction(appt, "No asistió")}>
+                                <UserX className="w-3.5 h-3.5" /> No asistió
+                            </Btn>
+                        )}
                         {!isApptPast && (
                             <Btn size="sm" variant="ghost" onClick={onReschedule}>
                                 <RefreshCw className="w-3.5 h-3.5" /> Reagendar

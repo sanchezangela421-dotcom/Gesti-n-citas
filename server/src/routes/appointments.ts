@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { orgScope } from '../lib/orgScope';
+import { sanitizeOptionalHttpUrl } from '../lib/urls';
+import { isDepartmentContracted } from '../lib/departments';
 import { getCallerSpecialist } from '../lib/clinicalAccess';
 import { writeAudit, getClientIp } from '../services/auditLogger';
 import {
@@ -11,6 +13,7 @@ import {
   sendCancelledByStudentEmail,
   sendRescheduledBySpecialistEmail,
   sendRescheduledByStudentEmail,
+  sendAppointmentMissedEmail,
 } from '../services/email';
 
 const router = Router();
@@ -114,13 +117,26 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
 
     // Cargar alumno y especialista validando que existan dentro del alcance del usuario.
     // Derivar nombre/departamento/organización de la BD impide que el cliente los falsifique.
+    // `deletedAt: null` en ambos lados: no se puede agendar con una persona dada
+    // de baja ni a nombre de ella (su cuenta existe solo por retención documental).
     const scope = orgScope(caller);
     const [student, specialist] = await Promise.all([
-      prisma.user.findFirst({ where: { id: studentId, ...scope } }),
-      prisma.specialist.findFirst({ where: { id: data.specialistId, ...scope }, include: { location: true } }),
+      prisma.user.findFirst({ where: { id: studentId, deletedAt: null, ...scope } }),
+      prisma.specialist.findFirst({ where: { id: data.specialistId, deletedAt: null, ...scope }, include: { location: true } }),
     ]);
     if (!student || !specialist) {
       return res.status(404).json({ error: 'Alumno o especialista no disponible en tu organización' });
+    }
+    // Inactivo = no admite citas nuevas (conserva las que ya tenía). Se valida en
+    // el servidor y no solo ocultándolo en la lista: el cliente no es la autoridad.
+    if (!specialist.active) {
+      return res.status(409).json({ error: 'Este especialista no está disponible para nuevas citas.' });
+    }
+
+    // Departamento no contratado: se dejan de aceptar citas nuevas, pero las ya
+    // agendadas siguen su curso (se avisó por correo al desactivarlo).
+    if (!(await isDepartmentContracted(specialist.organizationId, specialist.department))) {
+      return res.status(409).json({ error: `El departamento de ${specialist.department} no está disponible en tu organización.` });
     }
     if (student.organizationId !== specialist.organizationId) {
       return res.status(403).json({ error: 'El alumno y el especialista pertenecen a organizaciones distintas' });
@@ -248,11 +264,23 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
 
 // ── PATCH /api/appointments/:id/status ───────────────────────────────────────
 
+export const MISSED = 'No asistió';
+
+/**
+ * Transiciones permitidas.
+ *
+ * `No asistió` solo sale de `Confirmada`, nunca de `Pendiente`: una cita que
+ * el especialista jamás confirmó y venció sin atenderse no es una falta del
+ * alumno —puede que ni supiera que estaba en pie—, así que registrarla como
+ * inasistencia le echaría encima un incumplimiento ajeno. Desde Pendiente lo
+ * correcto es cancelar indicando el motivo.
+ */
 const VALID_TRANSITIONS: Record<string, string[]> = {
   'Pendiente':  ['Confirmada', 'Cancelada'],
-  'Confirmada': ['Completada', 'Cancelada'],
+  'Confirmada': ['Completada', 'Cancelada', MISSED],
   'Completada': [],
   'Cancelada':  [],
+  [MISSED]:     [],
 };
 
 router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) => {
@@ -289,6 +317,20 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       });
     }
 
+    // Solo el personal registra una inasistencia, y solo después de la hora de
+    // la cita: marcarla antes sería dar por perdida una sesión que aún no ocurre.
+    if (status === MISSED) {
+      if (req.user?.role !== 'especialista' && req.user?.role !== 'admin') {
+        return res.status(403).json({ error: 'Solo el especialista puede registrar una inasistencia.' });
+      }
+      const [h, m] = current.time.split(':').map(Number);
+      const apptDateTime = new Date(`${current.date}T00:00:00`);
+      apptDateTime.setHours(h, m, 0, 0);
+      if (apptDateTime > new Date()) {
+        return res.status(422).json({ error: 'No puedes registrar una inasistencia antes de la hora de la cita.' });
+      }
+    }
+
     // El especialista/admin debe justificar la cancelación
     if (status === 'Cancelada' && (req.user?.role === 'especialista' || req.user?.role === 'admin')) {
       if (!(typeof notes === 'string' && notes.trim())) {
@@ -314,18 +356,11 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       }
     }
 
-    // Saneamiento del enlace de videollamada (anti-XSS): solo se acepta http(s).
-    // El meetingUrl se renderiza como <a href> en correos y en el frontend, así que
-    // bloqueamos esquemas peligrosos (javascript:, data:, etc.) en el origen.
-    if (bodyMeetingUrl != null && String(bodyMeetingUrl).trim() !== '') {
-      let validUrl = false;
-      try {
-        const u = new URL(String(bodyMeetingUrl).trim());
-        validUrl = u.protocol === 'http:' || u.protocol === 'https:';
-      } catch { validUrl = false; }
-      if (!validUrl) {
-        return res.status(400).json({ error: 'El enlace de videollamada debe ser una URL http(s) válida.' });
-      }
+    // Saneamiento del enlace de videollamada (anti-XSS): solo se acepta http(s),
+    // porque se renderiza como <a href> en correos y en el frontend.
+    const safeBodyUrl = sanitizeOptionalHttpUrl(bodyMeetingUrl);
+    if (!safeBodyUrl.ok) {
+      return res.status(400).json({ error: 'El enlace de videollamada debe ser una URL http(s) válida.' });
     }
 
     // Resolver meetingUrl / ubicación antes del update para guardarlos en la cita
@@ -333,7 +368,7 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
     let resolvedLocation: string | undefined;
     if (status === 'Confirmada' && (current.modality === 'Virtual' || current.modality === 'Presencial')) {
       const spec = await prisma.specialist.findUnique({ where: { id: current.specialistId }, include: { location: true } });
-      if (current.modality === 'Virtual') resolvedMeetingUrl = (typeof bodyMeetingUrl === 'string' ? bodyMeetingUrl.trim() : '') || spec?.meetingUrl || undefined;
+      if (current.modality === 'Virtual') resolvedMeetingUrl = safeBodyUrl.value || spec?.meetingUrl || undefined;
       if (current.modality === 'Presencial') {
         // El especialista puede elegir la sede al confirmar; si no, usa su sede por defecto.
         if (bodyLocationId) {
@@ -404,6 +439,22 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
     const cancelReason = notes ?? undefined;
     const actorRole = req.user?.role;
 
+    // Notificación in-app de la inasistencia. Se crea en el servidor —y no desde
+    // el navegador como el resto— para que quede registrada aunque el especialista
+    // cierre la pestaña justo después.
+    if (status === MISSED) {
+      prisma.notification.create({
+        data: {
+          userId: appointment.studentId,
+          title: 'Tu cita se cerró',
+          message: `No pudiste asistir a tu cita de ${appointment.department} del ${formatDate(appointment.date)}. Puedes agendar una nueva cuando lo necesites.`,
+          time: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+          type: 'info',
+          organizationId: appointment.organizationId,
+        },
+      }).catch(err => console.error('[appointments] Error notificando la inasistencia:', err));
+    }
+
     // Emails según el nuevo status
     fireEmail(async () => {
       const { studentEmail, specialistEmail } = await getPartyEmails(
@@ -436,6 +487,12 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
         if ((actorRole === 'especialista' || actorRole === 'admin') && studentEmail) {
           await sendCancelledBySpecialistEmail(studentEmail, { ...base, reason: cancelReason });
         }
+      }
+
+      // Inasistencia: se avisa al alumno para que sepa que la cita ya no está
+      // en pie y que puede volver a agendar cuando quiera.
+      if (status === MISSED && studentEmail) {
+        await sendAppointmentMissedEmail(studentEmail, base);
       }
     });
 

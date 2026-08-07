@@ -33,7 +33,9 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
     // El destinatario debe pertenecer a la organización del actor (antes un admin
     // podía notificar a usuarios de cualquier org) y la notificación queda
     // etiquetada con la organización para el aislamiento multi-tenant.
-    const target = await prisma.user.findFirst({ where: { id: userId, ...orgScope(req.user) } });
+    // Un destinatario dado de baja no puede iniciar sesión, así que notificarlo
+    // solo generaría ruido que nadie va a leer.
+    const target = await prisma.user.findFirst({ where: { id: userId, deletedAt: null, ...orgScope(req.user) } });
     if (!target) {
       return res.status(404).json({ error: 'Usuario destino no encontrado' });
     }

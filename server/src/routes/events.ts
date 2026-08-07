@@ -4,8 +4,11 @@ import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { upload } from '../middleware/upload';
 import { orgScope } from '../lib/orgScope';
+import { sanitizeOptionalHttpUrl } from '../lib/urls';
 
 const router = Router();
+
+const INVALID_URL = 'El enlace de registro debe ser una URL http(s) válida.';
 
 /**
  * Notificación in-app "nuevo evento" para todos los end-users de la organización
@@ -20,6 +23,7 @@ function notifyOrgAboutEvent(event: { id: string; title: string; department: str
       where: {
         role: { in: [UserRole.alumno, UserRole.usuario] },
         organizationId: event.organizationId,
+        deletedAt: null, // los dados de baja no pueden entrar a ver el evento
       },
       select: { id: true },
     });
@@ -84,6 +88,10 @@ router.post('/', verifyToken as any, upload.single('image'), async (req: AuthReq
       return res.status(400).json({ error: 'title, date y department son requeridos' });
     }
 
+    // El alumno abre este enlace con window.open desde el carrusel: solo http(s)
+    const safeRegUrl = sanitizeOptionalHttpUrl(registrationUrl);
+    if (!safeRegUrl.ok) return res.status(400).json({ error: INVALID_URL });
+
     // Si se subió una imagen vía multer
     if (req.file) {
       imageUrl = `/uploads/${req.file.filename}`;
@@ -98,7 +106,7 @@ router.post('/', verifyToken as any, upload.single('image'), async (req: AuthReq
         time: time || '',
         type: type || 'conferencia',
         imageUrl: imageUrl || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=400&q=80',
-        registrationUrl,
+        registrationUrl: safeRegUrl.value,
         createdById: req.user?.id ?? null,
         organizationId: req.user?.organizationId ?? null,
       }
@@ -133,7 +141,11 @@ router.patch('/:id', verifyToken as any, upload.single('image'), async (req: Aut
     if (date !== undefined)            data.date = date;
     if (time !== undefined)            data.time = time;
     if (type !== undefined)            data.type = type;
-    if (registrationUrl !== undefined) data.registrationUrl = registrationUrl;
+    if (registrationUrl !== undefined) {
+      const safeRegUrl = sanitizeOptionalHttpUrl(registrationUrl);
+      if (!safeRegUrl.ok) return res.status(400).json({ error: INVALID_URL });
+      data.registrationUrl = safeRegUrl.value;
+    }
     if (req.file)                      data.imageUrl = `/uploads/${req.file.filename}`;
     else if (req.body.imageUrl !== undefined) data.imageUrl = req.body.imageUrl;
 

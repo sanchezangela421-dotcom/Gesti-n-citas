@@ -66,10 +66,10 @@ export const verifySuperAdmin = async (req: SuperAdminRequest, res: Response, ne
   try {
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
-      select: { id: true, email: true, role: true, tokenVersion: true },
+      select: { id: true, email: true, role: true, tokenVersion: true, deletedAt: true },
     });
 
-    if (!user || user.role !== 'superadmin' || user.tokenVersion !== (decoded.tokenVersion ?? 0)) {
+    if (!user || user.role !== 'superadmin' || user.deletedAt || user.tokenVersion !== (decoded.tokenVersion ?? 0)) {
       return res.status(403).json({ error: 'Acceso denegado.' });
     }
 

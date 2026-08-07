@@ -6,6 +6,7 @@ import { prisma } from '../../db';
 import { SuperAdminRequest } from '../../middleware/verifySuperAdmin';
 import { writeAudit, getClientIp } from '../../services/auditLogger';
 import { sendAccountInvitation } from '../../services/email';
+import { cancelOpenAppointments, notifyCancelledByDeactivation } from '../../services/deactivation';
 
 const FRONTEND_URL = process.env.FRONTEND_URL ?? 'http://localhost:5173';
 const INVITATION_EXPIRY_MS = 72 * 60 * 60 * 1000; // 72 horas
@@ -194,29 +195,111 @@ router.patch('/:id', async (req: SuperAdminRequest, res) => {
   }
 });
 
-// ── DELETE /api/superadmin/users/:id — eliminar usuario ──────────────────────
+// ── DELETE /api/superadmin/users/:id — dar de baja usuario ───────────────────
+// BAJA LÓGICA, nunca borrado físico: ni siquiera el superadmin puede eliminar a
+// una persona con expediente clínico (retención NOM-004). La cuenta se conserva
+// y deja de operar; sus citas abiertas se cancelan avisando a la contraparte.
 
 router.delete('/:id', async (req: SuperAdminRequest, res) => {
   try {
     const id = req.params.id as string;
 
     if (id === req.actor!.id) {
-      return res.status(403).json({ error: 'No puedes eliminar tu propia cuenta' });
+      return res.status(403).json({ error: 'No puedes dar de baja tu propia cuenta' });
     }
 
-    const target = await prisma.user.findUnique({ where: { id } });
+    const target = await prisma.user.findUnique({
+      where: { id },
+      include: { specialist: { select: { id: true } } },
+    });
     if (!target) return res.status(404).json({ error: 'Usuario no encontrado' });
 
     if (target.role === 'superadmin') {
-      return res.status(403).json({ error: 'No se puede eliminar otra cuenta de SuperAdmin' });
+      return res.status(403).json({ error: 'No se puede dar de baja otra cuenta de SuperAdmin' });
+    }
+    if (target.deletedAt) {
+      return res.status(409).json({ error: 'Esta cuenta ya está dada de baja' });
     }
 
-    await prisma.user.delete({ where: { id } });
+    const rawReason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    const reason = rawReason || 'La cuenta fue dada de baja por la administración de la plataforma.';
+    const now = new Date();
+
+    const { cancelled, isSpecialist } = await prisma.$transaction(async (tx) => {
+      // Un especialista se cancela por sus citas como prestador; cualquier otro
+      // rol, por las citas que tiene como paciente.
+      const affected = target.specialist
+        ? await cancelOpenAppointments(tx, { specialistId: target.specialist.id }, reason)
+        : await cancelOpenAppointments(tx, { studentId: id }, reason);
+
+      if (target.specialist) {
+        await tx.specialist.update({
+          where: { id: target.specialist.id },
+          data: { deletedAt: now, active: false },
+        });
+        await tx.scheduleSlot.deleteMany({ where: { specialistId: target.specialist.id } });
+      }
+
+      await tx.user.update({
+        where: { id },
+        data: { deletedAt: now, tokenVersion: { increment: 1 } },
+      });
+
+      return { cancelled: affected, isSpecialist: !!target.specialist };
+    });
+
+    notifyCancelledByDeactivation(
+      cancelled,
+      isSpecialist ? 'students' : 'specialists',
+      reason,
+      target.organizationId,
+    );
 
     writeAudit({
       actorId:        req.actor!.id,
       actorRole:      'superadmin',
-      action:         'DELETE_USER',
+      action:         'USER_DEACTIVATED',
+      targetEntity:   'User',
+      targetId:       id,
+      organizationId: target.organizationId,
+      metadata:       { email: target.email, role: target.role, reason, cancelledAppointments: cancelled.length },
+      ipAddress:      getClientIp(req),
+    });
+
+    res.json({ success: true, cancelledAppointments: cancelled.length });
+  } catch (error) {
+    console.error('[superadmin] Error deactivating user:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// ── POST /api/superadmin/users/:id/restore — reactivar usuario ───────────────
+
+router.post('/:id/restore', async (req: SuperAdminRequest, res) => {
+  try {
+    const id = req.params.id as string;
+
+    const target = await prisma.user.findUnique({
+      where: { id },
+      include: { specialist: { select: { id: true } } },
+    });
+    if (!target) return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (!target.deletedAt) return res.status(409).json({ error: 'Esta cuenta no está dada de baja' });
+
+    await prisma.$transaction(async (tx) => {
+      if (target.specialist) {
+        await tx.specialist.update({
+          where: { id: target.specialist.id },
+          data: { deletedAt: null, active: true },
+        });
+      }
+      await tx.user.update({ where: { id }, data: { deletedAt: null } });
+    });
+
+    writeAudit({
+      actorId:        req.actor!.id,
+      actorRole:      'superadmin',
+      action:         'USER_REACTIVATED',
       targetEntity:   'User',
       targetId:       id,
       organizationId: target.organizationId,
@@ -226,7 +309,7 @@ router.delete('/:id', async (req: SuperAdminRequest, res) => {
 
     res.json({ success: true });
   } catch (error) {
-    console.error('[superadmin] Error deleting user:', error);
+    console.error('[superadmin] Error restoring user:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });

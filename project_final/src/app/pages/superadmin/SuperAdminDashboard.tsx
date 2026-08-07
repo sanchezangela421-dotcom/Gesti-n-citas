@@ -7,6 +7,7 @@ import {
     AlertTriangle, Clock, LogOut,
 } from "lucide-react";
 import { API, superAdminHeaders, getUploadUrl } from "../../../lib/api";
+import { ALL_DEPARTMENTS } from "../../../constants";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,7 @@ interface Org {
     plan: string;
     active: boolean;
     userRoleLabel: string;
+    departments: string[];
     logoUrl?: string | null;
     createdAt: string;
     _count: { users: number; specialists: number; appointments: number };
@@ -143,7 +145,7 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
 
     // ── Editar org modal ──
     const [editOrg, setEditOrg]     = useState<Org | null>(null);
-    const [editForm, setEditForm]   = useState({ name: "", type: "school", plan: "free", userRoleLabel: "Usuario" });
+    const [editForm, setEditForm]   = useState<{ name: string; type: string; plan: string; userRoleLabel: string; departments: string[] }>({ name: "", type: "school", plan: "free", userRoleLabel: "Usuario", departments: [...ALL_DEPARTMENTS] });
     const [logoFile, setLogoFile]   = useState<File | null>(null);
     const [logoUploading, setLogoUploading] = useState(false);
     const logoInputRef = useRef<HTMLInputElement>(null);
@@ -276,7 +278,7 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
             const res = await fetch(`${API}/superadmin/organizations/${editOrg.id}`, {
                 method: "PATCH",
                 headers: superAdminHeaders(),
-                body: JSON.stringify({ name: editForm.name.trim(), type: editForm.type, plan: editForm.plan, userRoleLabel: editForm.userRoleLabel }),
+                body: JSON.stringify({ name: editForm.name.trim(), type: editForm.type, plan: editForm.plan, userRoleLabel: editForm.userRoleLabel, departments: editForm.departments }),
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
@@ -713,7 +715,7 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                                             Campos
                                                         </button>
                                                         <button
-                                                            onClick={() => { setEditOrg(org); setEditForm({ name: org.name, type: org.type, plan: org.plan, userRoleLabel: org.userRoleLabel ?? "Usuario" }); setLogoFile(null); }}
+                                                            onClick={() => { setEditOrg(org); setEditForm({ name: org.name, type: org.type, plan: org.plan, userRoleLabel: org.userRoleLabel ?? "Usuario", departments: org.departments ?? [...ALL_DEPARTMENTS] }); setLogoFile(null); }}
                                                             className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-indigo-900/20 transition-colors"
                                                             title="Editar"
                                                         >
@@ -1086,6 +1088,47 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                     <div className="space-y-4">
                         <Field label="Nombre" value={editForm.name} onChange={v => setEditForm(f => ({ ...f, name: v }))} placeholder="TECNL" />
                         <Field label="Cómo se llaman los usuarios" value={editForm.userRoleLabel} onChange={v => setEditForm(f => ({ ...f, userRoleLabel: v }))} placeholder="Alumno / Paciente / Empleado" />
+
+                        {/* Departamentos contratados. Retirar uno NO cancela citas:
+                            las ya agendadas se respetan y solo se bloquean las nuevas,
+                            avisando por correo a quien tenga una pendiente. */}
+                        <div>
+                            <label className="block text-xs font-medium text-slate-400 mb-1">Departamentos contratados</label>
+                            <div className="space-y-1.5 bg-slate-800/60 border border-slate-700 rounded-lg p-3">
+                                {ALL_DEPARTMENTS.map(dept => {
+                                    const checked = editForm.departments.includes(dept);
+                                    return (
+                                        <label key={dept} className="flex items-center gap-2.5 cursor-pointer text-sm text-slate-200">
+                                            <input
+                                                type="checkbox"
+                                                checked={checked}
+                                                onChange={() => setEditForm(f => ({
+                                                    ...f,
+                                                    departments: checked
+                                                        ? f.departments.filter(d => d !== dept)
+                                                        : [...f.departments, dept],
+                                                }))}
+                                                className="w-4 h-4 rounded border-slate-600 bg-slate-900 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-slate-900"
+                                            />
+                                            {dept}
+                                        </label>
+                                    );
+                                })}
+                            </div>
+                            {editForm.departments.length === 0 && (
+                                <p className="text-xs text-amber-400 mt-1.5">
+                                    Sin departamentos, esta organización no podrá agendar ninguna cita.
+                                </p>
+                            )}
+                            {editOrg.departments?.some(d => !editForm.departments.includes(d)) && (
+                                <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                                    Al retirar un departamento, las citas ya agendadas se respetan y se avisa
+                                    por correo a los usuarios y especialistas afectados. Solo se bloquean las
+                                    citas nuevas.
+                                </p>
+                            )}
+                        </div>
+
                         <div>
                             <label className="block text-xs font-medium text-slate-400 mb-1">Tipo</label>
                             <select value={editForm.type} onChange={e => setEditForm(f => ({ ...f, type: e.target.value }))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">

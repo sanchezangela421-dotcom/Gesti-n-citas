@@ -58,6 +58,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         confirmadas: a.filter(x => x.status === "Confirmada").length,
         completadas: a.filter(x => x.status === "Completada").length,
         canceladas:  a.filter(x => x.status === "Cancelada").length,
+        noAsistio:   a.filter(x => x.status === "No asistió").length,
         byDept: {
           Psicología: a.filter(x => x.department === "Psicología").length,
           Tutorías:   a.filter(x => x.department === "Tutorías").length,
@@ -189,6 +190,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     users: usersStore.users,
     getUserById: usersStore.getUserById,
     deleteUser: usersStore.deleteUser,
+    restoreUser: usersStore.restoreUser,
     // specialists
     specialists: specialistsStore.specialists,
     specialistsLoaded: specialistsStore.specialistsLoaded,
@@ -197,6 +199,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     addSpecialist: specialistsStore.addSpecialist,
     updateSpecialist: specialistsStore.updateSpecialist,
     removeSpecialist: specialistsStore.removeSpecialist,
+    restoreSpecialist: specialistsStore.restoreSpecialist,
     addScheduleSlot: specialistsStore.addScheduleSlot,
     removeScheduleSlot: specialistsStore.removeScheduleSlot,
     updateMeetingUrl: specialistsStore.updateMeetingUrl,
@@ -231,11 +234,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     fetchAll,
     isOnline,
   }), [
-    usersStore.users, usersStore.getUserById, usersStore.deleteUser,
+    usersStore.users, usersStore.getUserById, usersStore.deleteUser, usersStore.restoreUser,
     specialistsStore.specialists, specialistsStore.specialistsLoaded,
     specialistsStore.getSpecialists, specialistsStore.getSpecialistById,
     specialistsStore.addSpecialist, specialistsStore.updateSpecialist,
-    specialistsStore.removeSpecialist, specialistsStore.addScheduleSlot,
+    specialistsStore.removeSpecialist, specialistsStore.restoreSpecialist,
+    specialistsStore.addScheduleSlot,
     specialistsStore.removeScheduleSlot, specialistsStore.updateMeetingUrl,
     specialistsStore.updateSpecialistLocation,
     appointmentsStore.appointments, appointmentsStore.getAppointments,

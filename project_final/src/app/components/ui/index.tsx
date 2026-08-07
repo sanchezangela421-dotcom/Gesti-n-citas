@@ -31,6 +31,9 @@ const STATUS_VARIANTS: Record<string, { bg: string; text: string; border: string
     Confirmada:     { bg: "bg-blue-100",    text: "text-blue-700",    border: "border-blue-200",    dot: "bg-blue-500"    },
     Completada:     { bg: "bg-emerald-100", text: "text-emerald-700", border: "border-emerald-200", dot: "bg-emerald-500" },
     Cancelada:      { bg: "bg-rose-100",    text: "text-rose-700",    border: "border-rose-200",    dot: "bg-rose-500"    },
+    // Neutro a propósito, no rojo: una inasistencia se registra para tener el
+    // dato, no para señalar a nadie.
+    "No asistió":   { bg: "bg-slate-100",   text: "text-slate-600",   border: "border-slate-300",   dot: "bg-slate-400"   },
     "Sin atender":  { bg: "bg-rose-100",    text: "text-rose-700",    border: "border-rose-200",    dot: "bg-rose-400"    },
     "Sesión tardía":{ bg: "bg-amber-100",   text: "text-amber-700",   border: "border-amber-200",   dot: "bg-amber-400"   },
     "Sin cerrar":   { bg: "bg-amber-100",   text: "text-amber-700",   border: "border-amber-200",   dot: "bg-amber-400"   },

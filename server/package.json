@@ -13,8 +13,11 @@
     "dev": "nodemon src/index.ts",
     "build": "prisma generate && tsc",
     "lint": "eslint src/",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:seed": "ts-node prisma/seed.ts",
-    "db:cleanup": "ts-node src/scripts/cleanup.ts"
+    "db:cleanup": "ts-node src/scripts/cleanup.ts",
+    "typecheck": "tsc -p tsconfig.test.json"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
@@ -36,26 +39,27 @@
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
-    "express-rate-limit": "^8.3.2",
+    "express-rate-limit": "^8.6.2",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
-    "multer": "^2.1.1",
-    "nodemailer": "^8.0.3",
+    "multer": "^2.2.0",
+    "nodemailer": "^9.0.4",
     "prisma": "^6.19.2"
   },
   "devDependencies": {
+    "@eslint/js": "^9.0.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.1.0",
     "@types/node": "^25.5.0",
-    "@types/nodemailer": "^8.0.0",
+    "@types/nodemailer": "^8.0.1",
+    "eslint": "^10.2.1",
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
-    "@eslint/js": "^9.0.0",
-    "eslint": "^10.2.1",
-    "typescript-eslint": "^8.0.0"
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^4.1.10"
   }
 }

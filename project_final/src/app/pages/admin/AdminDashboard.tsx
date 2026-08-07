@@ -18,15 +18,79 @@ import { useAuth } from "../../../context/AuthContext";
 import { AppShell } from "../../components/layout/AppShell";
 import { Btn, StatCard, Avatar, StatusBadge, Modal, inputCls, EmptyState, Reveal } from "../../components/ui";
 import { Calendar } from "../../components/ui/calendar";
-import { DEPT_CONFIG } from "../../../constants";
+import { DEPT_CONFIG, ALL_DEPARTMENTS } from "../../../constants";
+import { useDepartments } from "../../hooks/useDepartments";
+
+// Presentación de las tarjetas de descarga de reporte, por departamento del
+// catálogo. Cuáles se muestran lo decide la lista de contratados.
+/** Campo de registro de la organización que sirve para agrupar estadísticas. */
+interface GroupableField { key: string; label: string }
+
+/**
+ * Claves con gráfica propia hecha a mano, que por eso NO se grafican de forma
+ * genérica: duplicarían la que ya existe. Semestre y edad además necesitan un
+ * tratamiento que el mecanismo genérico no da (orden numérico y rangos etarios).
+ */
+const FIELDS_WITH_OWN_CHART = new Set(['carrera', 'genero', 'semestre', 'fechaNacimiento']);
+
+/**
+ * Distribución de citas por el valor de un campo de registro de la organización.
+ *
+ * Sustituye a las gráficas fijas por carrera o género: cada organización define
+ * sus propios campos y aquí se agrupa por lo que haya definido. Solo tiene
+ * sentido con campos de conjunto cerrado (select y radio); agrupar por un texto
+ * libre daría una barra por respuesta.
+ *
+ * Devuelve null si NADIE tiene valor: la gráfica solo diría "No especificado"
+ * para todos, y mostrar eso es peor que no mostrar nada — parece un dato real.
+ */
+function distributionByField(
+    appts: Appointment[],
+    usersById: Map<string, { metadata?: Record<string, string> | null }>,
+    field: GroupableField,
+): { key: string; label: string; data: { name: string; value: number }[] } | null {
+    const counts: Record<string, number> = {};
+    let withValue = 0;
+
+    for (const a of appts) {
+        const raw = usersById.get(a.studentId)?.metadata?.[field.key];
+        const value = typeof raw === "string" ? raw.trim() : "";
+        if (value) withValue++;
+        const name = value || "No especificado";
+        counts[name] = (counts[name] || 0) + 1;
+    }
+
+    if (withValue === 0) return null;
+
+    return {
+        key: field.key,
+        label: field.label,
+        data: Object.entries(counts)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 8),
+    };
+}
+
+/** true si la gráfica tiene algún dato real y no solo "no especificado"/ceros. */
+function hasRealData(rows: { name: string; value: number }[] | undefined): boolean {
+    if (!rows?.length) return false;
+    return rows.some(r => r.value > 0 && !/^no esp/i.test(r.name));
+}
+
+const REPORT_CARD_STYLE: Record<string, { icon: typeof Brain; gradient: string }> = {
+    "Psicología": { icon: Brain, gradient: "from-blue-500 to-indigo-600" },
+    "Tutorías": { icon: GraduationCap, gradient: "from-emerald-500 to-teal-600" },
+    "Nutrición": { icon: Apple, gradient: "from-rose-500 to-orange-500" },
+};
 import { PIE_COLORS } from "../../../data/mockData";
 import { useActionModal } from "../../hooks";
 import { useTheme } from "../../hooks/useTheme";
-import { API, authHeaders } from "../../../lib/api";
+import { API, API_BASE, authHeaders } from "../../../lib/api";
 import { calcularEdad } from "../../../utils/date";
 import { AdminContentTab } from "./AdminContentTab";
 import { AdminEventsTab } from "./AdminEventsTab";
-import type { Appointment, Specialist, OrgLocation } from "../../../types";
+import type { Appointment, Specialist, OrgLocation, User } from "../../../types";
 
 // ─── ReportPeriod type ────────────────────────────────────────────────────────
 interface ReportPeriod {
@@ -207,7 +271,7 @@ const AGE_RANGES = [
 ];
 
 // ─── PDF report (pure jsPDF + autoTable, no canvas capture) ──────────────────
-async function generatePDFReport(deptReport: string, allAppts: Appointment[], users: { id: string; carrera?: string; genero?: string; semestre?: number; fechaNacimiento?: string }[], periodName?: string, isSchool?: boolean, userRoleLabel?: string) {
+async function generatePDFReport(deptReport: string, allAppts: Appointment[], users: { id: string; carrera?: string; genero?: string; semestre?: number; fechaNacimiento?: string }[], periodName?: string, isSchool?: boolean, userRoleLabel?: string, departments: string[] = [...ALL_DEPARTMENTS]) {
     const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
         import("jspdf"),
         import("jspdf-autotable"),
@@ -401,7 +465,7 @@ async function generatePDFReport(deptReport: string, allAppts: Appointment[], us
     };
 
     if (deptReport === "Reporte Global") {
-        const depts = ["Psicología", "Tutorías", "Nutrición"];
+        const depts = departments;
         depts.forEach((dept, i) => {
             addStatsPage(dept, allAppts.filter(a => a.department === dept), i === 0);
         });
@@ -472,6 +536,8 @@ async function generatePDFReport(deptReport: string, allAppts: Appointment[], us
 export function AdminDashboard() {
     const { dark } = useTheme();
     const { user: authUser } = useAuth();
+    // Solo los departamentos que la organización tiene contratados
+    const departments = useDepartments();
     const tooltipStyle = dark
         ? { borderRadius: "12px", border: "1px solid #334155", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.4)", backgroundColor: "#1e293b", color: "#f1f5f9" }
         : { borderRadius: "12px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" };
@@ -647,12 +713,37 @@ export function AdminDashboard() {
 
     // Specialist form
     const [newName, setNewName] = useState("");
-    const [newDept, setNewDept] = useState("Psicología");
+    const [newDept, setNewDept] = useState(departments[0] ?? "Psicología");
     const [newEmail, setNewEmail] = useState("");
     const [, setNewSched] = useState("");
     const [newShift, setNewShift] = useState("Matutino");
     const [editingSpec, setEditingSpec] = useState<Specialist | null>(null);
     const [editPass, setEditPass] = useState("");
+
+    // Bajas: nunca se borra a nadie, así que la confirmación lo explica y pide motivo
+    const [deactivatingSpec, setDeactivatingSpec] = useState<Specialist | null>(null);
+    const [deactivatingUser, setDeactivatingUser] = useState<User | null>(null);
+    const [deactivateReason, setDeactivateReason] = useState("");
+
+    // Campos de registro de la organización que sirven para agrupar: solo los de
+    // conjunto cerrado (select/radio). De aquí salen las gráficas demográficas,
+    // que antes estaban fijas a los campos de una escuela.
+    const [groupableFields, setGroupableFields] = useState<GroupableField[]>([]);
+    useEffect(() => {
+        const slug = authUser?.organization?.slug;
+        if (!slug) return;
+        fetch(`${API_BASE}/api/public/organizations/${slug}/fields`)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                const fields: Array<{ key: string; label: string; type: string }> = data?.registrationFields ?? [];
+                setGroupableFields(
+                    fields
+                        .filter(f => (f.type === "select" || f.type === "radio") && !FIELDS_WITH_OWN_CHART.has(f.key))
+                        .map(f => ({ key: f.key, label: f.label }))
+                );
+            })
+            .catch(() => { /* sin campos dinámicos: se muestran solo las gráficas de la cita */ });
+    }, [authUser?.organization?.slug]);
 
     // Sedes de la organización (catálogo) — solo el admin las da de alta
     const [orgLocations, setOrgLocations] = useState<OrgLocation[]>([]);
@@ -727,8 +818,15 @@ export function AdminDashboard() {
         new Date(a.date + "T12:00:00") < todayMidnightAdmin
     ).length;
 
+    // Índice por id: las gráficas recorren miles de citas y buscar el alumno con
+    // un find() por cada una convierte el cálculo en cuadrático.
+    const usersById = useMemo(
+        () => new Map(users.map(u => [u.id, u as { metadata?: Record<string, string> | null }])),
+        [users]
+    );
+
     const deptChartData = useMemo(() => {
-        const depts = ["Psicología", "Tutorías", "Nutrición"];
+        const depts = departments;
         const result: Record<string, any> = {};
         depts.forEach(d => {
             const dAppts = allAppts.filter(a => a.department === d);
@@ -773,10 +871,14 @@ export function AdminDashboard() {
                     return na - nb;
                 }),
                 edad: AGE_RANGES.map(r => ({ name: r.label, value: edaMap[r.label] ?? 0 })),
+                // Distribuciones por los campos que definio la organizacion
+                byField: groupableFields
+                    .map(f => distributionByField(dAppts, usersById, f))
+                    .filter((x): x is NonNullable<typeof x> => x !== null),
             };
         });
         return result;
-    }, [allAppts, users]);
+    }, [allAppts, users, usersById, departments, groupableFields]);
 
     // Demographic data for Global view (computed client-side)
     const globalDemoData = useMemo(() => {
@@ -803,8 +905,12 @@ export function AdminDashboard() {
                 return na - nb;
             }),
             edad: AGE_RANGES.map(r => ({ name: r.label, value: edaMap[r.label] ?? 0 })),
+            // Distribuciones por los campos que definió la organización
+            byField: groupableFields
+                .map(f => distributionByField(allAppts, usersById, f))
+                .filter((x): x is NonNullable<typeof x> => x !== null),
         };
-    }, [allAppts, users]);
+    }, [allAppts, users, usersById, groupableFields]);
 
     const filteredAppts = useMemo(() => allAppts.filter(a => {
         // Filtro por período
@@ -966,10 +1072,10 @@ export function AdminDashboard() {
                                         ))}
                                     </select>
                                     <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-sm font-medium text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600/20">
-                                        <option>Todos</option><option>Psicología</option><option>Tutorías</option><option>Nutrición</option>
+                                        <option>Todos</option>{departments.map(d => <option key={d}>{d}</option>)}
                                     </select>
                                     <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-sm font-medium text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600/20">
-                                        <option>Todos</option><option>Pendiente</option><option>Confirmada</option><option>Completada</option><option>Cancelada</option><option>Sin cerrar</option>
+                                        <option>Todos</option><option>Pendiente</option><option>Confirmada</option><option>Completada</option><option>Cancelada</option><option>No asistió</option><option>Sin cerrar</option>
                                     </select>
                                 </div>
                             </div>
@@ -1078,7 +1184,7 @@ export function AdminDashboard() {
                                                 </span>
                                                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                                     <button onClick={() => setEditingSpec(esp)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors"><Pencil className="w-4 h-4" /></button>
-                                                    <button onClick={() => { if (confirm(`¿Eliminar a ${esp.name}?`)) { removeSpecialist(esp.id); toast.success("Especialista eliminado"); } }}
+                                                    <button onClick={() => setDeactivatingSpec(esp)} title="Dar de baja"
                                                         className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"><XCircle className="w-4 h-4" /></button>
                                                 </div>
                                             </div>
@@ -1100,7 +1206,7 @@ export function AdminDashboard() {
                                             <div>
                                                 <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Departamento</label>
                                                 <select value={newDept} onChange={e => setNewDept(e.target.value)} className={inputCls}>
-                                                    <option>Psicología</option><option>Tutorías</option><option>Nutrición</option>
+                                                    {departments.map(d => <option key={d}>{d}</option>)}
                                                 </select>
                                             </div>
                                             <div>
@@ -1172,7 +1278,7 @@ export function AdminDashboard() {
                                                 )}
                                                 <td className="px-6 py-4 text-slate-500 text-sm">{u.email}</td>
                                                 <td className="px-6 py-4">
-                                                    <button onClick={() => { if (confirm(`¿Eliminar a ${u.name}?`)) { deleteUser(u.id); toast.success(`${endUserLabel} eliminado`); } }}
+                                                    <button onClick={() => setDeactivatingUser(u)} title="Dar de baja"
                                                         className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer">
                                                         <XCircle className="w-4 h-4" />
                                                     </button>
@@ -1239,7 +1345,7 @@ export function AdminDashboard() {
                                     </div>
                                     {/* Tabs de departamento */}
                                     <div className="flex bg-white dark:bg-slate-800 rounded-xl p-1 border border-slate-200 dark:border-slate-700 shadow-sm">
-                                        {["Global", "Psicología", "Tutorías", "Nutrición"].map(v => (
+                                        {["Global", ...departments].map(v => (
                                             <button key={v} onClick={() => setStatsView(v)}
                                                 className={`px-4 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer ${statsView === v ? "bg-blue-600 text-white shadow-md shadow-blue-600/20" : "text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-700"}`}>
                                                 {v}
@@ -1266,7 +1372,7 @@ export function AdminDashboard() {
                                                 <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
                                                     <div className="flex items-center justify-between mb-6">
                                                         <h4 className="text-slate-900 dark:text-white font-bold text-lg">Citas por Mes{isGlobal ? " y Departamento" : ""}</h4>
-                                                        <button onClick={() => downloadChartAsImage(refs.monthly, `Tendencias_${statsView}`, isGlobal ? "Citas por Mes y Departamento" : `Citas por Mes — ${statsView}`, dark, isGlobal ? [{ label: "Psicología", color: "#2563EB" }, { label: "Tutorías", color: "#16A34A" }, { label: "Nutrición", color: "#EA580C" }] : undefined)}
+                                                        <button onClick={() => downloadChartAsImage(refs.monthly, `Tendencias_${statsView}`, isGlobal ? "Citas por Mes y Departamento" : `Citas por Mes — ${statsView}`, dark, isGlobal ? departments.map(d => ({ label: d, color: DEPT_CONFIG[d]?.color ?? "#64748b" })) : undefined)}
                                                             className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all cursor-pointer" title="Descargar como imagen">
                                                             <Download className="w-5 h-5" />
                                                         </button>
@@ -1280,12 +1386,12 @@ export function AdminDashboard() {
                                                                 <Tooltip cursor={cursorStyle} contentStyle={tooltipStyle} />
                                                                 {isGlobal ? (
                                                                     <>
-                                                                        <Bar dataKey="Psicología" fill="#2563EB" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                                                                        <Bar dataKey="Tutorías" fill="#16A34A" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                                                                        <Bar dataKey="Nutrición" fill="#EA580C" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                                                                        {departments.map(d => (
+                                                                            <Bar key={d} dataKey={d} fill={DEPT_CONFIG[d]?.color ?? "#64748b"} radius={[4, 4, 0, 0]} maxBarSize={40} />
+                                                                        ))}
                                                                     </>
                                                                 ) : (
-                                                                    <Bar dataKey={statsView} fill={statsView === "Psicología" ? "#2563EB" : statsView === "Tutorías" ? "#16A34A" : "#EA580C"} radius={[4, 4, 0, 0]} maxBarSize={50} />
+                                                                    <Bar dataKey={statsView} fill={DEPT_CONFIG[statsView]?.color ?? "#64748b"} radius={[4, 4, 0, 0]} maxBarSize={50} />
                                                                 )}
                                                             </BarChart>
                                                         </ResponsiveContainer>
@@ -1336,6 +1442,27 @@ export function AdminDashboard() {
                                                     </div>
                                                 </div>
 
+                                                {/* Una gráfica por campo de registro de la organización.
+                                                    Sustituye a las fijas por carrera o género: cada
+                                                    organización define los suyos y aquí se agrupa por ellos.
+                                                    Los campos que nadie rellenó no se pintan. */}
+                                                {(data.byField ?? []).map((f: { key: string; label: string; data: { name: string; value: number }[] }) => (
+                                                    <div key={f.key} className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+                                                        <div className="flex items-center justify-between mb-6">
+                                                            <h4 className="text-slate-900 dark:text-white font-bold text-lg">Distribución por {f.label}</h4>
+                                                        </div>
+                                                        <ResponsiveContainer width="100%" height={320}>
+                                                            <BarChart data={f.data} layout="vertical" margin={{ top: 0, right: 30, left: 30, bottom: 0 }}>
+                                                                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                                                                <XAxis type="number" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                                                                <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: "#475569", fontWeight: 500 }} axisLine={false} tickLine={false} width={100} interval={0} />
+                                                                <Tooltip cursor={cursorStyle} contentStyle={tooltipStyle} />
+                                                                <Bar dataKey="value" fill="#8b5cf6" radius={[0, 4, 4, 0]} maxBarSize={24} />
+                                                            </BarChart>
+                                                        </ResponsiveContainer>
+                                                    </div>
+                                                ))}
+
                                                 {/* Por Carrera — school only */}
                                                 {isSchool && (
                                                 <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
@@ -1363,6 +1490,7 @@ export function AdminDashboard() {
 
                                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                                 {/* Por Género */}
+                                                {hasRealData(data.genero) && (
                                                 <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
                                                     <div className="flex items-center justify-between mb-6">
                                                         <h4 className="text-slate-900 dark:text-white font-bold text-lg">Distribución por Género</h4>
@@ -1382,6 +1510,7 @@ export function AdminDashboard() {
                                                         </ResponsiveContainer>
                                                     </div>
                                                 </div>
+                                                )}
 
                                                 {/* Por Semestre — school only */}
                                                 {isSchool && (
@@ -1579,9 +1708,11 @@ export function AdminDashboard() {
                                     return (
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                                             {[
-                                                { label: "Psicología", icon: Brain, gradient: "from-blue-500 to-indigo-600" },
-                                                { label: "Tutorías", icon: GraduationCap, gradient: "from-emerald-500 to-teal-600" },
-                                                { label: "Nutrición", icon: Apple, gradient: "from-rose-500 to-orange-500" },
+                                                ...departments.map(d => ({
+                                                    label: d,
+                                                    icon: REPORT_CARD_STYLE[d]?.icon ?? FileText,
+                                                    gradient: REPORT_CARD_STYLE[d]?.gradient ?? "from-slate-500 to-slate-700",
+                                                })),
                                                 { label: "Reporte Global", icon: FileText, gradient: "from-violet-600 to-purple-700" },
                                             ].map(r => (
                                                 <div key={r.label} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 text-center hover:shadow-xl transition-all flex flex-col h-full">
@@ -1594,7 +1725,7 @@ export function AdminDashboard() {
                                                         {pdfPeriodName ? `Período: ${pdfPeriodName}` : "Todos los períodos"}
                                                         {" · "}{(r.label === "Reporte Global" ? pdfAppts : pdfAppts.filter(a => a.department === r.label)).length} citas
                                                     </p>
-                                                    <Btn onClick={() => generatePDFReport(r.label, pdfAppts, users, pdfPeriodName, isSchool, endUserLabel)} variant="outline" className="w-full">
+                                                    <Btn onClick={() => generatePDFReport(r.label, pdfAppts, users, pdfPeriodName, isSchool, endUserLabel, departments)} variant="outline" className="w-full">
                                                         <Download className="w-4 h-4 mr-2" /> PDF Export
                                                     </Btn>
                                                 </div>
@@ -1695,7 +1826,7 @@ export function AdminDashboard() {
                             <div>
                                 <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Departamento</label>
                                 <select value={editingSpec?.department || ""} onChange={e => setEditingSpec(p => p ? { ...p, department: e.target.value } : null)} className={inputCls}>
-                                    <option>Psicología</option><option>Tutorías</option><option>Nutrición</option>
+                                    {departments.map(d => <option key={d}>{d}</option>)}
                                 </select>
                             </div>
                         </div>
@@ -1880,6 +2011,62 @@ export function AdminDashboard() {
                             </div>
                         </div>
                     )}
+                </Modal>
+
+                {/* ── Baja de personas ─────────────────────────────────────────
+                    No es un borrado: la cuenta y su historial clínico se conservan
+                    por obligación legal de retención. El modal lo dice explícitamente
+                    para que el admin sepa qué está haciendo realmente. */}
+                <Modal
+                    open={!!(deactivatingSpec || deactivatingUser)}
+                    onClose={() => { setDeactivatingSpec(null); setDeactivatingUser(null); setDeactivateReason(""); }}
+                    title={deactivatingSpec ? "Dar de baja al especialista" : `Dar de baja al ${endUserLabel.toLowerCase()}`}
+                >
+                    <div className="space-y-5">
+                        <p className="text-slate-700 dark:text-slate-300 text-sm">
+                            Estás por dar de baja a <strong>{deactivatingSpec?.name ?? deactivatingUser?.name}</strong>.
+                        </p>
+
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 p-4 text-sm space-y-2">
+                            <p className="text-slate-700 dark:text-slate-200">
+                                <strong>Perderá el acceso de inmediato</strong> y sus citas pendientes o confirmadas
+                                se cancelarán avisando a la otra parte por correo.
+                            </p>
+                            <p className="text-slate-600 dark:text-slate-300">
+                                Su expediente clínico y su historial de citas <strong>se conservan</strong>: la ley
+                                obliga a resguardarlos. La cuenta puede reactivarse después.
+                            </p>
+                        </div>
+
+                        <div>
+                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">
+                                Motivo <span className="text-slate-400 font-normal">(se incluye en el aviso de cancelación)</span>
+                            </label>
+                            <input
+                                type="text"
+                                value={deactivateReason}
+                                onChange={e => setDeactivateReason(e.target.value)}
+                                placeholder="Ej. Cambio de adscripción"
+                                className={inputCls}
+                            />
+                        </div>
+
+                        <div className="flex gap-3">
+                            <Btn variant="ghost" className="flex-1"
+                                onClick={() => { setDeactivatingSpec(null); setDeactivatingUser(null); setDeactivateReason(""); }}>
+                                Cancelar
+                            </Btn>
+                            <Btn className="flex-1 bg-rose-600 hover:bg-rose-700 text-white border-0"
+                                onClick={() => {
+                                    const reason = deactivateReason.trim() || undefined;
+                                    if (deactivatingSpec) removeSpecialist(deactivatingSpec.id, reason);
+                                    else if (deactivatingUser) deleteUser(deactivatingUser.id, reason);
+                                    setDeactivatingSpec(null); setDeactivatingUser(null); setDeactivateReason("");
+                                }}>
+                                <XCircle className="w-4 h-4 mr-2" /> Dar de baja
+                            </Btn>
+                        </div>
+                    </div>
                 </Modal>
 
             </div>

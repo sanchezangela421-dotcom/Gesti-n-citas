@@ -21,11 +21,25 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
     });
 
     // Agregar por paciente: última sesión (más reciente, ya viene ordenado desc) y total
-    const byStudent = new Map<string, { studentId: string; studentName: string; lastSession: string; total: number }>();
+    const byStudent = new Map<string, { studentId: string; studentName: string; lastSession: string; total: number; inactive: boolean }>();
     for (const a of appts) {
       const cur = byStudent.get(a.studentId);
       if (cur) cur.total += 1;
-      else byStudent.set(a.studentId, { studentId: a.studentId, studentName: a.studentName, lastSession: a.date, total: 1 });
+      else byStudent.set(a.studentId, { studentId: a.studentId, studentName: a.studentName, lastSession: a.date, total: 1, inactive: false });
+    }
+
+    // Los pacientes dados de baja SIGUEN apareciendo: su expediente debe conservarse
+    // y consultarse (NOM-004). Solo se marcan como inactivos para que el
+    // especialista sepa que ya no puede agendar con ellos.
+    if (byStudent.size > 0) {
+      const deactivated = await prisma.user.findMany({
+        where: { id: { in: [...byStudent.keys()] }, NOT: { deletedAt: null } },
+        select: { id: true },
+      });
+      for (const { id } of deactivated) {
+        const entry = byStudent.get(id);
+        if (entry) entry.inactive = true;
+      }
     }
 
     res.json([...byStudent.values()]);
@@ -46,7 +60,9 @@ router.get('/:studentId/record', verifyToken as any, async (req: AuthRequest, re
     const studentId = req.params.studentId as string;
     const scope = orgScope(req.user);
 
-    // Gate: el especialista debe tener una relación de atención real con el paciente
+    // Gate: el especialista debe tener una relación de atención real con el paciente.
+    // No se exige que el paciente siga activo: el expediente de una persona dada de
+    // baja debe permanecer consultable durante todo el periodo de retención.
     const relation = await prisma.appointment.findFirst({
       where: { specialistId: spec.id, studentId, ...scope },
       select: { id: true },
@@ -54,6 +70,11 @@ router.get('/:studentId/record', verifyToken as any, async (req: AuthRequest, re
     if (!relation) {
       return res.status(403).json({ error: 'No tienes una relación de atención con este paciente.' });
     }
+
+    const patient = await prisma.user.findUnique({
+      where: { id: studentId },
+      select: { deletedAt: true },
+    });
 
     // Timeline: historial del paciente DENTRO del departamento del especialista
     const appointments = await prisma.appointment.findMany({
@@ -96,7 +117,7 @@ router.get('/:studentId/record', verifyToken as any, async (req: AuthRequest, re
       ipAddress: getClientIp(req),
     });
 
-    res.json({ studentId, department: spec.department, timeline });
+    res.json({ studentId, department: spec.department, inactive: !!patient?.deletedAt, timeline });
   } catch (error) {
     console.error('Error fetching patient record:', error);
     res.status(500).json({ error: 'Error interno del servidor' });

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Megaphone, CheckCircle2, CalendarDays, Users, Pencil, Trash2, Image as ImageIcon, Plus } from "lucide-react";
 import { useStore } from "../../../context/StoreContext";
+import { useDepartments } from "../../hooks/useDepartments";
 import { Btn, Modal, EmptyState, inputCls } from "../../components/ui";
 import { API, authHeaders, getUploadUrl } from "../../../lib/api";
 import type { AppEvent, EventRegistrant } from "../../../types";
@@ -9,6 +10,9 @@ import type { AppEvent, EventRegistrant } from "../../../types";
 // Pestaña "Publicar Evento" del admin — aislada para que el formulario, la lista
 // de inscritos y la edición no re-rendericen el resto del dashboard.
 export function AdminEventsTab({ endUserTabLabel }: { endUserTabLabel: string }) {
+    // Solo los departamentos que la organizacion tiene contratados
+    const departments = useDepartments();
+
     const { addEvent, updateEvent, deleteEvent, events } = useStore();
 
     const [eventsDeptTab, setEventsDeptTab] = useState("Todos");
@@ -16,7 +20,7 @@ export function AdminEventsTab({ endUserTabLabel }: { endUserTabLabel: string })
     // Event form
     const [evTitle, setEvTitle] = useState("");
     const [evDesc, setEvDesc] = useState("");
-    const [evDept, setEvDept] = useState("Psicología");
+    const [evDept, setEvDept] = useState(departments[0] ?? "Psicología");
     const [evDate, setEvDate] = useState("");
     const [evTime, setEvTime] = useState("");
     const [evType, setEvType] = useState("taller");
@@ -122,7 +126,7 @@ export function AdminEventsTab({ endUserTabLabel }: { endUserTabLabel: string })
                             <div>
                                 <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Departamento organizador</label>
                                 <select value={evDept} onChange={e => setEvDept(e.target.value)} className={inputCls}>
-                                    <option>Psicología</option><option>Tutorías</option><option>Nutrición</option><option value="General">General (Todas las áreas)</option>
+                                    {departments.map(d => <option key={d}>{d}</option>)}<option value="General">General (Todas las áreas)</option>
                                 </select>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
@@ -171,7 +175,7 @@ export function AdminEventsTab({ endUserTabLabel }: { endUserTabLabel: string })
                         </h3>
                         {/* Dept filter tabs */}
                         <div className="flex gap-2 mb-4 flex-wrap">
-                            {["Todos", "Psicología", "Tutorías", "Nutrición"].map(d => (
+                            {["Todos", ...departments].map(d => (
                                 <button key={d} onClick={() => setEventsDeptTab(d)}
                                     className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all cursor-pointer ${eventsDeptTab === d ? "bg-violet-600 text-white border-violet-600" : "bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:border-violet-400"}`}>
                                     {d}
@@ -284,7 +288,7 @@ export function AdminEventsTab({ endUserTabLabel }: { endUserTabLabel: string })
                     <div>
                         <label className="block mb-1 text-slate-700 font-bold text-xs uppercase">Departamento</label>
                         <select value={editEvDept} onChange={e => setEditEvDept(e.target.value)} className={inputCls}>
-                            <option>Psicología</option><option>Tutorías</option><option>Nutrición</option><option value="General">General</option>
+                            {departments.map(d => <option key={d}>{d}</option>)}<option value="General">General</option>
                         </select>
                     </div>
                     <div className="grid grid-cols-2 gap-4">

@@ -53,6 +53,25 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_quality_check == true }}
     permissions:
       contents: read
+
+    # Las pruebas corren contra un Postgres real: lo que hay que garantizar
+    # (las FKs que protegen el expediente clínico, el aislamiento entre
+    # organizaciones) vive en la base de datos y un mock lo daría por bueno.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: gestion_citas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -74,13 +93,43 @@ jobs:
         working-directory: server
         run: pnpm install --frozen-lockfile
 
+      # El cliente de Prisma se genera a partir del schema y NO está versionado:
+      # sin este paso, `@prisma/client` no exporta PrismaClient, UserRole ni
+      # Prisma, y el typecheck cae con decenas de errores en cascada.
+      #
+      # Va aquí y no se delega al postinstall a propósito: pnpm solo ejecuta
+      # scripts de build de dependencias aprobadas, y con la store cacheada
+      # puede no llegar a correr. Un artefacto del que depende toda la
+      # compilación no debe quedar a merced de un efecto secundario.
+      - name: Generar cliente Prisma
+        working-directory: server
+        run: pnpm exec prisma generate
+        env:
+          DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/gestion_citas"
+
+      # Los reportes se siguen generando para el resumen, pero el paso ya NO
+      # termina en "|| true": antes ninguna de estas puertas podía poner el
+      # pipeline en rojo, así que no protegían de nada.
       - name: Lint
         working-directory: server
-        run: pnpm exec eslint src/ --format json --output-file eslint-report.json || true
+        run: |
+          pnpm exec eslint src/ --format json --output-file eslint-report.json || true
+          pnpm exec eslint src/
 
-      - name: Auditar Dependencias
+      - name: Typecheck
+        working-directory: server
+        run: pnpm run typecheck
+
+      # Bloquea solo por dependencias que llegan a producción. Las de desarrollo
+      # se reportan pero no rompen el build: sus avisos aparecen y desaparecen
+      # constantemente y bloquearían PRs sin relación con el cambio.
+      - name: Auditar Dependencias (informe completo)
         working-directory: server
         run: pnpm audit --audit-level=high --json > npm-audit.json 2>&1 || true
+
+      - name: Auditar Dependencias de producción (bloqueante)
+        working-directory: server
+        run: pnpm audit --prod --audit-level=high
 
       - name: Build
         working-directory: server
@@ -89,6 +138,13 @@ jobs:
           DATABASE_URL: "postgres://dummy:dummy@localhost:5432/dummy"
           JWT_SECRET: "ci_test_secret_key_only"
           SESSION_SECRET: "ci_test_session_secret_key_only"
+
+      - name: Pruebas
+        working-directory: server
+        run: pnpm test
+        env:
+          DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/gestion_citas"
+          TEST_DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/gestion_citas_test"
 
       - name: Subir Reportes
         if: always()
@@ -131,11 +187,23 @@ jobs:
 
       - name: Lint
         working-directory: project_final
-        run: pnpm exec eslint src/ --format json --output-file eslint-report.json || true
+        run: |
+          pnpm exec eslint src/ --format json --output-file eslint-report.json || true
+          pnpm exec eslint src/
 
-      - name: Auditar Dependencias
+      # `vite build` NO comprueba tipos: sin este paso, un error de tipos llegaba
+      # a producción con el pipeline en verde.
+      - name: Typecheck
+        working-directory: project_final
+        run: pnpm run typecheck
+
+      - name: Auditar Dependencias (informe completo)
         working-directory: project_final
         run: pnpm audit --audit-level=high --json > npm-audit.json 2>&1 || true
+
+      - name: Auditar Dependencias de producción (bloqueante)
+        working-directory: project_final
+        run: pnpm audit --prod --audit-level=high
 
       - name: Build
         working-directory: project_final
