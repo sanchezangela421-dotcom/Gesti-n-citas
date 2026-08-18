@@ -13,14 +13,33 @@ export interface ScheduleSlot {
   specificDate?: string;
 }
 
+/**
+ * Departamento del catálogo de una organización.
+ *
+ * `icon` es el NOMBRE de un icono de lucide, no un componente: el servidor no
+ * sabe de JSX. Lo resuelve `resolveDeptStyle()` con respaldo genérico, para que
+ * un icono que el frontend no conozca no deje la tarjeta en blanco.
+ */
+export interface OrgDepartment {
+  id: string;
+  name: string;
+  color: string;
+  icon: string;
+  /** Si cerrar una cita aquí obliga a dejar nota (atención clínica). */
+  requiresNote: boolean;
+  order: number;
+}
+
 export interface Organization {
   id: string;
   name: string;
   slug: string;
   type: string;
   userRoleLabel?: string;
-  /** Departamentos contratados. El catálogo es fijo; esto dice cuáles tiene activos. */
+  /** Nombres de los contratados. Derivado de `orgDepartments`; se conserva por compatibilidad. */
   departments?: string[];
+  /** Catálogo completo con presentación y régimen de nota. */
+  orgDepartments?: OrgDepartment[];
   logoUrl?: string | null;
 }
 

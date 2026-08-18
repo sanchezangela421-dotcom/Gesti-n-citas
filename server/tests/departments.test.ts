@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../src/db';
 import { startTestServer, stopTestServer, api, tokenFor, waitFor } from './helpers/api';
-import { createOrg, createUser, createSpecialist, createAppointment, isoDaysFromNow } from './helpers/factories';
+import { createOrg, createUser, createSpecialist, createAppointment, isoDaysFromNow, setContractedDepartments } from './helpers/factories';
 
 /**
  * Departamentos contratados por organización.
@@ -18,10 +18,7 @@ afterAll(async () => { await stopTestServer(); });
 /** Organización que solo contrató Psicología. */
 async function orgWithoutNutrition() {
   const org = await createOrg();
-  await prisma.organization.update({
-    where: { id: org.id },
-    data: { departments: ['Psicología', 'Tutorías'] },
-  });
+  await setContractedDepartments(org.id, ['Psicología', 'Tutorías']);
   return org;
 }
 
@@ -127,10 +124,7 @@ describe('las citas ya agendadas se respetan', () => {
     const pendiente = await createAppointment({ student, specialist, organizationId: org.id, status: 'Pendiente', time: '09:00' });
     const confirmada = await createAppointment({ student, specialist, organizationId: org.id, status: 'Confirmada', time: '10:00' });
 
-    await prisma.organization.update({
-      where: { id: org.id },
-      data: { departments: ['Psicología', 'Tutorías'] },
-    });
+    await setContractedDepartments(org.id, ['Psicología', 'Tutorías']);
 
     const [p, c] = await Promise.all([
       prisma.appointment.findUnique({ where: { id: pendiente.id } }),
@@ -147,10 +141,7 @@ describe('las citas ya agendadas se respetan', () => {
     const appt = await createAppointment({ student, specialist, organizationId: org.id, status: 'Confirmada' });
     const pasada = await createAppointment({ student, specialist, organizationId: org.id, status: 'Completada', time: '08:00' });
 
-    await prisma.organization.update({
-      where: { id: org.id },
-      data: { departments: ['Psicología'] },
-    });
+    await setContractedDepartments(org.id, ['Psicología']);
 
     const res = await api('GET', '/api/appointments', { token: tokenFor(student) });
     const ids = res.body.map((a: any) => a.id);
@@ -164,15 +155,12 @@ describe('las citas ya agendadas se respetan', () => {
     const { user: specUser, specialist } = await createSpecialist({ organizationId: org.id, department: 'Nutrición' });
     const appt = await createAppointment({ student, specialist, organizationId: org.id, status: 'Confirmada' });
 
-    await prisma.organization.update({
-      where: { id: org.id },
-      data: { departments: ['Psicología'] },
-    });
+    await setContractedDepartments(org.id, ['Psicología']);
 
     expect((await api('GET', '/api/auth/me', { token: tokenFor(specUser) })).status).toBe(200);
 
     const res = await api('PATCH', `/api/appointments/${appt.id}/status`, {
-      token: tokenFor(specUser), body: { status: 'Completada' },
+      token: tokenFor(specUser), body: { status: 'Completada', notes: 'Sesión concluida.' },
     });
     expect(res.status).toBe(200);
   });

@@ -10,8 +10,8 @@ generator client {
 // ── Enums ──────────────────────────────────────────────────────────────────────
 
 enum UserRole {
-  alumno      // usuario de org tipo escuela
-  usuario     // usuario de org tipo empresa u hospital
+  alumno // usuario de org tipo escuela
+  usuario // usuario de org tipo empresa u hospital
   especialista
   admin
   superadmin
@@ -23,7 +23,7 @@ model Organization {
   id            String   @id @default(uuid())
   name          String
   slug          String   @unique
-  type          String   // "school" | "hospital" | "company"
+  type          String // "school" | "hospital" | "company"
   plan          String   @default("free")
   active        Boolean  @default(true)
   userRoleLabel String   @default("Usuario") // "Alumno" | "Paciente" | "Empleado"
@@ -47,6 +47,39 @@ model Organization {
   clinicalNotes      ClinicalNote[]
   eventRegistrations EventRegistration[]
   locations          OrgLocation[]
+  orgDepartments     OrgDepartment[]
+}
+
+// Departamento de atención de una organización.
+//
+// Sustituye al catálogo FIJO de tres que vivía en lib/departments.ts: cada
+// organización define los suyos. Los tres originales siguen existiendo, pero
+// ahora como filas sembradas por migración, no como constante.
+//
+// El NOMBRE es la clave real del sistema: viaja denormalizado en Appointment,
+// ClinicalNote, Specialist, AppEvent y Resource, y sobre él se apoya la regla de
+// continuidad del expediente. Por eso @@unique por organización, y por eso
+// renombrar solo se permite mientras el departamento no tenga citas (regla de
+// aplicación, no de base: la BD no puede expresarla).
+model OrgDepartment {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  color          String       @default("#64748b") // hex, para gráficas y badges
+  icon           String       @default("Stethoscope") // NOMBRE de icono lucide, nunca JSX
+  // ¿Cerrar una cita aquí obliga a dejar nota? Reemplaza a CLINICAL_DEPARTMENTS:
+  // Tutorías es acompañamiento académico y la NOM-004 no le aplica.
+  requiresNote   Boolean      @default(false)
+  // Contratado. Retirar un departamento NO cancela lo agendado: solo impide
+  // reservas nuevas, igual que hacía Organization.departments.
+  active         Boolean      @default(true)
+  order          Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, name])
+  @@index([organizationId, active])
 }
 
 // Campos personalizados que cada org pide al registrarse
@@ -54,12 +87,12 @@ model RegistrationField {
   id             String       @id @default(uuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  key            String       // identificador interno: "matricula", "numero_empleado"
-  label          String       // etiqueta visible: "Número de Control", "No. Empleado"
-  type           String       // "text" | "number" | "select" | "date" | "radio"
+  key            String // identificador interno: "matricula", "numero_empleado"
+  label          String // etiqueta visible: "Número de Control", "No. Empleado"
+  type           String // "text" | "number" | "select" | "date" | "radio"
   required       Boolean      @default(false)
   order          Int          @default(0)
-  options        Json?        // para "select" y "radio": ["ISC", "IEC", ...]
+  options        Json? // para "select" y "radio": ["ISC", "IEC", ...]
   placeholder    String?
   createdAt      DateTime     @default(now())
 
@@ -86,8 +119,8 @@ model AuditLog {
 // ── Business models ────────────────────────────────────────────────────────────
 
 model User {
-  id                          String    @id @default(uuid())
-  email                       String    @unique
+  id                          String        @id @default(uuid())
+  email                       String        @unique
   password                    String
   name                        String
   role                        UserRole
@@ -98,24 +131,24 @@ model User {
   genero                      String?
   department                  String?
   avatarUrl                   String?
-  metadata                    Json?     // campos dinámicos definidos por la org (RegistrationField)
-  emailVerified               Boolean   @default(false)
+  metadata                    Json? // campos dinámicos definidos por la org (RegistrationField)
+  emailVerified               Boolean       @default(false)
   verificationToken           String?
   verificationTokenExpiresAt  DateTime?
   resetPasswordToken          String?
   resetPasswordTokenExpiresAt DateTime?
-  tokenVersion                Int       @default(0) // se incrementa para invalidar JWTs emitidos previamente
+  tokenVersion                Int           @default(0) // se incrementa para invalidar JWTs emitidos previamente
   deletedAt                   DateTime? // baja lógica: la fila NUNCA se borra (retención NOM-004 del expediente)
   organizationId              String?
   organization                Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  createdAt                   DateTime  @default(now())
-  updatedAt                   DateTime  @updatedAt
+  createdAt                   DateTime      @default(now())
+  updatedAt                   DateTime      @updatedAt
 
   specialist          Specialist?
-  studentAppointments Appointment[]  @relation("StudentAppointments")
+  studentAppointments Appointment[]       @relation("StudentAppointments")
   notifications       Notification[]
-  clinicalNotes       ClinicalNote[] @relation("StudentClinicalNotes")
-  createdEvents       AppEvent[]     @relation("CreatedEvents")
+  clinicalNotes       ClinicalNote[]      @relation("StudentClinicalNotes")
+  createdEvents       AppEvent[]          @relation("CreatedEvents")
   eventRegistrations  EventRegistration[]
 
   @@index([organizationId, role])
@@ -132,13 +165,13 @@ model Specialist {
   active         Boolean       @default(true)
   shift          String?
   meetingUrl     String?
-  locationId     String?       // sede asignada (del catálogo de la organización)
+  locationId     String? // sede asignada (del catálogo de la organización)
   location       OrgLocation?  @relation(fields: [locationId], references: [id], onDelete: SetNull)
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
-  deletedAt      DateTime?     // soft-delete: el expediente clínico sobrevive (retención NOM-004)
+  deletedAt      DateTime? // soft-delete: el expediente clínico sobrevive (retención NOM-004)
 
   schedules     ScheduleSlot[]
   appointments  Appointment[]  @relation("SpecialistAppointments")
@@ -156,8 +189,8 @@ model ScheduleSlot {
   startTime    String
   endTime      String
   available    Boolean    @default(true)
-  week         Int?       // LEGACY, siempre null: los slots "de semana" se anclan con specificDate (migración 20260719000000)
-  specificDate String?    // fecha concreta "YYYY-MM-DD"; null = recurrente semanal
+  week         Int? // LEGACY, siempre null: los slots "de semana" se anclan con specificDate (migración 20260719000000)
+  specificDate String? // fecha concreta "YYYY-MM-DD"; null = recurrente semanal
 }
 
 model ReportPeriod {
@@ -179,36 +212,36 @@ model ReportPeriod {
 }
 
 model Appointment {
-  id             String        @id @default(uuid())
+  id                 String        @id @default(uuid())
   // Restrict en ambas partes: la cita es el vínculo del expediente clínico, así que
   // borrar al alumno o al especialista NO puede llevarse el historial por cascada.
   // Las bajas son lógicas (User.deletedAt / Specialist.deletedAt), nunca físicas.
-  studentId      String
-  student        User          @relation("StudentAppointments", fields: [studentId], references: [id], onDelete: Restrict)
-  studentName    String
-  specialistId   String
-  specialist     Specialist    @relation("SpecialistAppointments", fields: [specialistId], references: [id], onDelete: Restrict)
-  specialistName String
-  department     String
-  date           String
-  time           String
-  status         String        @default("Pendiente")
-  modality       String
-  motivo         String
-  cancellationReason String?   // motivo de cancelación (NO confidencial; visible al alumno)
-  meetingUrl     String?
-  location       String?       // lugar de la cita presencial (snapshot al confirmar)
-  isFollowUp     Boolean       @default(false)
-  parentId       String?
-  parent         Appointment?  @relation("AppointmentFollowUps", fields: [parentId], references: [id], onDelete: SetNull)
-  followUps      Appointment[] @relation("AppointmentFollowUps")
-  clinicalNote   ClinicalNote?
-  periodId       String?
-  period         ReportPeriod? @relation(fields: [periodId], references: [id], onDelete: SetNull)
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  studentId          String
+  student            User          @relation("StudentAppointments", fields: [studentId], references: [id], onDelete: Restrict)
+  studentName        String
+  specialistId       String
+  specialist         Specialist    @relation("SpecialistAppointments", fields: [specialistId], references: [id], onDelete: Restrict)
+  specialistName     String
+  department         String
+  date               String
+  time               String
+  status             String        @default("Pendiente")
+  modality           String
+  motivo             String
+  cancellationReason String? // motivo de cancelación (NO confidencial; visible al alumno)
+  meetingUrl         String?
+  location           String? // lugar de la cita presencial (snapshot al confirmar)
+  isFollowUp         Boolean       @default(false)
+  parentId           String?
+  parent             Appointment?  @relation("AppointmentFollowUps", fields: [parentId], references: [id], onDelete: SetNull)
+  followUps          Appointment[] @relation("AppointmentFollowUps")
+  clinicalNote       ClinicalNote?
+  periodId           String?
+  period             ReportPeriod? @relation(fields: [periodId], references: [id], onDelete: SetNull)
+  organizationId     String?
+  organization       Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   @@index([organizationId, status])
   @@index([organizationId, studentId])
@@ -233,7 +266,7 @@ model AppEvent {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  registrations   EventRegistration[]
+  registrations EventRegistration[]
 
   @@index([organizationId, date])
   @@index([organizationId, type])
@@ -260,13 +293,13 @@ model OrgLocation {
   id             String        @id @default(uuid())
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  name           String       // "Campus Centro", "Edificio A — Consultorio 3"
-  address        String?      // dirección o referencia completa
-  active         Boolean      @default(true)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  name           String // "Campus Centro", "Edificio A — Consultorio 3"
+  address        String? // dirección o referencia completa
+  active         Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
-  specialists    Specialist[]
+  specialists Specialist[]
 
   @@index([organizationId, active])
 }
@@ -320,21 +353,21 @@ model ClinicalNote {
   // línea de defensa: aunque alguien ejecute un DELETE manual, la BD lo rechaza.
   appointmentId  String        @unique
   appointment    Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
-  specialistId   String        // autor — Specialist.id
+  specialistId   String // autor — Specialist.id
   specialist     Specialist    @relation(fields: [specialistId], references: [id], onDelete: Restrict)
-  studentId      String        // paciente — denormalizado para el expediente
+  studentId      String // paciente — denormalizado para el expediente
   student        User          @relation("StudentClinicalNotes", fields: [studentId], references: [id], onDelete: Restrict)
-  department     String        // depto de atención — denormalizado para continuidad por depto
-  organizationId String?       // aislamiento por organización
+  department     String // depto de atención — denormalizado para continuidad por depto
+  organizationId String? // aislamiento por organización
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  body           String        // contenido confidencial
+  body           String // contenido confidencial
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  revisions      ClinicalNoteRevision[]
+  revisions ClinicalNoteRevision[]
 
   @@index([organizationId, department, studentId]) // consulta de continuidad por depto
-  @@index([specialistId, studentId])               // notas propias del especialista
+  @@index([specialistId, studentId]) // notas propias del especialista
   @@index([studentId])
 }
 
@@ -344,8 +377,8 @@ model ClinicalNoteRevision {
   id                   String       @id @default(uuid())
   noteId               String
   note                 ClinicalNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
-  body                 String       // snapshot del contenido anterior
-  editedBySpecialistId String       // quién editó (Specialist.id) — escalar, registro histórico
+  body                 String // snapshot del contenido anterior
+  editedBySpecialistId String // quién editó (Specialist.id) — escalar, registro histórico
   createdAt            DateTime     @default(now())
 
   @@index([noteId, createdAt])

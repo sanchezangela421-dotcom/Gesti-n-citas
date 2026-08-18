@@ -1,5 +1,6 @@
 import { PrismaClient, UserRole, Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { SEED_DEPARTMENTS } from '../src/lib/departments';
 
 const prisma = new PrismaClient();
 const HASH_ROUNDS = 10;
@@ -24,6 +25,23 @@ async function main() {
       userRoleLabel: 'Alumno',
     },
   });
+
+  // Catálogo de departamentos de la organización. Es upsert para poder volver a
+  // sembrar sin pisar los colores o el régimen de nota que alguien haya ajustado.
+  for (const dept of SEED_DEPARTMENTS) {
+    await prisma.orgDepartment.upsert({
+      where: { organizationId_name: { organizationId: org.id, name: dept.name } },
+      update: {},
+      create: {
+        organizationId: org.id,
+        name: dept.name,
+        color: dept.color,
+        icon: dept.icon,
+        requiresNote: dept.requiresNote,
+        order: dept.order,
+      },
+    });
+  }
   console.log(`✔ Organization: ${org.name} (${org.id})`);
 
   // ── 2. Registration fields para TECNL ────────────────────────────────────────

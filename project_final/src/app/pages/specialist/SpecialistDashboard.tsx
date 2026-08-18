@@ -10,7 +10,7 @@ import { useAuth } from "../../../context/AuthContext";
 import { useStore } from "../../../context/StoreContext";
 import { AppShell } from "../../components/layout/AppShell";
 import { Btn, StatCard, Modal, MiniCalendar, StatusBadge, inputCls, EmptyState, Reveal } from "../../components/ui";
-import { DAYS_FULL } from "../../../constants";
+import { DAYS_FULL, MISSED_STATUS } from "../../../constants";
 import { useReschedule, useActionModal } from "../../hooks";
 import { localISODate } from "../../../utils/date";
 import { API, authHeaders } from "../../../lib/api";
@@ -215,7 +215,7 @@ export function SpecialistDashboard() {
     // Historial: citas raíz (Completada/Cancelada sin parentId), orden desc por fecha.
     const historialAppts = useMemo(
         () => allAppts
-            .filter(a => (a.status === "Completada" || a.status === "Cancelada" || a.status === "No asistió") && !a.parentId)
+            .filter(a => (a.status === "Completada" || a.status === "Cancelada" || a.status === MISSED_STATUS) && !a.parentId)
             .sort((a, b) => b.date.localeCompare(a.date)),
         [allAppts]
     );
@@ -345,6 +345,14 @@ export function SpecialistDashboard() {
 
     const endUserLabel = user.organization?.userRoleLabel ?? "Usuario";
     const endUserTabLabel = `${endUserLabel}s`;
+    // Minúscula para usarla a mitad de frase ("se mostrará al alumno/paciente/empleado").
+    const endUserLower = endUserLabel.toLowerCase();
+
+    // Tutorias no es atencion clinica: la NOM-004 no le aplica, asi que ahi la
+    // anotacion es opcional y se llama distinto. En Psicologia y Nutricion la
+    // nota es obligatoria para poder cerrar la sesion.
+    const isClinicalDept = dept !== "Tutorías";
+    const noteLabel = isClinicalDept ? "Nota clínica" : "Observaciones";
 
     const statsData = [
         { label: "Pendientes", value: pendientes.length, icon: Clock, gradient: "from-amber-500 to-amber-600" },
@@ -628,7 +636,7 @@ export function SpecialistDashboard() {
                                 <MapPin className="w-4 h-4 text-emerald-600" />
                                 <h4 className="font-bold text-slate-900 dark:text-white text-sm">Sede de atención presencial <span className="font-normal text-slate-400">(opcional)</span></h4>
                             </div>
-                            <p className="text-slate-500 text-xs mb-3">Elige tu sede del catálogo de la organización. Se mostrará al alumno al confirmar citas presenciales.</p>
+                            <p className="text-slate-500 text-xs mb-3">Elige tu sede del catálogo de la organización. Se mostrará al {endUserLower} al confirmar citas presenciales.</p>
                             {orgLocations.length === 0 ? (
                                 <p className="text-slate-400 text-xs italic">Tu organización aún no tiene sedes registradas. Pide al administrador que las agregue.</p>
                             ) : (
@@ -876,7 +884,7 @@ export function SpecialistDashboard() {
                     <div className="space-y-4">
                         <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl flex items-start gap-2">
                             <Video className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
-                            <p className="text-blue-800 text-sm">Esta es una cita virtual. El alumno recibirá el enlace de videollamada junto con la confirmación.</p>
+                            <p className="text-blue-800 text-sm">Esta es una cita virtual. El {endUserLower} recibirá el enlace de videollamada junto con la confirmación.</p>
                         </div>
                         <div>
                             <label className="block text-sm font-bold text-slate-900 mb-2">Enlace de videollamada</label>
@@ -909,7 +917,7 @@ export function SpecialistDashboard() {
                     <div className="space-y-4">
                         <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl flex items-start gap-2">
                             <MapPin className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
-                            <p className="text-emerald-800 text-sm">El alumno verá la sede que elijas junto con la confirmación.</p>
+                            <p className="text-emerald-800 text-sm">El {endUserLower} verá la sede que elijas junto con la confirmación.</p>
                         </div>
                         <div>
                             <label className="block text-sm font-bold text-slate-900 mb-2">Sede de atención</label>
@@ -939,7 +947,7 @@ export function SpecialistDashboard() {
                     open={!!action.appt && !!action.status && action.status !== "Confirmada"}
                     onClose={action.close}
                     title={action.status === "Completada" ? "Finalizar Cita"
-                        : action.status === "No asistió" ? "Registrar inasistencia"
+                        : action.status === MISSED_STATUS ? "Registrar inasistencia"
                         : "Cancelar Cita"}
                     subtitle={action.appt ? `${action.appt.studentName} — ${action.appt.date} a las ${action.appt.time}` : ""}
                     maxWidth="max-w-md"
@@ -951,13 +959,16 @@ export function SpecialistDashboard() {
                                 <div className="flex items-start gap-3 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
                                     <Lock className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
                                     <p className="text-slate-500 text-xs leading-relaxed">
-                                        Estas anotaciones son <span className="font-bold text-slate-700">confidenciales</span> — solo tú puedes verlas. No son visibles para el alumno.
+                                        Estas anotaciones son <span className="font-bold text-slate-700">confidenciales</span> — solo tú puedes verlas. No son visibles para el {endUserLower}.
                                     </p>
                                 </div>
                                 <div>
                                     <label className="block mb-2 text-slate-900 font-bold text-sm flex items-center gap-2">
                                         <ClipboardList className="w-4 h-4 text-indigo-600" />
-                                        Anotaciones clínicas (opcional)
+                                        {noteLabel}
+                                        {isClinicalDept
+                                            ? <span className="text-rose-500">*</span>
+                                            : <span className="font-normal text-slate-400">(opcional)</span>}
                                     </label>
                                     <textarea
                                         value={action.notes}
@@ -968,7 +979,7 @@ export function SpecialistDashboard() {
                                     />
                                 </div>
                             </>
-                        ) : action.status === "No asistió" ? (
+                        ) : action.status === MISSED_STATUS ? (
                             <div className="flex items-start gap-3 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
                                 <Info className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
                                 <p className="text-slate-600 text-xs leading-relaxed">
@@ -993,12 +1004,16 @@ export function SpecialistDashboard() {
                             <Btn
                                 onClick={() => {
                                     if (action.status === "Cancelada" && !action.notes.trim()) { toast.error("Indica el motivo de la cancelación."); return; }
+                                    if (action.status === "Completada" && isClinicalDept && !action.notes.trim()) {
+                                        toast.error("La nota clínica es obligatoria para cerrar la sesión.");
+                                        return;
+                                    }
                                     action.confirm();
                                 }}
                                 className={`flex-1 text-white border-0 shadow-lg ${action.status === "Cancelada" ? "bg-rose-600 hover:bg-rose-700" : "bg-indigo-600 hover:bg-indigo-700"}`}
                             >
                                 {action.status === "Completada" ? "Finalizar Cita"
-                                    : action.status === "No asistió" ? "Registrar inasistencia"
+                                    : action.status === MISSED_STATUS ? "Registrar inasistencia"
                                     : "Confirmar Cancelación"}
                             </Btn>
                         </div>
@@ -1006,11 +1021,11 @@ export function SpecialistDashboard() {
                 </Modal>
 
                 {/* Reschedule Modal */}
-                <Modal open={resch.show} onClose={() => resch.setShow(false)} title="Reagendar Cita" subtitle="Propón una nueva fecha y hora para el alumno">
+                <Modal open={resch.show} onClose={() => resch.setShow(false)} title="Reagendar Cita" subtitle={`Propón una nueva fecha y hora para el ${endUserLower}`}>
                     <div className="space-y-6">
                         <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl flex items-start gap-3">
                             <Info className="w-5 h-5 text-blue-600 mt-0.5" />
-                            <p className="text-sm text-blue-700">El alumno recibirá una notificación con el nuevo horario.</p>
+                            <p className="text-sm text-blue-700">El {endUserLower} recibirá una notificación con el nuevo horario.</p>
                         </div>
                         <div>
                             <label className="block text-slate-700 font-bold text-sm mb-2">Modalidad</label>
@@ -1213,7 +1228,7 @@ function AppointmentCard({
                         {/* Solo tras la hora de la cita: es la otra forma de cerrarla
                             cuando el usuario no se presentó. */}
                         {isTimePast && (
-                            <Btn size="sm" variant="ghost" onClick={() => onAction(appt, "No asistió")}>
+                            <Btn size="sm" variant="ghost" onClick={() => onAction(appt, MISSED_STATUS)}>
                                 <UserX className="w-3.5 h-3.5" /> No asistió
                             </Btn>
                         )}

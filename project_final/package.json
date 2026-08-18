@@ -84,6 +84,9 @@
       "@tailwindcss/oxide",
       "esbuild",
       "core-js"
-    ]
+    ],
+    "overrides": {
+      "nanoid": "^3.3.18"
+    }
   }
 }

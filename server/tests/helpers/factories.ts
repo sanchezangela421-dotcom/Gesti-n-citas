@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../../src/db';
+import { SEED_DEPARTMENTS } from '../../src/lib/departments';
 
 /**
  * Constructores de datos de prueba.
@@ -16,13 +17,50 @@ export const TEST_PASSWORD = 'Test1234';
 
 export async function createOrg(overrides: Partial<{ name: string; slug: string; type: string; active: boolean }> = {}) {
   const id = uniq();
-  return prisma.organization.create({
+  const org = await prisma.organization.create({
     data: {
       name: overrides.name ?? `Org ${id}`,
       slug: overrides.slug ?? `org-${id}`,
       type: overrides.type ?? 'school',
       active: overrides.active ?? true,
     },
+  });
+
+  // Igual que al crearla desde el panel: nace con su catálogo de departamentos.
+  await prisma.orgDepartment.createMany({
+    data: SEED_DEPARTMENTS.map(d => ({
+      organizationId: org.id,
+      name: d.name,
+      color: d.color,
+      icon: d.icon,
+      requiresNote: d.requiresNote,
+      order: d.order,
+    })),
+  });
+
+  return org;
+}
+
+/**
+ * Deja contratados exactamente esos departamentos.
+ *
+ * Los tests fijaban `Organization.departments` a mano; esa columna es ahora
+ * derivada, así que hay que activar y desactivar las filas del catálogo, que es
+ * lo que hace el panel. Mantiene la columna sincronizada para no dejar a
+ * `/api/auth/me` devolviendo una lista desfasada.
+ */
+export async function setContractedDepartments(organizationId: string, names: string[]) {
+  await prisma.orgDepartment.updateMany({
+    where: { organizationId, name: { in: names } },
+    data: { active: true },
+  });
+  await prisma.orgDepartment.updateMany({
+    where: { organizationId, name: { notIn: names } },
+    data: { active: false },
+  });
+  await prisma.organization.update({
+    where: { id: organizationId },
+    data: { departments: names },
   });
 }
 

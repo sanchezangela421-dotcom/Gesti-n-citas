@@ -11,9 +11,9 @@ import { useStore } from "../../../context/StoreContext";
 import { API_BASE, API, authHeaders } from "../../../lib/api";
 import { AppShell } from "../../components/layout/AppShell";
 import { Btn, StatCard, TabNav, Modal, MiniCalendar, StatusBadge, Avatar, EmptyState, Stagger, StaggerItem } from "../../components/ui";
-import { DEPT_CONFIG, DEPT_REASONS } from "../../../constants";
+import { getDeptReasons, MISSED_STATUS } from "../../../constants";
 import { useAppointmentWizard, useReschedule, useCancelAppointment } from "../../hooks";
-import { useDepartments } from "../../hooks/useDepartments";
+import { useDepartments, useDepartmentCatalog } from "../../hooks/useDepartments";
 import type { AppEvent } from "../../../types";
 
 function getVideoEmbedUrl(url: string): string | null {
@@ -79,6 +79,7 @@ const DEPARTMENT_STYLE: Record<string, { icon: typeof Brain; color: string }> = 
 export function StudentDashboard() {
     const { user } = useAuth();
     const departments = useDepartments();
+    const deptCatalog = useDepartmentCatalog();
     const { getAppointments, events, resources, activePeriod } = useStore();
 
     // ── UI state ──────────────────────────────────────────
@@ -146,7 +147,7 @@ export function StudentDashboard() {
         [appointments, activePeriod]
     );
     const historial = useMemo(
-        () => appointments.filter(a => a.status === "Completada" || a.status === "Cancelada" || a.status === "No asistió"),
+        () => appointments.filter(a => a.status === "Completada" || a.status === "Cancelada" || a.status === MISSED_STATUS),
         [appointments]
     );
 
@@ -690,20 +691,36 @@ export function StudentDashboard() {
                                 </div>
                             ))}
 
-                            {/* Reason */}
-                            {wizard.selDept && DEPT_REASONS[wizard.selDept] && (
-                                <div>
-                                    <p className="font-bold text-slate-900 mb-2">Motivo de la cita</p>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {DEPT_REASONS[wizard.selDept].map((r: string) => (
-                                            <button key={r} onClick={() => wizard.setSelReason(r)}
-                                                className={`p-3 rounded-xl border-2 text-sm text-left transition-all cursor-pointer ${wizard.selReason === r ? "border-blue-600 bg-blue-50 text-blue-700 font-bold" : "border-slate-200 text-slate-600 hover:border-slate-300"}`}>
-                                                {r}
-                                            </button>
-                                        ))}
+                            {/* Motivo — los tres departamentos originales traen motivos
+                                sugeridos; uno propio de la organización no puede traer una
+                                lista que nadie escribió, así que ahí se captura libre. */}
+                            {wizard.selDept && (() => {
+                                const sugeridos = getDeptReasons(wizard.selDept);
+                                return (
+                                    <div>
+                                        <p className="font-bold text-slate-900 mb-2">Motivo de la cita</p>
+                                        {sugeridos.length > 0 ? (
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {sugeridos.map((r: string) => (
+                                                    <button key={r} onClick={() => wizard.setSelReason(r)}
+                                                        className={`p-3 rounded-xl border-2 text-sm text-left transition-all cursor-pointer ${wizard.selReason === r ? "border-blue-600 bg-blue-50 text-blue-700 font-bold" : "border-slate-200 text-slate-600 hover:border-slate-300"}`}>
+                                                        {r}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <textarea
+                                                value={wizard.selReason}
+                                                onChange={e => wizard.setSelReason(e.target.value)}
+                                                placeholder="Cuéntanos brevemente el motivo de tu cita"
+                                                rows={3}
+                                                maxLength={300}
+                                                className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 resize-none focus:outline-none focus:border-blue-600 transition-colors text-sm text-slate-700"
+                                            />
+                                        )}
                                     </div>
-                                </div>
-                            )}
+                                );
+                            })()}
 
                             {/* Modality */}
                             <div>
@@ -876,7 +893,7 @@ export function StudentDashboard() {
                 >
                     <div className="space-y-6">
                         <TabNav
-                            tabs={Object.keys(DEPT_CONFIG).map(d => ({ key: d, label: d }))}
+                            tabs={deptCatalog.map(d => ({ key: d.name, label: d.name }))}
                             active={activeResTab}
                             onSelect={setActiveResTab}
                         />

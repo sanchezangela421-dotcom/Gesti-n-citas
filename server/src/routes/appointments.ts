@@ -3,7 +3,7 @@ import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { orgScope } from '../lib/orgScope';
 import { sanitizeOptionalHttpUrl } from '../lib/urls';
-import { isDepartmentContracted } from '../lib/departments';
+import { isDepartmentContracted, departmentRequiresNote } from '../lib/departments';
 import { getCallerSpecialist } from '../lib/clinicalAccess';
 import { writeAudit, getClientIp } from '../services/auditLogger';
 import {
@@ -264,6 +264,9 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
 
 // ── PATCH /api/appointments/:id/status ───────────────────────────────────────
 
+// Debe coincidir con MISSED_STATUS del frontend (src/constants/index.ts): el
+// estado viaja como texto en la API, así que si uno de los dos cambia el acento
+// deja de coincidir en silencio, sin error de compilación en ningún lado.
 export const MISSED = 'No asistió';
 
 /**
@@ -328,6 +331,29 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       apptDateTime.setHours(h, m, 0, 0);
       if (apptDateTime > new Date()) {
         return res.status(422).json({ error: 'No puedes registrar una inasistencia antes de la hora de la cita.' });
+      }
+    }
+
+    // Completar una cita es un acto CLÍNICO: la cierra quien atendió la sesión y,
+    // en los departamentos de salud, firma lo que ocurrió en ella. El admin
+    // gestiona la agenda —confirma, cancela, reagenda— pero no cierra la atención
+    // ni puede dar por atendido algo que no presenció.
+    if (status === 'Completada' && req.user?.role !== 'especialista') {
+      return res.status(403).json({
+        error: 'Solo el especialista que atendió la cita puede marcarla como completada.',
+      });
+    }
+
+    // La nota es obligatoria donde la atención es clínica (NOM-004). En Tutorías
+    // la anotación es opcional: es acompañamiento académico, no un servicio de
+    // salud, y exigir ahí una nota clínica no tendría fundamento.
+    if (status === 'Completada'
+        && await departmentRequiresNote(current.organizationId, current.department)) {
+      if (!(typeof notes === 'string' && notes.trim())) {
+        return res.status(400).json({
+          code: 'NOTE_REQUIRED',
+          error: 'La nota clínica es obligatoria para cerrar la sesión.',
+        });
       }
     }
 
@@ -398,7 +424,8 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
       // Al completar con anotaciones, el especialista asignado persiste la nota clínica.
       // (Un admin que cierre la cita NO escribe nota clínica — no es personal clínico.)
       let audit: { action: string; id: string } | null = null;
-      if (status === 'Completada' && noteText && req.user?.role === 'especialista') {
+      // El rol ya se validó arriba (solo especialista llega aquí con Completada).
+      if (status === 'Completada' && noteText) {
         const existing = await tx.clinicalNote.findUnique({ where: { appointmentId: id } });
         if (existing) {
           await tx.clinicalNoteRevision.create({
