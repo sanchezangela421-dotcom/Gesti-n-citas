@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { orgScope } from '../lib/orgScope';
 import { sanitizeOptionalHttpUrl } from '../lib/urls';
-import { contractedDepartments, isDepartmentContracted } from '../lib/departments';
+import { contractedDepartmentNames, isDepartmentContracted } from '../lib/departments';
 import { localISODate } from '../lib/dates';
 import { sendAccountInvitation } from '../services/email';
 import { cancelOpenAppointments, notifyCancelledByDeactivation } from '../services/deactivation';
@@ -39,13 +39,7 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
       // Mismo criterio para un departamento que la organización dejó de
       // contratar: desaparece del selector, pero el especialista conserva su
       // acceso y sus citas ya agendadas.
-      const org = req.user?.organizationId
-        ? await prisma.organization.findUnique({
-            where: { id: req.user.organizationId },
-            select: { departments: true },
-          })
-        : null;
-      const allowed = contractedDepartments(org);
+      const allowed = await contractedDepartmentNames(req.user?.organizationId);
 
       // El filtro ?department= se intersecta con lo contratado, no lo sustituye:
       // pedir explícitamente un departamento dado de baja no debe saltarse el límite.

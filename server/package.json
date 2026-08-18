@@ -17,6 +17,7 @@
     "test:watch": "vitest",
     "db:seed": "ts-node prisma/seed.ts",
     "db:cleanup": "ts-node src/scripts/cleanup.ts",
+    "db:backfill-fields": "ts-node src/scripts/backfillOrgFields.ts",
     "typecheck": "tsc -p tsconfig.test.json"
   },
   "prisma": {

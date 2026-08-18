@@ -3,7 +3,7 @@ import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { orgScope } from '../lib/orgScope';
 import { sanitizeOptionalHttpUrl } from '../lib/urls';
-import { isDepartmentContracted, requiresClinicalNote } from '../lib/departments';
+import { isDepartmentContracted, departmentRequiresNote } from '../lib/departments';
 import { getCallerSpecialist } from '../lib/clinicalAccess';
 import { writeAudit, getClientIp } from '../services/auditLogger';
 import {
@@ -347,7 +347,8 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
     // La nota es obligatoria donde la atención es clínica (NOM-004). En Tutorías
     // la anotación es opcional: es acompañamiento académico, no un servicio de
     // salud, y exigir ahí una nota clínica no tendría fundamento.
-    if (status === 'Completada' && requiresClinicalNote(current.department)) {
+    if (status === 'Completada'
+        && await departmentRequiresNote(current.organizationId, current.department)) {
       if (!(typeof notes === 'string' && notes.trim())) {
         return res.status(400).json({
           code: 'NOTE_REQUIRED',

@@ -3,7 +3,7 @@ import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { orgScope } from '../lib/orgScope';
 import { MISSED } from './appointments';
-import { contractedDepartments } from '../lib/departments';
+import { contractedDepartmentNames } from '../lib/departments';
 import { legacyOrMetadata, comparableKey } from '../lib/registrationFields';
 
 const router = Router();
@@ -189,13 +189,7 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
 
     const organizationId = req.user?.organizationId ?? null;
 
-    const [org, fields, students] = await Promise.all([
-      organizationId
-        ? prisma.organization.findUnique({
-            where: { id: organizationId },
-            select: { departments: true },
-          })
-        : Promise.resolve(null),
+    const [fields, students] = await Promise.all([
       organizationId
         ? prisma.registrationField.findMany({
             where: { organizationId },
@@ -212,7 +206,7 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
       }),
     ]);
 
-    const departments = contractedDepartments(org);
+    const departments = await contractedDepartmentNames(organizationId);
 
     // Solo los campos de conjunto cerrado sirven para agrupar: hacerlo por un
     // texto libre daría una barra por respuesta.

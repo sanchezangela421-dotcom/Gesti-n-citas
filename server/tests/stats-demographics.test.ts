@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../src/db';
 import { startTestServer, stopTestServer, api, tokenFor } from './helpers/api';
-import { createOrg, createUser, createSpecialist, createAppointment } from './helpers/factories';
+import { createOrg, createUser, createSpecialist, createAppointment, setContractedDepartments } from './helpers/factories';
 
 /**
  * Demografía y desglose por departamento del endpoint de estadísticas.
@@ -157,10 +157,7 @@ describe('desglose por departamento', () => {
 
   it('solo incluye los departamentos que la organización tiene contratados', async () => {
     const { org, admin } = await orgWithAdmin();
-    await prisma.organization.update({
-      where: { id: org.id },
-      data: { departments: ['Psicología'] },
-    });
+    await setContractedDepartments(org.id, ['Psicología']);
 
     const res = await api('GET', '/api/stats', { token: tokenFor(admin) });
 

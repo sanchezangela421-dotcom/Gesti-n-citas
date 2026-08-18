@@ -10,6 +10,24 @@ import { upload } from '../middleware/upload';
 import { metadataValue, type LegacyField } from '../lib/registrationFields';
 
 const router = Router();
+
+/**
+ * Lo que necesita el cliente para pintar la sesión: el perfil de especialista y
+ * la organización CON su catálogo de departamentos (color, icono y si exige
+ * nota). Se comparte entre el login y /me para que ambos devuelvan lo mismo.
+ */
+const SESSION_INCLUDE = {
+  specialist: true,
+  organization: {
+    include: {
+      orgDepartments: {
+        where: { active: true },
+        orderBy: [{ order: 'asc' as const }, { name: 'asc' as const }],
+        select: { id: true, name: true, color: true, icon: true, requiresNote: true, order: true },
+      },
+    },
+  },
+};
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error('JWT_SECRET no está configurado en las variables de entorno');
 
@@ -23,7 +41,7 @@ router.post('/login', async (req, res) => {
     // Find user
     const user = await prisma.user.findUnique({
       where: { email },
-      include: { specialist: true, organization: true }
+      include: SESSION_INCLUDE,
     });
     
     if (!user) {
@@ -372,7 +390,7 @@ router.get('/me', verifyToken as any, async (req: AuthRequest, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
-      include: { specialist: true, organization: true }
+      include: SESSION_INCLUDE,
     });
 
     if (!user) {

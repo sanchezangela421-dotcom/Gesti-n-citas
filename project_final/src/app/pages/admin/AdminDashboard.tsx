@@ -18,8 +18,8 @@ import { useAuth } from "../../../context/AuthContext";
 import { AppShell } from "../../components/layout/AppShell";
 import { Btn, StatCard, Avatar, StatusBadge, Modal, inputCls, EmptyState, Reveal } from "../../components/ui";
 import { Calendar } from "../../components/ui/calendar";
-import { DEPT_CONFIG, ALL_DEPARTMENTS, MISSED_STATUS } from "../../../constants";
-import { useDepartments } from "../../hooks/useDepartments";
+import { ALL_DEPARTMENTS, MISSED_STATUS, resolveDeptStyle } from "../../../constants";
+import { useDepartments, useDepartmentCatalog } from "../../hooks/useDepartments";
 
 // Presentación de las tarjetas de descarga de reporte, por departamento del
 // catálogo. Cuáles se muestran lo decide la lista de contratados.
@@ -79,7 +79,6 @@ const REPORT_CARD_STYLE: Record<string, { icon: typeof Brain; gradient: string }
     "Nutrición": { icon: Apple, gradient: "from-rose-500 to-orange-500" },
 };
 import { PIE_COLORS } from "../../../data/mockData";
-import { useActionModal } from "../../hooks";
 import { useTheme } from "../../hooks/useTheme";
 import { API, authHeaders } from "../../../lib/api";
 import { AdminContentTab } from "./AdminContentTab";
@@ -547,6 +546,9 @@ export function AdminDashboard() {
     const { user: authUser } = useAuth();
     // Solo los departamentos que la organización tiene contratados
     const departments = useDepartments();
+    // Catálogo con color e icono: un departamento propio de la organización
+    // debe pintarse con lo suyo, no con el genérico de los tres originales.
+    const deptCatalog = useDepartmentCatalog();
     const tooltipStyle = dark
         ? { borderRadius: "12px", border: "1px solid #334155", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.4)", backgroundColor: "#1e293b", color: "#f1f5f9" }
         : { borderRadius: "12px", border: "none", boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" };
@@ -717,8 +719,6 @@ export function AdminDashboard() {
             fetchPeriods();
         } catch { toast.error("Error al realizar el corte"); }
     };
-
-    const action = useActionModal();
 
     // Specialist form
     const [newName, setNewName] = useState("");
@@ -1058,24 +1058,30 @@ export function AdminDashboard() {
                     </div>
                 </div>
 
-                {/* Dept cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    {Object.entries(DEPT_CONFIG).map(([name, cfg]) => (
-                        <div key={name} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm flex items-center justify-between hover:shadow-md hover:border-blue-200 dark:hover:border-blue-600 transition-all">
-                            <div className="flex items-center gap-4">
-                                <div className={`w-12 h-12 ${cfg.bg} rounded-xl flex items-center justify-center`}>
-                                    <cfg.icon className="w-5 h-5" style={{ color: cfg.color }} />
+                {/* Tarjetas por departamento — salen del catálogo de la organización,
+                    no de una lista fija, así que sus departamentos propios aparecen. */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {deptCatalog.map(dept => {
+                        const deptStyle = resolveDeptStyle(dept.name, deptCatalog);
+                        const DeptIcon = deptStyle.icon;
+                        return (
+                            <div key={dept.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm flex items-center justify-between hover:shadow-md hover:border-blue-200 dark:hover:border-blue-600 transition-all">
+                                <div className="flex items-center gap-4 min-w-0">
+                                    <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+                                        style={{ backgroundColor: `${deptStyle.color}1f` }}>
+                                        <DeptIcon className="w-5 h-5" style={{ color: deptStyle.color }} />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className="text-slate-500 text-xs font-bold uppercase tracking-wider truncate">{dept.name}</p>
+                                        <p className="text-slate-900 dark:text-white text-2xl font-black mt-0.5 leading-none">
+                                            {summary.byDept?.[dept.name] ?? 0} <span className="text-slate-400 font-medium text-sm">citas</span>
+                                        </p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">{name}</p>
-                                    <p className="text-slate-900 text-2xl font-black mt-0.5 leading-none">
-                                        {summary.byDept?.[name] ?? 0} <span className="text-slate-400 font-medium text-sm">citas</span>
-                                    </p>
-                                </div>
+                                <TrendingUp className="w-5 h-5 text-slate-300 shrink-0" />
                             </div>
-                            <TrendingUp className="w-5 h-5 text-slate-300" />
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
 
                 <Reveal key={activeTab}>
@@ -1209,7 +1215,7 @@ export function AdminDashboard() {
                                 <div className="space-y-3">
                                     <h4 className="text-slate-900 font-bold mb-4 uppercase tracking-wider text-xs">Directorio Activo</h4>
                                     {specialists.map((esp: Specialist) => {
-                                        const conf = DEPT_CONFIG[esp.department];
+                                        const conf = resolveDeptStyle(esp.department, deptCatalog);
                                         return (
                                             <div key={esp.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow flex items-center gap-4 group">
                                                 <Avatar name={esp.name} avatarUrl={esp.avatarUrl} />
@@ -1257,7 +1263,7 @@ export function AdminDashboard() {
                                             ) : (
                                                 <div className="space-y-3">
                                                     {deletedSpecs.map((esp: Specialist) => {
-                                                        const conf = DEPT_CONFIG[esp.department];
+                                                        const conf = resolveDeptStyle(esp.department, deptCatalog);
                                                         return (
                                                             <div key={esp.id} className="bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 flex items-center gap-4">
                                                                 <div className="opacity-50 shrink-0"><Avatar name={esp.name} avatarUrl={esp.avatarUrl} /></div>
@@ -1517,7 +1523,7 @@ export function AdminDashboard() {
                                                 <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
                                                     <div className="flex items-center justify-between mb-6">
                                                         <h4 className="text-slate-900 dark:text-white font-bold text-lg">Citas por Mes{isGlobal ? " y Departamento" : ""}</h4>
-                                                        <button onClick={() => downloadChartAsImage(refs.monthly, `Tendencias_${statsView}`, isGlobal ? "Citas por Mes y Departamento" : `Citas por Mes — ${statsView}`, dark, isGlobal ? departments.map(d => ({ label: d, color: DEPT_CONFIG[d]?.color ?? "#64748b" })) : undefined)}
+                                                        <button onClick={() => downloadChartAsImage(refs.monthly, `Tendencias_${statsView}`, isGlobal ? "Citas por Mes y Departamento" : `Citas por Mes — ${statsView}`, dark, isGlobal ? departments.map(d => ({ label: d, color: resolveDeptStyle(d, deptCatalog).color })) : undefined)}
                                                             className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all cursor-pointer" title="Descargar como imagen">
                                                             <Download className="w-5 h-5" />
                                                         </button>
@@ -1532,11 +1538,11 @@ export function AdminDashboard() {
                                                                 {isGlobal ? (
                                                                     <>
                                                                         {departments.map(d => (
-                                                                            <Bar key={d} dataKey={d} fill={DEPT_CONFIG[d]?.color ?? "#64748b"} radius={[4, 4, 0, 0]} maxBarSize={40} />
+                                                                            <Bar key={d} dataKey={d} fill={resolveDeptStyle(d, deptCatalog).color} radius={[4, 4, 0, 0]} maxBarSize={40} />
                                                                         ))}
                                                                     </>
                                                                 ) : (
-                                                                    <Bar dataKey={statsView} fill={DEPT_CONFIG[statsView]?.color ?? "#64748b"} radius={[4, 4, 0, 0]} maxBarSize={50} />
+                                                                    <Bar dataKey={statsView} fill={resolveDeptStyle(statsView, deptCatalog).color} radius={[4, 4, 0, 0]} maxBarSize={50} />
                                                                 )}
                                                             </BarChart>
                                                         </ResponsiveContainer>
@@ -1855,7 +1861,8 @@ export function AdminDashboard() {
                                             {[
                                                 ...departments.map(d => ({
                                                     label: d,
-                                                    icon: REPORT_CARD_STYLE[d]?.icon ?? FileText,
+                                                    // Un departamento propio usa el icono que eligió la organización.
+                                                    icon: REPORT_CARD_STYLE[d]?.icon ?? resolveDeptStyle(d, deptCatalog).icon,
                                                     gradient: REPORT_CARD_STYLE[d]?.gradient ?? "from-slate-500 to-slate-700",
                                                 })),
                                                 { label: "Reporte Global", icon: FileText, gradient: "from-violet-600 to-purple-700" },
@@ -2027,31 +2034,6 @@ export function AdminDashboard() {
                             <Btn onClick={() => deletingLoc && deleteLocation(deletingLoc.id)}
                                 className="flex-1 bg-rose-600 hover:bg-rose-700 text-white border-0 shadow-lg">
                                 Sí, eliminar
-                            </Btn>
-                        </div>
-                    </div>
-                </Modal>
-
-                {/* ─── Action Modal ─── */}
-                <Modal open={!!action.appt && !!action.status} onClose={action.close}
-                    title={`Cambiar estado a: ${action.status}`}
-                    subtitle={action.appt ? `${action.appt.studentName} — ${action.appt.date} a las ${action.appt.time}` : ""}
-                    maxWidth="max-w-md">
-                    <div className="space-y-5">
-                        <div>
-                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">{action.status === "Cancelada" ? <>Motivo de cancelación <span className="text-rose-500">*</span></> : "Observaciones (opcional)"}</label>
-                            <textarea value={action.notes} onChange={e => action.setNotes(e.target.value)}
-                                placeholder="Agregar comentario..." rows={3}
-                                className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 resize-none focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600 transition-colors text-slate-700 dark:text-slate-200 bg-slate-50/50 dark:bg-slate-700/50 text-sm" />
-                        </div>
-                        <div className="flex gap-3">
-                            <Btn variant="outline" onClick={action.close} className="flex-1">Cancelar Operación</Btn>
-                            <Btn onClick={() => {
-                                    if (action.status === "Cancelada" && !action.notes.trim()) { toast.error("Indica el motivo de la cancelación."); return; }
-                                    action.confirm(false);
-                                }}
-                                className={`flex-1 text-white border-0 shadow-lg ${action.status === "Cancelada" ? "bg-rose-600 hover:bg-rose-700 shadow-rose-600/20" : "bg-blue-600 hover:bg-blue-700 shadow-blue-600/20"}`}>
-                                Confirmar Estado
                             </Btn>
                         </div>
                     </div>

@@ -7,7 +7,6 @@ import {
     AlertTriangle, Clock, LogOut, Trash2, Sun, Moon,
 } from "lucide-react";
 import { API, superAdminHeaders, getUploadUrl } from "../../../lib/api";
-import { ALL_DEPARTMENTS } from "../../../constants";
 import { useTheme } from "../../hooks/useTheme";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -25,6 +24,27 @@ interface Org {
     createdAt: string;
     _count: { users: number; specialists: number; appointments: number };
 }
+
+interface OrgDept {
+    id: string;
+    name: string;
+    color: string;
+    icon: string;
+    requiresNote: boolean;
+    active: boolean;
+    order: number;
+}
+
+/** Iconos ofrecidos al crear un departamento. El servidor guarda el NOMBRE. */
+const DEPT_ICON_CHOICES = [
+    'Stethoscope', 'Brain', 'GraduationCap', 'Apple', 'HeartHandshake',
+    'Heart', 'Activity', 'BookOpen', 'Users', 'Scale', 'Smile', 'Briefcase',
+];
+
+const DEPT_COLOR_CHOICES = [
+    '#2563EB', '#16A34A', '#EA580C', '#7C3AED',
+    '#DB2777', '#0891B2', '#CA8A04', '#64748B',
+];
 
 interface RegField {
     id: string;
@@ -146,10 +166,21 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
 
     // ── Editar org modal ──
     const [editOrg, setEditOrg]     = useState<Org | null>(null);
-    const [editForm, setEditForm]   = useState<{ name: string; type: string; plan: string; userRoleLabel: string; departments: string[] }>({ name: "", type: "school", plan: "free", userRoleLabel: "Usuario", departments: [...ALL_DEPARTMENTS] });
+    const [editForm, setEditForm]   = useState({ name: "", type: "school", plan: "free", userRoleLabel: "Usuario" });
     const [logoFile, setLogoFile]   = useState<File | null>(null);
     const [logoUploading, setLogoUploading] = useState(false);
     const logoInputRef = useRef<HTMLInputElement>(null);
+
+    // ── Catálogo de departamentos por org ──
+    const [deptOrg, setDeptOrg]             = useState<Org | null>(null);
+    const [depts, setDepts]                 = useState<OrgDept[]>([]);
+    const [deptsLoading, setDeptsLoading]   = useState(false);
+    const [showAddDept, setShowAddDept]     = useState(false);
+    const [editingDept, setEditingDept]     = useState<OrgDept | null>(null);
+    const [deptForm, setDeptForm]           = useState({
+        name: '', color: DEPT_COLOR_CHOICES[0], icon: 'Stethoscope', requiresNote: false,
+    });
+    const [deptSaving, setDeptSaving]       = useState(false);
 
     // ── Configurar campos de registro por org ──
     const [configFieldsOrg, setConfigFieldsOrg]     = useState<Org | null>(null);
@@ -283,7 +314,9 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
             const res = await fetch(`${API}/superadmin/organizations/${editOrg.id}`, {
                 method: "PATCH",
                 headers: superAdminHeaders(),
-                body: JSON.stringify({ name: editForm.name.trim(), type: editForm.type, plan: editForm.plan, userRoleLabel: editForm.userRoleLabel, departments: editForm.departments }),
+                // Sin `departments`: contratar y retirar se hace en el gestor del
+                // catálogo, que además valida que el nombre exista en él.
+                body: JSON.stringify({ name: editForm.name.trim(), type: editForm.type, plan: editForm.plan, userRoleLabel: editForm.userRoleLabel }),
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
@@ -399,6 +432,104 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
             toast.error(e.message ?? "Error al guardar campo");
         } finally {
             setFieldSaving(false);
+        }
+    }
+
+    async function loadDepts(org: Org) {
+        setDeptsLoading(true);
+        try {
+            const res = await fetch(`${API}/superadmin/organizations/${org.id}/departments`, { headers: superAdminHeaders() });
+            if (res.ok) setDepts(await res.json());
+        } catch {
+            toast.error('No se pudo cargar el catálogo de departamentos.');
+        } finally {
+            setDeptsLoading(false);
+        }
+    }
+
+    function openDepts(org: Org) {
+        setDeptOrg(org);
+        setDepts([]);
+        setShowAddDept(false);
+        setEditingDept(null);
+        loadDepts(org);
+    }
+
+    function startEditDept(dept: OrgDept) {
+        setEditingDept(dept);
+        setShowAddDept(true);
+        setDeptForm({ name: dept.name, color: dept.color, icon: dept.icon, requiresNote: dept.requiresNote });
+    }
+
+    function startAddDept() {
+        setEditingDept(null);
+        setShowAddDept(true);
+        setDeptForm({ name: '', color: DEPT_COLOR_CHOICES[0], icon: 'Stethoscope', requiresNote: false });
+    }
+
+    async function saveDept() {
+        if (!deptOrg) return;
+        const name = deptForm.name.trim();
+        if (name.length < 2) { toast.error('El nombre debe tener al menos 2 caracteres.'); return; }
+
+        setDeptSaving(true);
+        try {
+            const base = `${API}/superadmin/organizations/${deptOrg.id}/departments`;
+            const res = await fetch(editingDept ? `${base}/${editingDept.id}` : base, {
+                method: editingDept ? 'PATCH' : 'POST',
+                headers: superAdminHeaders(),
+                body: JSON.stringify({ name, color: deptForm.color, icon: deptForm.icon, requiresNote: deptForm.requiresNote }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+
+            toast.success(editingDept ? 'Departamento actualizado' : `Departamento "${name}" creado`);
+            setShowAddDept(false);
+            setEditingDept(null);
+            await loadDepts(deptOrg);
+            fetchOrgs(true);
+        } catch (e) {
+            toast.error(e instanceof Error && e.message ? e.message : 'No se pudo guardar el departamento.');
+        } finally {
+            setDeptSaving(false);
+        }
+    }
+
+    /** Contratar o retirar. Retirar NO cancela citas: solo bloquea las nuevas. */
+    async function toggleDept(dept: OrgDept) {
+        if (!deptOrg) return;
+        try {
+            const res = await fetch(`${API}/superadmin/organizations/${deptOrg.id}/departments/${dept.id}`, {
+                method: 'PATCH',
+                headers: superAdminHeaders(),
+                body: JSON.stringify({ active: !dept.active }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+            toast.success(dept.active
+                ? `"${dept.name}" retirado. Las citas ya agendadas se respetan.`
+                : `"${dept.name}" contratado de nuevo.`);
+            await loadDepts(deptOrg);
+            fetchOrgs(true);
+        } catch (e) {
+            toast.error(e instanceof Error && e.message ? e.message : 'No se pudo cambiar el departamento.');
+        }
+    }
+
+    async function deleteDept(dept: OrgDept) {
+        if (!deptOrg) return;
+        try {
+            const res = await fetch(`${API}/superadmin/organizations/${deptOrg.id}/departments/${dept.id}`, {
+                method: 'DELETE',
+                headers: superAdminHeaders(),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+            toast.success(`Departamento "${dept.name}" eliminado`);
+            await loadDepts(deptOrg);
+            fetchOrgs(true);
+        } catch (e) {
+            toast.error(e instanceof Error && e.message ? e.message : 'No se pudo eliminar el departamento.');
         }
     }
 
@@ -723,6 +854,13 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                                             Designar admin
                                                         </button>
                                                         <button
+                                                            onClick={() => openDepts(org)}
+                                                            className="text-xs px-3 py-1.5 rounded-lg bg-slate-200 text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600 transition-colors font-medium"
+                                                            title="Gestionar departamentos"
+                                                        >
+                                                            Departamentos
+                                                        </button>
+                                                        <button
                                                             onClick={() => openConfigFields(org)}
                                                             className="text-xs px-3 py-1.5 rounded-lg bg-slate-200 text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600 transition-colors font-medium"
                                                             title="Configurar campos de registro"
@@ -730,7 +868,7 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                                             Campos
                                                         </button>
                                                         <button
-                                                            onClick={() => { setEditOrg(org); setEditForm({ name: org.name, type: org.type, plan: org.plan, userRoleLabel: org.userRoleLabel ?? "Usuario", departments: org.departments ?? [...ALL_DEPARTMENTS] }); setLogoFile(null); }}
+                                                            onClick={() => { setEditOrg(org); setEditForm({ name: org.name, type: org.type, plan: org.plan, userRoleLabel: org.userRoleLabel ?? "Usuario" }); setLogoFile(null); }}
                                                             className="p-1.5 rounded-lg text-muted-foreground hover:text-indigo-700 hover:bg-indigo-50 transition-colors"
                                                             title="Editar"
                                                         >
@@ -999,6 +1137,130 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                 </Modal>
             )}
 
+            {/* ── Modal: Departamentos de la organización ───────────────────── */}
+            {deptOrg && (
+                <Modal title={`Departamentos — ${deptOrg.name}`} onClose={() => { setDeptOrg(null); setShowAddDept(false); setEditingDept(null); }}>
+                    <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                            Retirar un departamento <span className="font-semibold text-foreground">no cancela</span> las citas
+                            ya agendadas: solo bloquea las nuevas y avisa por correo a quien tenga una pendiente.
+                        </p>
+
+                        {deptsLoading ? (
+                            <p className="text-sm text-muted-foreground text-center py-4">Cargando...</p>
+                        ) : depts.length === 0 && !showAddDept ? (
+                            <p className="text-sm text-muted-foreground text-center py-4">Sin departamentos configurados.</p>
+                        ) : (
+                            <div className="space-y-2">
+                                {depts.map(dept => (
+                                    <div key={dept.id}
+                                        className={`flex items-start gap-3 p-3 rounded-lg border ${dept.active ? 'bg-muted/40 border-border' : 'bg-muted/20 border-border opacity-60'}`}>
+                                        <span className="w-3 h-3 rounded-full mt-1 shrink-0" style={{ backgroundColor: dept.color }} />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="text-sm font-medium text-foreground">{dept.name}</span>
+                                                {dept.requiresNote && (
+                                                    <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 font-semibold uppercase tracking-wide">
+                                                        Nota obligatoria
+                                                    </span>
+                                                )}
+                                                {!dept.active && (
+                                                    <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300 font-semibold uppercase tracking-wide">
+                                                        Retirado
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <p className="text-xs text-muted-foreground mt-0.5">Icono: {dept.icon}</p>
+                                        </div>
+                                        <div className="flex gap-1.5 shrink-0">
+                                            <button onClick={() => startEditDept(dept)} title="Editar"
+                                                className="p-1.5 rounded text-muted-foreground hover:text-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors">
+                                                <Pencil className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button onClick={() => toggleDept(dept)} title={dept.active ? 'Retirar' : 'Contratar'}
+                                                className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                                                {dept.active ? <PowerOff className="w-3.5 h-3.5" /> : <Power className="w-3.5 h-3.5" />}
+                                            </button>
+                                            <button onClick={() => deleteDept(dept)} title="Eliminar (solo si nunca se usó)"
+                                                className="p-1.5 rounded text-muted-foreground hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {showAddDept ? (
+                            <div className="space-y-3 p-3 bg-muted/40 border border-border rounded-lg">
+                                <Field
+                                    label="Nombre"
+                                    value={deptForm.name}
+                                    onChange={v => setDeptForm(f => ({ ...f, name: v }))}
+                                    placeholder="Ej. Trabajo Social"
+                                />
+                                {!editingDept && (
+                                    <p className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed">
+                                        El nombre no podrá cambiarse una vez que el departamento tenga citas o
+                                        especialistas: el expediente lo referencia por nombre. Revísalo bien.
+                                    </p>
+                                )}
+
+                                <div>
+                                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Color</label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {DEPT_COLOR_CHOICES.map(c => (
+                                            <button key={c} type="button" onClick={() => setDeptForm(f => ({ ...f, color: c }))}
+                                                aria-label={`Color ${c}`}
+                                                className={`w-7 h-7 rounded-full border-2 transition-transform ${deptForm.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                                                style={{ backgroundColor: c }} />
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">Icono</label>
+                                    <select value={deptForm.icon}
+                                        onChange={e => setDeptForm(f => ({ ...f, icon: e.target.value }))}
+                                        className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-indigo-500">
+                                        {DEPT_ICON_CHOICES.map(i => <option key={i} value={i}>{i}</option>)}
+                                    </select>
+                                </div>
+
+                                <label className="flex items-start gap-2.5 cursor-pointer text-sm text-foreground">
+                                    <input type="checkbox" checked={deptForm.requiresNote}
+                                        onChange={e => setDeptForm(f => ({ ...f, requiresNote: e.target.checked }))}
+                                        className="w-4 h-4 mt-0.5 rounded border-border bg-card text-indigo-500 focus:ring-indigo-500 focus:ring-offset-background" />
+                                    <span>
+                                        Exige nota al cerrar la cita
+                                        <span className="block text-xs text-muted-foreground font-normal">
+                                            Márcalo si es atención clínica: el especialista no podrá completar la sesión sin dejar constancia.
+                                        </span>
+                                    </span>
+                                </label>
+
+                                <div className="flex justify-end gap-2 pt-1">
+                                    <button onClick={() => { setShowAddDept(false); setEditingDept(null); }}
+                                        className="px-3 py-1.5 rounded-lg text-sm text-muted-foreground hover:text-foreground transition-colors">
+                                        Cancelar
+                                    </button>
+                                    <button onClick={saveDept} disabled={deptSaving}
+                                        className="px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 transition-colors">
+                                        {deptSaving ? 'Guardando...' : editingDept ? 'Guardar cambios' : 'Crear departamento'}
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <button onClick={startAddDept}
+                                className="w-full py-2 rounded-lg border border-dashed border-border text-sm text-muted-foreground hover:text-foreground hover:border-indigo-500 transition-colors">
+                                + Agregar departamento
+                            </button>
+                        )}
+                    </div>
+                </Modal>
+            )}
+
             {/* ── Modal: Configurar campos de registro ─────────────────────── */}
             {configFieldsOrg && (
                 <Modal title={`Campos de registro — ${configFieldsOrg.name}`} onClose={() => { setConfigFieldsOrg(null); setShowAddField(false); setEditingField(null); }}>
@@ -1104,44 +1366,14 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                         <Field label="Nombre" value={editForm.name} onChange={v => setEditForm(f => ({ ...f, name: v }))} placeholder="TECNL" />
                         <Field label="Cómo se llaman los usuarios" value={editForm.userRoleLabel} onChange={v => setEditForm(f => ({ ...f, userRoleLabel: v }))} placeholder="Alumno / Paciente / Empleado" />
 
-                        {/* Departamentos contratados. Retirar uno NO cancela citas:
-                            las ya agendadas se respetan y solo se bloquean las nuevas,
-                            avisando por correo a quien tenga una pendiente. */}
-                        <div>
-                            <label className="block text-xs font-medium text-muted-foreground mb-1">Departamentos contratados</label>
-                            <div className="space-y-1.5 bg-muted/60 border border-border rounded-lg p-3">
-                                {ALL_DEPARTMENTS.map(dept => {
-                                    const checked = editForm.departments.includes(dept);
-                                    return (
-                                        <label key={dept} className="flex items-center gap-2.5 cursor-pointer text-sm text-foreground">
-                                            <input
-                                                type="checkbox"
-                                                checked={checked}
-                                                onChange={() => setEditForm(f => ({
-                                                    ...f,
-                                                    departments: checked
-                                                        ? f.departments.filter(d => d !== dept)
-                                                        : [...f.departments, dept],
-                                                }))}
-                                                className="w-4 h-4 rounded border-border bg-card text-indigo-500 focus:ring-indigo-500 focus:ring-offset-background"
-                                            />
-                                            {dept}
-                                        </label>
-                                    );
-                                })}
-                            </div>
-                            {editForm.departments.length === 0 && (
-                                <p className="text-xs text-amber-700 mt-1.5">
-                                    Sin departamentos, esta organización no podrá agendar ninguna cita.
-                                </p>
-                            )}
-                            {editOrg.departments?.some(d => !editForm.departments.includes(d)) && (
-                                <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
-                                    Al retirar un departamento, las citas ya agendadas se respetan y se avisa
-                                    por correo a los usuarios y especialistas afectados. Solo se bloquean las
-                                    citas nuevas.
-                                </p>
-                            )}
+                        {/* Los departamentos dejaron de ser tres casillas fijas: cada
+                            organización tiene su catálogo, y se gestiona en su propia
+                            pantalla porque ahora llevan color, icono y régimen de nota. */}
+                        <div className="bg-muted/60 border border-border rounded-lg p-3">
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                                Los departamentos de esta organización ({editOrg.departments?.length ?? 0} contratados)
+                                se gestionan desde el botón <span className="font-semibold text-foreground">Departamentos</span> de su tarjeta.
+                            </p>
                         </div>
 
                         <div>

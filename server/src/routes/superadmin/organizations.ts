@@ -3,7 +3,13 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import { SuperAdminRequest } from '../../middleware/verifySuperAdmin';
 import { writeAudit, getClientIp } from '../../services/auditLogger';
-import { ALL_DEPARTMENTS, parseContractedDepartments } from '../../lib/departments';
+import {
+  SEED_DEPARTMENTS,
+  normalizeDepartmentName,
+  listOrgDepartments,
+  syncOrgDepartmentNames,
+  departmentIsRenameable,
+} from '../../lib/departments';
 import { notifyDepartmentDisabled } from '../../services/departmentNotices';
 import { upload } from '../../middleware/upload';
 import { defaultFieldsForOrgType, normalizeFieldKey } from '../../lib/registrationFields';
@@ -58,6 +64,19 @@ router.post('/', async (req: SuperAdminRequest, res) => {
         data: { name: name.trim(), slug: slugClean, type, plan: plan ?? 'free', active: true, userRoleLabel: userRoleLabel?.trim() || 'Usuario' },
       });
 
+      // Catálogo de departamentos propio de la organización. Nace con los tres
+      // originales; desde aquí el superadmin puede añadir los suyos o retirarlos.
+      await tx.orgDepartment.createMany({
+        data: SEED_DEPARTMENTS.map(d => ({
+          organizationId: created.id,
+          name: d.name,
+          color: d.color,
+          icon: d.icon,
+          requiresNote: d.requiresNote,
+          order: d.order,
+        })),
+      });
+
       await tx.registrationField.createMany({
         data: defaultFieldsForOrgType(type).map(f => ({
           organizationId: created.id,
@@ -107,21 +126,40 @@ router.patch('/:id', async (req: SuperAdminRequest, res) => {
     if (active !== undefined)        data.active        = active;
     if (userRoleLabel !== undefined) data.userRoleLabel = userRoleLabel.trim() || 'Usuario';
 
-    // Departamentos contratados. Se calculan los que se retiran ANTES de guardar,
-    // para poder avisar a quien tiene una cita abierta en ellos.
+    // Departamentos contratados. Ahora la lista de nombres no reemplaza una
+    // columna: activa o desactiva filas del catálogo de la organización. Solo se
+    // aceptan nombres que YA existan en él — dar de alta uno nuevo tiene su
+    // propio endpoint, para no crearlo sin color, icono ni régimen de nota.
     let removed: string[] = [];
-    if (departments !== undefined) {
-      const parsed = parseContractedDepartments(departments);
-      if (!parsed) {
-        return res.status(400).json({
-          error: `Departamentos inválidos. Valores permitidos: ${ALL_DEPARTMENTS.join(', ')}.`,
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if (departments !== undefined) {
+        if (!Array.isArray(departments) || departments.some(d => typeof d !== 'string')) {
+          throw new Error('INVALID_DEPARTMENTS');
+        }
+        const wanted = new Set<string>(departments as string[]);
+
+        const catalog = await tx.orgDepartment.findMany({ where: { organizationId: id } });
+        const known = new Set(catalog.map(d => d.name));
+        const unknown = [...wanted].filter(n => !known.has(n));
+        if (unknown.length > 0) throw new Error(`UNKNOWN_DEPARTMENTS:${unknown.join(', ')}`);
+
+        removed = catalog.filter(d => d.active && !wanted.has(d.name)).map(d => d.name);
+
+        await tx.orgDepartment.updateMany({
+          where: { organizationId: id, name: { in: [...wanted] } },
+          data: { active: true },
+        });
+        await tx.orgDepartment.updateMany({
+          where: { organizationId: id, name: { notIn: [...wanted] } },
+          data: { active: false },
         });
       }
-      removed = org.departments.filter(d => !parsed.includes(d));
-      data.departments = parsed;
-    }
 
-    const updated = await prisma.organization.update({ where: { id }, data });
+      const saved = await tx.organization.update({ where: { id }, data });
+      if (departments !== undefined) await syncOrgDepartmentNames(tx, id);
+      return saved;
+    });
 
     // Retirar un departamento NO cancela nada: las citas ya agendadas se
     // respetan y solo se bloquean las nuevas. Se avisa por correo para que
@@ -143,6 +181,15 @@ router.patch('/:id', async (req: SuperAdminRequest, res) => {
 
     res.json(updated);
   } catch (error) {
+    const msg = error instanceof Error ? error.message : '';
+    if (msg === 'INVALID_DEPARTMENTS') {
+      return res.status(400).json({ error: 'La lista de departamentos no es válida.' });
+    }
+    if (msg.startsWith('UNKNOWN_DEPARTMENTS:')) {
+      return res.status(400).json({
+        error: `Esta organización no tiene en su catálogo: ${msg.split(':')[1]}. Créalos antes de contratarlos.`,
+      });
+    }
     console.error('[superadmin] Error updating organization:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
@@ -201,6 +248,179 @@ router.patch('/:id/logo', upload.single('logo'), async (req: SuperAdminRequest, 
     res.json(updated);
   } catch (error) {
     console.error('[superadmin] Error uploading logo:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// ── Departamentos de la organización ─────────────────────────────────────────
+
+// GET /api/superadmin/organizations/:id/departments
+router.get('/:id/departments', async (req: SuperAdminRequest, res) => {
+  try {
+    res.json(await listOrgDepartments(req.params.id as string));
+  } catch (error) {
+    console.error('[superadmin] Error fetching departments:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// POST /api/superadmin/organizations/:id/departments
+router.post('/:id/departments', async (req: SuperAdminRequest, res) => {
+  try {
+    const organizationId = req.params.id as string;
+    const { color, icon, requiresNote, order } = req.body;
+
+    const name = normalizeDepartmentName(req.body?.name);
+    if (!name) {
+      return res.status(400).json({ error: 'El nombre debe tener entre 2 y 60 caracteres.' });
+    }
+
+    const org = await prisma.organization.findUnique({ where: { id: organizationId } });
+    if (!org) return res.status(404).json({ error: 'Organización no encontrada' });
+
+    const existing = await prisma.orgDepartment.findUnique({
+      where: { organizationId_name: { organizationId, name } },
+    });
+    if (existing) {
+      return res.status(409).json({ error: `La organización ya tiene un departamento llamado "${name}".` });
+    }
+
+    const department = await prisma.$transaction(async (tx) => {
+      const created = await tx.orgDepartment.create({
+        data: {
+          organizationId,
+          name,
+          ...(typeof color === 'string' && color.trim() ? { color: color.trim() } : {}),
+          ...(typeof icon === 'string' && icon.trim() ? { icon: icon.trim() } : {}),
+          ...(requiresNote !== undefined ? { requiresNote: !!requiresNote } : {}),
+          ...(Number.isInteger(order) ? { order } : {}),
+        },
+      });
+      await syncOrgDepartmentNames(tx, organizationId);
+      return created;
+    });
+
+    writeAudit({
+      actorId: req.actor!.id, actorRole: 'superadmin',
+      action: 'CREATE_DEPARTMENT', targetEntity: 'OrgDepartment', targetId: department.id,
+      organizationId, metadata: { name, requiresNote: department.requiresNote },
+      ipAddress: getClientIp(req),
+    });
+
+    res.status(201).json(department);
+  } catch (error) {
+    console.error('[superadmin] Error creating department:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// PATCH /api/superadmin/organizations/:id/departments/:deptId
+router.patch('/:id/departments/:deptId', async (req: SuperAdminRequest, res) => {
+  try {
+    const organizationId = req.params.id as string;
+    const deptId = req.params.deptId as string;
+    const { color, icon, requiresNote, active, order } = req.body;
+
+    const department = await prisma.orgDepartment.findUnique({ where: { id: deptId } });
+    if (!department || department.organizationId !== organizationId) {
+      return res.status(404).json({ error: 'Departamento no encontrado' });
+    }
+
+    const data: Record<string, unknown> = {};
+
+    // Renombrar solo mientras no tenga citas ni especialistas: el nombre viaja
+    // denormalizado al expediente, y cambiarlo después desconectaría al paciente
+    // de su propio historial.
+    if (req.body?.name !== undefined) {
+      const name = normalizeDepartmentName(req.body.name);
+      if (!name) {
+        return res.status(400).json({ error: 'El nombre debe tener entre 2 y 60 caracteres.' });
+      }
+      if (name !== department.name) {
+        if (!(await departmentIsRenameable(organizationId, department.name))) {
+          return res.status(409).json({
+            code: 'DEPARTMENT_IN_USE',
+            error: 'Este departamento ya tiene citas o especialistas: su nombre no puede cambiarse. Desactívalo y crea uno nuevo si hace falta.',
+          });
+        }
+        const clash = await prisma.orgDepartment.findUnique({
+          where: { organizationId_name: { organizationId, name } },
+        });
+        if (clash) return res.status(409).json({ error: `Ya existe un departamento llamado "${name}".` });
+        data.name = name;
+      }
+    }
+
+    if (typeof color === 'string' && color.trim())  data.color = color.trim();
+    if (typeof icon === 'string' && icon.trim())    data.icon = icon.trim();
+    if (requiresNote !== undefined)                 data.requiresNote = !!requiresNote;
+    if (active !== undefined)                       data.active = !!active;
+    if (Number.isInteger(order))                    data.order = order;
+
+    const wasActive = department.active;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.orgDepartment.update({ where: { id: deptId }, data });
+      await syncOrgDepartmentNames(tx, organizationId);
+      return row;
+    });
+
+    // Retirarlo NO cancela nada: las citas agendadas se respetan y solo se
+    // bloquean las nuevas. Se avisa para que nadie intente reservar en vano.
+    if (wasActive && updated.active === false) {
+      const org = await prisma.organization.findUnique({ where: { id: organizationId } });
+      if (org) notifyDepartmentDisabled(org, updated.name);
+    }
+
+    writeAudit({
+      actorId: req.actor!.id, actorRole: 'superadmin',
+      action: 'UPDATE_DEPARTMENT', targetEntity: 'OrgDepartment', targetId: deptId,
+      organizationId, metadata: data,
+      ipAddress: getClientIp(req),
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error('[superadmin] Error updating department:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// DELETE /api/superadmin/organizations/:id/departments/:deptId
+// Solo si nunca se usó. Con citas o especialistas detrás se desactiva, no se
+// borra: el nombre está denormalizado en el expediente y quedaría huérfano.
+router.delete('/:id/departments/:deptId', async (req: SuperAdminRequest, res) => {
+  try {
+    const organizationId = req.params.id as string;
+    const deptId = req.params.deptId as string;
+
+    const department = await prisma.orgDepartment.findUnique({ where: { id: deptId } });
+    if (!department || department.organizationId !== organizationId) {
+      return res.status(404).json({ error: 'Departamento no encontrado' });
+    }
+
+    if (!(await departmentIsRenameable(organizationId, department.name))) {
+      return res.status(409).json({
+        code: 'DEPARTMENT_IN_USE',
+        error: 'Este departamento ya tiene citas o especialistas. Desactívalo en vez de eliminarlo: su historial debe conservarse.',
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.orgDepartment.delete({ where: { id: deptId } });
+      await syncOrgDepartmentNames(tx, organizationId);
+    });
+
+    writeAudit({
+      actorId: req.actor!.id, actorRole: 'superadmin',
+      action: 'DELETE_DEPARTMENT', targetEntity: 'OrgDepartment', targetId: deptId,
+      organizationId, metadata: { name: department.name },
+      ipAddress: getClientIp(req),
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[superadmin] Error deleting department:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
