@@ -4,10 +4,11 @@ import {
     Building2, Users, CalendarCheck, ShieldCheck, Plus,
     Power, PowerOff, Search, RefreshCw, Pencil,
     Globe, Stethoscope, GraduationCap, Briefcase,
-    AlertTriangle, Clock, LogOut,
+    AlertTriangle, Clock, LogOut, Trash2, Sun, Moon,
 } from "lucide-react";
 import { API, superAdminHeaders, getUploadUrl } from "../../../lib/api";
 import { ALL_DEPARTMENTS } from "../../../constants";
+import { useTheme } from "../../hooks/useTheme";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -83,16 +84,16 @@ const ORG_TYPE_ICON: Record<string, typeof GraduationCap> = {
 
 const PLAN_COLOR: Record<string, string> = {
     free:       "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
-    basic:      "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-    enterprise: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+    basic:      "bg-blue-100 text-blue-700 dark:bg-blue-100 dark:text-blue-700",
+    enterprise: "bg-amber-100 text-amber-700 dark:bg-amber-100 dark:text-amber-700",
 };
 
 const ROLE_COLOR: Record<string, string> = {
     superadmin:  "bg-rose-100 text-rose-700",
     admin:       "bg-indigo-100 text-indigo-700",
-    especialista:"bg-teal-100 text-teal-700",
-    alumno:      "bg-slate-100 text-slate-600",
-    usuario:     "bg-sky-100 text-sky-700",
+    especialista:"bg-teal-100 text-teal-700 dark:text-teal-300",
+    alumno:      "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+    usuario:     "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300",
 };
 
 function fmtDate(iso: string) {
@@ -165,6 +166,10 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
     const [editUserForm, setEditUserForm] = useState({ name: "", email: "", role: "alumno", organizationId: "", password: "" });
     const [showCreateUser, setShowCreateUser] = useState(false);
     const [createUserForm, setCreateUserForm] = useState({ name: "", email: "", role: "alumno", organizationId: "" });
+    // El panel estaba cableado a oscuro y no seguía el tema de la app. Usa el
+    // mismo hook, que escribe la clase .dark en el <html> y persiste la elección.
+    const { dark, toggle: toggleTheme } = useTheme();
+
     const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
     const [userActionLoading, setUserActionLoading] = useState(false);
 
@@ -507,7 +512,7 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
-            toast.success("Usuario eliminado");
+            toast.success("Usuario dado de baja");
             setDeleteUserId(null);
             lastFetched.current[`users-${usersPage}-${userOrgFilter}`] = 0;
             fetchUsers(usersPage, userOrgFilter, true);
@@ -558,24 +563,34 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
     ] as const;
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100">
+        <div className="min-h-screen bg-background text-foreground">
 
             {/* Top bar */}
-            <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-30">
+            <header className="border-b border-border bg-card/80 backdrop-blur sticky top-0 z-30">
                 <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                        <ShieldCheck className="w-5 h-5 text-rose-400" />
-                        <span className="font-bold text-white tracking-tight">Super Admin</span>
-                        <span className="text-slate-600">|</span>
-                        <span className="text-xs text-slate-400 font-mono">{user?.email}</span>
+                        <ShieldCheck className="w-5 h-5 text-rose-700" />
+                        <span className="font-bold text-foreground tracking-tight">Super Admin</span>
+                        <span className="text-muted-foreground">|</span>
+                        <span className="text-xs text-muted-foreground font-mono">{user?.email}</span>
                     </div>
-                    <button
-                        onClick={onLogout}
-                        className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-rose-400 transition-colors"
-                    >
-                        <LogOut className="w-4 h-4" />
-                        Salir
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={toggleTheme}
+                            title={dark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+                            aria-label={dark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+                            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                        >
+                            {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                        </button>
+                        <button
+                            onClick={onLogout}
+                            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-rose-700 transition-colors cursor-pointer"
+                        >
+                            <LogOut className="w-4 h-4" />
+                            Salir
+                        </button>
+                    </div>
 
                 </div>
             </header>
@@ -583,15 +598,15 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
             <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
 
                 {/* Tab nav */}
-                <nav className="flex gap-1 bg-slate-900 p-1 rounded-xl w-fit">
+                <nav className="flex gap-1 bg-card p-1 rounded-xl w-fit">
                     {TABS.map(({ key, label, icon: Icon }) => (
                         <button
                             key={key}
                             onClick={() => setTab(key)}
                             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                                 tab === key
-                                    ? "bg-slate-700 text-white"
-                                    : "text-slate-400 hover:text-white"
+                                    ? "bg-card text-foreground shadow-sm"
+                                    : "text-muted-foreground hover:text-foreground"
                             }`}
                         >
                             <Icon className="w-4 h-4" />
@@ -604,8 +619,8 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                 {tab === "overview" && (
                     <div className="space-y-6">
                         <div className="flex items-center justify-between">
-                            <h2 className="text-xl font-bold text-white">Resumen de plataforma</h2>
-                            <button onClick={() => fetchStats(true)} className="text-slate-400 hover:text-white transition-colors">
+                            <h2 className="text-xl font-bold text-foreground">Resumen de plataforma</h2>
+                            <button onClick={() => fetchStats(true)} className="text-muted-foreground hover:text-foreground transition-colors">
                                 <RefreshCw className={`w-4 h-4 ${statsLoading ? "animate-spin" : ""}`} />
                             </button>
                         </div>
@@ -613,7 +628,7 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                         {statsLoading ? (
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                 {[...Array(4)].map((_, i) => (
-                                    <div key={i} className="h-24 bg-slate-800 rounded-xl animate-pulse" />
+                                    <div key={i} className="h-24 bg-muted rounded-xl animate-pulse" />
                                 ))}
                             </div>
                         ) : stats && (
@@ -627,10 +642,10 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
 
                                 {/* Recent audit */}
                                 <div>
-                                    <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Actividad reciente</h3>
-                                    <div className="bg-slate-900 rounded-xl overflow-hidden">
+                                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Actividad reciente</h3>
+                                    <div className="bg-card rounded-xl overflow-hidden">
                                         {stats.recentAudit.length === 0 ? (
-                                            <p className="text-slate-500 text-sm p-4 text-center">Sin actividad registrada aún</p>
+                                            <p className="text-muted-foreground text-sm p-4 text-center">Sin actividad registrada aún</p>
                                         ) : stats.recentAudit.map(entry => (
                                             <AuditRow key={entry.id} entry={entry} />
                                         ))}
@@ -645,15 +660,15 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                 {tab === "orgs" && (
                     <div className="space-y-4">
                         <div className="flex items-center justify-between gap-4 flex-wrap">
-                            <h2 className="text-xl font-bold text-white">Organizaciones</h2>
+                            <h2 className="text-xl font-bold text-foreground">Organizaciones</h2>
                             <div className="flex items-center gap-2">
                                 <div className="relative">
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                                     <input
                                         value={orgSearch}
                                         onChange={e => setOrgSearch(e.target.value)}
                                         placeholder="Buscar..."
-                                        className="bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-3 py-1.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 w-48"
+                                        className="bg-muted border border-border rounded-lg pl-9 pr-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-indigo-500 w-48"
                                     />
                                 </div>
                                 <button
@@ -668,62 +683,62 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                         {orgsLoading ? (
                             <div className="space-y-3">
                                 {[...Array(3)].map((_, i) => (
-                                    <div key={i} className="h-20 bg-slate-800 rounded-xl animate-pulse" />
+                                    <div key={i} className="h-20 bg-muted rounded-xl animate-pulse" />
                                 ))}
                             </div>
                         ) : filteredOrgs.length === 0 ? (
-                            <p className="text-slate-500 text-sm text-center py-12">No hay organizaciones</p>
+                            <p className="text-muted-foreground text-sm text-center py-12">No hay organizaciones</p>
                         ) : (
                             <div className="space-y-3">
                                 {filteredOrgs.map(org => {
                                     const Icon = ORG_TYPE_ICON[org.type] ?? Globe;
                                     return (
-                                        <div key={org.id} className={`bg-slate-900 rounded-xl p-4 border ${org.active ? "border-slate-800" : "border-slate-700 opacity-60"}`}>
+                                        <div key={org.id} className={`bg-card rounded-xl p-4 border ${org.active ? "border-border" : "border-border opacity-60"}`}>
                                             <div className="flex items-center justify-between gap-4 flex-wrap">
                                                 <div className="flex items-center gap-3">
-                                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${org.active ? "bg-indigo-900/50" : "bg-slate-800"}`}>
-                                                        <Icon className={`w-5 h-5 ${org.active ? "text-indigo-400" : "text-slate-500"}`} />
+                                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${org.active ? "bg-indigo-100" : "bg-muted"}`}>
+                                                        <Icon className={`w-5 h-5 ${org.active ? "text-indigo-700" : "text-muted-foreground"}`} />
                                                     </div>
                                                     <div>
                                                         <div className="flex items-center gap-2">
-                                                            <span className="font-semibold text-white">{org.name}</span>
-                                                            <span className="text-xs text-slate-500 font-mono">/{org.slug}</span>
+                                                            <span className="font-semibold text-foreground">{org.name}</span>
+                                                            <span className="text-xs text-muted-foreground font-mono">/{org.slug}</span>
                                                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PLAN_COLOR[org.plan] ?? PLAN_COLOR.free}`}>{org.plan}</span>
-                                                            {!org.active && <span className="text-xs px-2 py-0.5 rounded-full bg-red-900/40 text-red-400 font-medium">Inactiva</span>}
+                                                            {!org.active && <span className="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 font-medium">Inactiva</span>}
                                                         </div>
-                                                        <p className="text-xs text-slate-400 mt-0.5">{ORG_TYPE_LABEL[org.type] ?? org.type} · Creada {fmtDate(org.createdAt)}</p>
+                                                        <p className="text-xs text-muted-foreground mt-0.5">{ORG_TYPE_LABEL[org.type] ?? org.type} · Creada {fmtDate(org.createdAt)}</p>
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-4">
                                                     <div className="flex gap-4 text-center">
-                                                        <div><p className="text-lg font-bold text-white">{org._count.users}</p><p className="text-xs text-slate-500">usuarios</p></div>
-                                                        <div><p className="text-lg font-bold text-white">{org._count.specialists}</p><p className="text-xs text-slate-500">especialistas</p></div>
-                                                        <div><p className="text-lg font-bold text-white">{org._count.appointments}</p><p className="text-xs text-slate-500">citas</p></div>
+                                                        <div><p className="text-lg font-bold text-foreground">{org._count.users}</p><p className="text-xs text-muted-foreground">usuarios</p></div>
+                                                        <div><p className="text-lg font-bold text-foreground">{org._count.specialists}</p><p className="text-xs text-muted-foreground">especialistas</p></div>
+                                                        <div><p className="text-lg font-bold text-foreground">{org._count.appointments}</p><p className="text-xs text-muted-foreground">citas</p></div>
                                                     </div>
                                                     <div className="flex gap-2">
                                                         <button
                                                             onClick={() => { setDesignOrg(org); setAdminForm({ name: "", email: "", password: "" }); }}
-                                                            className="text-xs px-3 py-1.5 rounded-lg bg-teal-900/40 text-teal-400 hover:bg-teal-900/70 transition-colors font-medium"
+                                                            className="text-xs px-3 py-1.5 rounded-lg bg-teal-100 text-teal-700 dark:text-teal-400 hover:bg-teal-200 dark:hover:bg-teal-900/70 transition-colors font-medium"
                                                         >
                                                             Designar admin
                                                         </button>
                                                         <button
                                                             onClick={() => openConfigFields(org)}
-                                                            className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors font-medium"
+                                                            className="text-xs px-3 py-1.5 rounded-lg bg-slate-200 text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600 transition-colors font-medium"
                                                             title="Configurar campos de registro"
                                                         >
                                                             Campos
                                                         </button>
                                                         <button
                                                             onClick={() => { setEditOrg(org); setEditForm({ name: org.name, type: org.type, plan: org.plan, userRoleLabel: org.userRoleLabel ?? "Usuario", departments: org.departments ?? [...ALL_DEPARTMENTS] }); setLogoFile(null); }}
-                                                            className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-indigo-900/20 transition-colors"
+                                                            className="p-1.5 rounded-lg text-muted-foreground hover:text-indigo-700 hover:bg-indigo-50 transition-colors"
                                                             title="Editar"
                                                         >
                                                             <Pencil className="w-4 h-4" />
                                                         </button>
                                                         <button
                                                             onClick={() => toggleOrgActive(org)}
-                                                            className={`p-1.5 rounded-lg transition-colors ${org.active ? "text-slate-400 hover:text-red-400 hover:bg-red-900/20" : "text-green-400 hover:bg-green-900/20"}`}
+                                                            className={`p-1.5 rounded-lg transition-colors ${org.active ? "text-muted-foreground hover:text-rose-700 hover:bg-rose-50" : "text-green-700 dark:text-green-400 hover:bg-green-50"}`}
                                                             title={org.active ? "Desactivar" : "Activar"}
                                                         >
                                                             {org.active ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
@@ -743,12 +758,12 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                 {tab === "users" && (
                     <div className="space-y-4">
                         <div className="flex items-center justify-between gap-4 flex-wrap">
-                            <h2 className="text-xl font-bold text-white">Usuarios globales <span className="text-slate-500 text-base font-normal">({usersTotal})</span></h2>
+                            <h2 className="text-xl font-bold text-foreground">Usuarios globales <span className="text-muted-foreground text-base font-normal">({usersTotal})</span></h2>
                             <div className="flex items-center gap-2 flex-wrap">
                                 <select
                                     value={userOrgFilter}
                                     onChange={e => { setUserOrgFilter(e.target.value); setUsersPage(1); fetchUsers(1, e.target.value, true); }}
-                                    className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                                    className="bg-muted border border-border rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-indigo-500"
                                 >
                                     <option value="">Todas las orgs</option>
                                     {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
@@ -759,53 +774,53 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                 >
                                     <Plus className="w-4 h-4" /> Nuevo usuario
                                 </button>
-                                <button onClick={() => fetchUsers(usersPage, userOrgFilter, true)} className="text-slate-400 hover:text-white transition-colors">
+                                <button onClick={() => fetchUsers(usersPage, userOrgFilter, true)} className="text-muted-foreground hover:text-foreground transition-colors">
                                     <RefreshCw className={`w-4 h-4 ${usersLoading ? "animate-spin" : ""}`} />
                                 </button>
                             </div>
                         </div>
 
-                        <div className="bg-slate-900 rounded-xl overflow-hidden">
+                        <div className="bg-card rounded-xl overflow-hidden">
                             <table className="w-full text-sm">
                                 <thead>
-                                    <tr className="border-b border-slate-800">
-                                        <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-3">Usuario</th>
-                                        <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-3">Rol</th>
-                                        <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-3 hidden md:table-cell">Organización</th>
-                                        <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-3 hidden lg:table-cell">Registrado</th>
+                                    <tr className="border-b border-border">
+                                        <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Usuario</th>
+                                        <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Rol</th>
+                                        <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3 hidden md:table-cell">Organización</th>
+                                        <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3 hidden lg:table-cell">Registrado</th>
                                         <th className="px-4 py-3" />
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {usersLoading ? (
-                                        <tr><td colSpan={5} className="text-center py-8 text-slate-500">Cargando...</td></tr>
+                                        <tr><td colSpan={5} className="text-center py-8 text-muted-foreground">Cargando...</td></tr>
                                     ) : users.length === 0 ? (
-                                        <tr><td colSpan={5} className="text-center py-8 text-slate-500">Sin usuarios</td></tr>
+                                        <tr><td colSpan={5} className="text-center py-8 text-muted-foreground">Sin usuarios</td></tr>
                                     ) : users.map(u => (
-                                        <tr key={u.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
+                                        <tr key={u.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                                             <td className="px-4 py-3">
-                                                <p className="font-medium text-white">{u.name}</p>
-                                                <p className="text-xs text-slate-500">{u.email}</p>
+                                                <p className="font-medium text-foreground">{u.name}</p>
+                                                <p className="text-xs text-muted-foreground">{u.email}</p>
                                             </td>
                                             <td className="px-4 py-3">
-                                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ROLE_COLOR[u.role] ?? "bg-slate-100 text-slate-600"}`}>{u.role}</span>
+                                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ROLE_COLOR[u.role] ?? "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>{u.role}</span>
                                             </td>
                                             <td className="px-4 py-3 hidden md:table-cell">
-                                                <span className="text-slate-300">{u.organization?.name ?? <span className="text-slate-600 italic">Sin org</span>}</span>
+                                                <span className="text-foreground">{u.organization?.name ?? <span className="text-muted-foreground italic">Sin org</span>}</span>
                                             </td>
-                                            <td className="px-4 py-3 hidden lg:table-cell text-slate-400 text-xs">{fmtDate(u.createdAt)}</td>
+                                            <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-xs">{fmtDate(u.createdAt)}</td>
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center gap-1 justify-end">
                                                     <button
                                                         onClick={() => { setEditUser(u); setEditUserForm({ name: u.name, email: u.email, role: u.role, organizationId: u.organizationId ?? "", password: "" }); }}
-                                                        className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-indigo-900/20 transition-colors"
+                                                        className="p-1.5 rounded-lg text-muted-foreground hover:text-indigo-700 hover:bg-indigo-50 transition-colors"
                                                         title="Editar"
                                                     ><Pencil className="w-3.5 h-3.5" /></button>
                                                     {u.role !== "superadmin" && (
                                                         <button
                                                             onClick={() => setDeleteUserId(u.id)}
-                                                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-900/20 transition-colors"
-                                                            title="Eliminar"
+                                                            className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-700 hover:bg-rose-50 transition-colors"
+                                                            title="Dar de baja"
                                                         ><PowerOff className="w-3.5 h-3.5" /></button>
                                                     )}
                                                 </div>
@@ -815,11 +830,11 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                 </tbody>
                             </table>
                             {usersTotal > 50 && (
-                                <div className="flex items-center justify-between px-4 py-3 border-t border-slate-800 text-xs text-slate-400">
+                                <div className="flex items-center justify-between px-4 py-3 border-t border-border text-xs text-muted-foreground">
                                     <span>{(usersPage - 1) * 50 + 1}–{Math.min(usersPage * 50, usersTotal)} de {usersTotal}</span>
                                     <div className="flex gap-2">
-                                        <button disabled={usersPage <= 1} onClick={() => { setUsersPage(p => p - 1); fetchUsers(usersPage - 1, userOrgFilter); }} className="px-2 py-1 rounded bg-slate-800 disabled:opacity-40">Anterior</button>
-                                        <button disabled={usersPage * 50 >= usersTotal} onClick={() => { setUsersPage(p => p + 1); fetchUsers(usersPage + 1, userOrgFilter); }} className="px-2 py-1 rounded bg-slate-800 disabled:opacity-40">Siguiente</button>
+                                        <button disabled={usersPage <= 1} onClick={() => { setUsersPage(p => p - 1); fetchUsers(usersPage - 1, userOrgFilter); }} className="px-2 py-1 rounded bg-muted disabled:opacity-40">Anterior</button>
+                                        <button disabled={usersPage * 50 >= usersTotal} onClick={() => { setUsersPage(p => p + 1); fetchUsers(usersPage + 1, userOrgFilter); }} className="px-2 py-1 rounded bg-muted disabled:opacity-40">Siguiente</button>
                                     </div>
                                 </div>
                             )}
@@ -831,25 +846,25 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                 {tab === "audit" && (
                     <div className="space-y-4">
                         <div className="flex items-center justify-between">
-                            <h2 className="text-xl font-bold text-white">Registro de auditoría <span className="text-slate-500 text-base font-normal">({auditTotal})</span></h2>
-                            <button onClick={() => fetchAudit(auditPage, true)} className="text-slate-400 hover:text-white transition-colors">
+                            <h2 className="text-xl font-bold text-foreground">Registro de auditoría <span className="text-muted-foreground text-base font-normal">({auditTotal})</span></h2>
+                            <button onClick={() => fetchAudit(auditPage, true)} className="text-muted-foreground hover:text-foreground transition-colors">
                                 <RefreshCw className={`w-4 h-4 ${auditLoading ? "animate-spin" : ""}`} />
                             </button>
                         </div>
-                        <div className="bg-slate-900 rounded-xl overflow-hidden">
+                        <div className="bg-card rounded-xl overflow-hidden">
                             {auditLoading ? (
-                                <p className="text-center py-8 text-slate-500">Cargando...</p>
+                                <p className="text-center py-8 text-muted-foreground">Cargando...</p>
                             ) : audit.length === 0 ? (
-                                <p className="text-center py-8 text-slate-500">Sin entradas de auditoría</p>
+                                <p className="text-center py-8 text-muted-foreground">Sin entradas de auditoría</p>
                             ) : audit.map(entry => (
                                 <AuditRow key={entry.id} entry={entry} verbose />
                             ))}
                             {auditTotal > 100 && (
-                                <div className="flex items-center justify-between px-4 py-3 border-t border-slate-800 text-xs text-slate-400">
+                                <div className="flex items-center justify-between px-4 py-3 border-t border-border text-xs text-muted-foreground">
                                     <span>Página {auditPage}</span>
                                     <div className="flex gap-2">
-                                        <button disabled={auditPage <= 1} onClick={() => { setAuditPage(p => p - 1); fetchAudit(auditPage - 1); }} className="px-2 py-1 rounded bg-slate-800 disabled:opacity-40">Anterior</button>
-                                        <button disabled={auditPage * 100 >= auditTotal} onClick={() => { setAuditPage(p => p + 1); fetchAudit(auditPage + 1); }} className="px-2 py-1 rounded bg-slate-800 disabled:opacity-40">Siguiente</button>
+                                        <button disabled={auditPage <= 1} onClick={() => { setAuditPage(p => p - 1); fetchAudit(auditPage - 1); }} className="px-2 py-1 rounded bg-muted disabled:opacity-40">Anterior</button>
+                                        <button disabled={auditPage * 100 >= auditTotal} onClick={() => { setAuditPage(p => p + 1); fetchAudit(auditPage + 1); }} className="px-2 py-1 rounded bg-muted disabled:opacity-40">Siguiente</button>
                                     </div>
                                 </div>
                             )}
@@ -865,16 +880,16 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                         <Field label="Nombre" value={createForm.name} onChange={v => setCreateForm(f => ({ ...f, name: v, slug: v.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') }))} placeholder="TECNL" />
                         <Field label="Slug (URL)" value={createForm.slug} onChange={v => setCreateForm(f => ({ ...f, slug: v.toLowerCase().replace(/[^a-z0-9-]/g, '') }))} placeholder="tecnl" mono />
                         <div>
-                            <label className="block text-xs font-medium text-slate-400 mb-1">Tipo</label>
-                            <select value={createForm.type} onChange={e => setCreateForm(f => ({ ...f, type: e.target.value }))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                            <label className="block text-xs font-medium text-muted-foreground mb-1">Tipo</label>
+                            <select value={createForm.type} onChange={e => setCreateForm(f => ({ ...f, type: e.target.value }))} className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-indigo-500">
                                 <option value="school">Institución Educativa</option>
                                 <option value="hospital">Hospital / Clínica</option>
                                 <option value="company">Empresa</option>
                             </select>
                         </div>
                         <div>
-                            <label className="block text-xs font-medium text-slate-400 mb-1">Plan</label>
-                            <select value={createForm.plan} onChange={e => setCreateForm(f => ({ ...f, plan: e.target.value }))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                            <label className="block text-xs font-medium text-muted-foreground mb-1">Plan</label>
+                            <select value={createForm.plan} onChange={e => setCreateForm(f => ({ ...f, plan: e.target.value }))} className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-indigo-500">
                                 <option value="free">Free</option>
                                 <option value="basic">Basic</option>
                                 <option value="enterprise">Enterprise</option>
@@ -882,7 +897,7 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                         </div>
                         <Field label="Cómo se llaman los usuarios" value={createForm.userRoleLabel} onChange={v => setCreateForm(f => ({ ...f, userRoleLabel: v }))} placeholder="Alumno / Paciente / Empleado" />
                         <div className="flex justify-end gap-2 pt-2">
-                            <button onClick={() => setShowCreateOrg(false)} className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-white transition-colors">Cancelar</button>
+                            <button onClick={() => setShowCreateOrg(false)} className="px-4 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground transition-colors">Cancelar</button>
                             <button onClick={createOrg} disabled={creating} className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 transition-colors">
                                 {creating ? "Creando..." : "Crear organización"}
                             </button>
@@ -895,15 +910,15 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
             {showCreateUser && (
                 <Modal title="Nuevo usuario" onClose={() => setShowCreateUser(false)}>
                     <div className="space-y-4">
-                        <div className="flex items-start gap-2 p-3 bg-teal-900/20 border border-teal-800/40 rounded-lg text-xs text-teal-300">
+                        <div className="flex items-start gap-2 p-3 bg-teal-50 border border-teal-200 rounded-lg text-xs text-teal-700 dark:text-teal-300">
                             <ShieldCheck className="w-4 h-4 mt-0.5 shrink-0" />
                             <span>El usuario recibirá un correo para activar su cuenta y elegir su contraseña.</span>
                         </div>
                         <Field label="Nombre completo" value={createUserForm.name} onChange={v => setCreateUserForm(f => ({ ...f, name: v }))} placeholder="Ana García" />
                         <Field label="Correo" value={createUserForm.email} onChange={v => setCreateUserForm(f => ({ ...f, email: v }))} placeholder="usuario@org.com" type="email" />
                         <div>
-                            <label className="block text-xs font-medium text-slate-400 mb-1">Rol</label>
-                            <select value={createUserForm.role} onChange={e => setCreateUserForm(f => ({ ...f, role: e.target.value }))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                            <label className="block text-xs font-medium text-muted-foreground mb-1">Rol</label>
+                            <select value={createUserForm.role} onChange={e => setCreateUserForm(f => ({ ...f, role: e.target.value }))} className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-indigo-500">
                                 <option value="alumno">Alumno (escuela)</option>
                                 <option value="usuario">Usuario (empresa / hospital)</option>
                                 <option value="especialista">Especialista</option>
@@ -913,15 +928,15 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                         </div>
                         {createUserForm.role !== "superadmin" && (
                             <div>
-                                <label className="block text-xs font-medium text-slate-400 mb-1">Organización</label>
-                                <select value={createUserForm.organizationId} onChange={e => setCreateUserForm(f => ({ ...f, organizationId: e.target.value }))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                                <label className="block text-xs font-medium text-muted-foreground mb-1">Organización</label>
+                                <select value={createUserForm.organizationId} onChange={e => setCreateUserForm(f => ({ ...f, organizationId: e.target.value }))} className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-indigo-500">
                                     <option value="">Seleccionar...</option>
                                     {orgs.filter(o => o.active).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                                 </select>
                             </div>
                         )}
                         <div className="flex justify-end gap-2 pt-2">
-                            <button onClick={() => setShowCreateUser(false)} className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-white transition-colors">Cancelar</button>
+                            <button onClick={() => setShowCreateUser(false)} className="px-4 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground transition-colors">Cancelar</button>
                             <button onClick={saveCreateUser} disabled={userActionLoading} className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 transition-colors">
                                 {userActionLoading ? "Creando..." : "Crear usuario"}
                             </button>
@@ -937,8 +952,8 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                         <Field label="Nombre completo" value={editUserForm.name} onChange={v => setEditUserForm(f => ({ ...f, name: v }))} placeholder="Ana García" />
                         <Field label="Correo" value={editUserForm.email} onChange={v => setEditUserForm(f => ({ ...f, email: v }))} type="email" placeholder="usuario@org.com" />
                         <div>
-                            <label className="block text-xs font-medium text-slate-400 mb-1">Rol</label>
-                            <select value={editUserForm.role} onChange={e => setEditUserForm(f => ({ ...f, role: e.target.value }))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                            <label className="block text-xs font-medium text-muted-foreground mb-1">Rol</label>
+                            <select value={editUserForm.role} onChange={e => setEditUserForm(f => ({ ...f, role: e.target.value }))} className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-indigo-500">
                                 <option value="alumno">Alumno (escuela)</option>
                                 <option value="usuario">Usuario (empresa / hospital)</option>
                                 <option value="especialista">Especialista</option>
@@ -948,8 +963,8 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                         </div>
                         {editUserForm.role !== "superadmin" && (
                             <div>
-                                <label className="block text-xs font-medium text-slate-400 mb-1">Organización</label>
-                                <select value={editUserForm.organizationId} onChange={e => setEditUserForm(f => ({ ...f, organizationId: e.target.value }))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                                <label className="block text-xs font-medium text-muted-foreground mb-1">Organización</label>
+                                <select value={editUserForm.organizationId} onChange={e => setEditUserForm(f => ({ ...f, organizationId: e.target.value }))} className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-indigo-500">
                                     <option value="">Sin organización</option>
                                     {orgs.filter(o => o.active).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                                 </select>
@@ -957,7 +972,7 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                         )}
                         <Field label="Nueva contraseña (opcional)" value={editUserForm.password} onChange={v => setEditUserForm(f => ({ ...f, password: v }))} placeholder="Dejar vacío para no cambiar" type="password" />
                         <div className="flex justify-end gap-2 pt-2">
-                            <button onClick={() => setEditUser(null)} className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-white transition-colors">Cancelar</button>
+                            <button onClick={() => setEditUser(null)} className="px-4 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground transition-colors">Cancelar</button>
                             <button onClick={saveEditUser} disabled={userActionLoading} className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 transition-colors">
                                 {userActionLoading ? "Guardando..." : "Guardar cambios"}
                             </button>
@@ -966,18 +981,18 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                 </Modal>
             )}
 
-            {/* ── Modal: Confirmar eliminación ──────────────────────────────── */}
+            {/* ── Modal: Confirmar baja de usuario ───────────────────────────── */}
             {deleteUserId && (
-                <Modal title="Confirmar eliminación" onClose={() => setDeleteUserId(null)}>
+                <Modal title="Dar de baja al usuario" onClose={() => setDeleteUserId(null)}>
                     <div className="space-y-4">
-                        <div className="flex items-start gap-2 p-3 bg-red-900/20 border border-red-800/40 rounded-lg text-xs text-red-300">
+                        <div className="flex items-start gap-2 p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700">
                             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                            <span>Esta acción es irreversible. Se eliminarán todos los datos asociados al usuario.</span>
+                            <span>La cuenta dejará de tener acceso y sus sesiones abiertas se cerrarán. Los datos NO se eliminan: el expediente clínico debe conservarse (NOM-004). Un administrador puede reactivarla después.</span>
                         </div>
                         <div className="flex justify-end gap-2 pt-2">
-                            <button onClick={() => setDeleteUserId(null)} className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-white transition-colors">Cancelar</button>
-                            <button onClick={confirmDeleteUser} disabled={userActionLoading} className="px-4 py-2 rounded-lg text-sm font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-50 transition-colors">
-                                {userActionLoading ? "Eliminando..." : "Sí, eliminar"}
+                            <button onClick={() => setDeleteUserId(null)} className="px-4 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground transition-colors">Cancelar</button>
+                            <button onClick={confirmDeleteUser} disabled={userActionLoading} className="px-4 py-2 rounded-lg text-sm font-medium bg-rose-700 hover:bg-rose-600 text-white disabled:opacity-50 transition-colors">
+                                {userActionLoading ? "Dando de baja..." : "Sí, dar de baja"}
                             </button>
                         </div>
                     </div>
@@ -991,27 +1006,27 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
 
                         {/* Lista de campos existentes */}
                         {orgFieldsLoading ? (
-                            <p className="text-sm text-slate-400 text-center py-4">Cargando...</p>
+                            <p className="text-sm text-muted-foreground text-center py-4">Cargando...</p>
                         ) : orgFields.length === 0 && !showAddField ? (
-                            <p className="text-sm text-slate-500 text-center py-4">Sin campos configurados aún.</p>
+                            <p className="text-sm text-muted-foreground text-center py-4">Sin campos configurados aún.</p>
                         ) : (
                             <div className="space-y-2">
                                 {orgFields.map(field => (
-                                    <div key={field.id} className={`flex items-center justify-between gap-2 p-3 rounded-lg border ${editingField?.id === field.id ? "border-indigo-500 bg-indigo-900/10" : "border-slate-700 bg-slate-800/50"}`}>
+                                    <div key={field.id} className={`flex items-center justify-between gap-2 p-3 rounded-lg border ${editingField?.id === field.id ? "border-indigo-500 bg-indigo-50" : "border-border bg-muted/50"}`}>
                                         <div className="min-w-0">
                                             <div className="flex items-center gap-2 flex-wrap">
-                                                <span className="text-sm font-medium text-white">{field.label}</span>
-                                                <span className="text-xs font-mono text-slate-500">{field.key}</span>
-                                                <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">{field.type}</span>
-                                                {field.required && <span className="text-xs text-rose-400">requerido</span>}
+                                                <span className="text-sm font-medium text-foreground">{field.label}</span>
+                                                <span className="text-xs font-mono text-muted-foreground">{field.key}</span>
+                                                <span className="text-xs px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200">{field.type}</span>
+                                                {field.required && <span className="text-xs text-rose-700">requerido</span>}
                                             </div>
                                             {Array.isArray(field.options) && field.options.length > 0 && (
-                                                <p className="text-xs text-slate-500 mt-0.5 truncate">{field.options.join(", ")}</p>
+                                                <p className="text-xs text-muted-foreground mt-0.5 truncate">{field.options.join(", ")}</p>
                                             )}
                                         </div>
                                         <div className="flex gap-1.5 shrink-0">
-                                            <button onClick={() => openEditField(field)} className="p-1.5 rounded text-slate-400 hover:text-indigo-400 hover:bg-indigo-900/20 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
-                                            <button onClick={() => deleteField(field)} className="p-1.5 rounded text-slate-400 hover:text-red-400 hover:bg-red-900/20 transition-colors"><PowerOff className="w-3.5 h-3.5" /></button>
+                                            <button onClick={() => openEditField(field)} className="p-1.5 rounded text-muted-foreground hover:text-indigo-700 hover:bg-indigo-50 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
+                                            <button onClick={() => deleteField(field)} title="Eliminar campo" className="p-1.5 rounded text-muted-foreground hover:text-rose-700 hover:bg-rose-50 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
                                         </div>
                                     </div>
                                 ))}
@@ -1020,28 +1035,28 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
 
                         {/* Formulario agregar / editar campo */}
                         {(showAddField || editingField) && (
-                            <div className="border border-slate-600 rounded-xl p-4 space-y-3 bg-slate-800/40">
-                                <p className="text-xs font-semibold text-slate-300 uppercase tracking-wider">{editingField ? "Editar campo" : "Nuevo campo"}</p>
+                            <div className="border border-border rounded-xl p-4 space-y-3 bg-muted/40">
+                                <p className="text-xs font-semibold text-foreground uppercase tracking-wider">{editingField ? "Editar campo" : "Nuevo campo"}</p>
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
-                                        <label className="block text-xs text-slate-400 mb-1">Label <span className="text-rose-400">*</span></label>
+                                        <label className="block text-xs text-muted-foreground mb-1">Label <span className="text-rose-700">*</span></label>
                                         <input value={fieldForm.label} onChange={e => {
                                             const label = e.target.value;
                                             setFieldForm(f => ({
                                                 ...f, label,
                                                 key: editingField ? f.key : label.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''),
                                             }));
-                                        }} placeholder="Número de Control" className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500" />
+                                        }} placeholder="Número de Control" className="w-full bg-muted border border-border rounded-lg px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-indigo-500" />
                                     </div>
                                     <div>
-                                        <label className="block text-xs text-slate-400 mb-1">Identificador <span className="text-rose-400">*</span></label>
-                                        <input value={fieldForm.key} onChange={e => setFieldForm(f => ({ ...f, key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '') }))} placeholder="numero_control" className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white font-mono placeholder:text-slate-500 focus:outline-none focus:border-indigo-500" />
+                                        <label className="block text-xs text-muted-foreground mb-1">Identificador <span className="text-rose-700">*</span></label>
+                                        <input value={fieldForm.key} onChange={e => setFieldForm(f => ({ ...f, key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '') }))} placeholder="numero_control" className="w-full bg-muted border border-border rounded-lg px-3 py-1.5 text-sm text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:border-indigo-500" />
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
-                                        <label className="block text-xs text-slate-400 mb-1">Tipo</label>
-                                        <select value={fieldForm.type} onChange={e => setFieldForm(f => ({ ...f, type: e.target.value }))} className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                                        <label className="block text-xs text-muted-foreground mb-1">Tipo</label>
+                                        <select value={fieldForm.type} onChange={e => setFieldForm(f => ({ ...f, type: e.target.value }))} className="w-full bg-muted border border-border rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-indigo-500">
                                             <option value="text">Texto</option>
                                             <option value="number">Número</option>
                                             <option value="select">Select</option>
@@ -1050,22 +1065,22 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                         </select>
                                     </div>
                                     <div>
-                                        <label className="block text-xs text-slate-400 mb-1">Placeholder</label>
-                                        <input value={fieldForm.placeholder} onChange={e => setFieldForm(f => ({ ...f, placeholder: e.target.value }))} placeholder="Ej. L20123456" className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500" />
+                                        <label className="block text-xs text-muted-foreground mb-1">Placeholder</label>
+                                        <input value={fieldForm.placeholder} onChange={e => setFieldForm(f => ({ ...f, placeholder: e.target.value }))} placeholder="Ej. L20123456" className="w-full bg-muted border border-border rounded-lg px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-indigo-500" />
                                     </div>
                                 </div>
                                 {(fieldForm.type === "select" || fieldForm.type === "radio") && (
                                     <div>
-                                        <label className="block text-xs text-slate-400 mb-1">Opciones <span className="text-slate-500">(una por línea)</span></label>
-                                        <textarea value={fieldForm.options} onChange={e => setFieldForm(f => ({ ...f, options: e.target.value }))} rows={4} placeholder={"Opción 1\nOpción 2\nOpción 3"} className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 resize-none" />
+                                        <label className="block text-xs text-muted-foreground mb-1">Opciones <span className="text-muted-foreground">(una por línea)</span></label>
+                                        <textarea value={fieldForm.options} onChange={e => setFieldForm(f => ({ ...f, options: e.target.value }))} rows={4} placeholder={"Opción 1\nOpción 2\nOpción 3"} className="w-full bg-muted border border-border rounded-lg px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-indigo-500 resize-none" />
                                     </div>
                                 )}
                                 <label className="flex items-center gap-2 cursor-pointer">
                                     <input type="checkbox" checked={fieldForm.required} onChange={e => setFieldForm(f => ({ ...f, required: e.target.checked }))} className="w-4 h-4 rounded accent-indigo-500" />
-                                    <span className="text-sm text-slate-300">Campo requerido</span>
+                                    <span className="text-sm text-foreground">Campo requerido</span>
                                 </label>
                                 <div className="flex justify-end gap-2">
-                                    <button onClick={() => { setShowAddField(false); setEditingField(null); }} className="px-3 py-1.5 text-sm text-slate-400 hover:text-white transition-colors">Cancelar</button>
+                                    <button onClick={() => { setShowAddField(false); setEditingField(null); }} className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">Cancelar</button>
                                     <button onClick={saveField} disabled={fieldSaving} className="px-4 py-1.5 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-50 transition-colors">
                                         {fieldSaving ? "Guardando..." : editingField ? "Guardar cambios" : "Agregar campo"}
                                     </button>
@@ -1074,7 +1089,7 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                         )}
 
                         {!showAddField && !editingField && (
-                            <button onClick={openAddField} className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-slate-600 rounded-xl text-sm text-slate-400 hover:text-white hover:border-slate-500 transition-colors">
+                            <button onClick={openAddField} className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-border rounded-xl text-sm text-muted-foreground hover:text-foreground hover:border-ring transition-colors">
                                 <Plus className="w-4 h-4" /> Agregar campo
                             </button>
                         )}
@@ -1093,12 +1108,12 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                             las ya agendadas se respetan y solo se bloquean las nuevas,
                             avisando por correo a quien tenga una pendiente. */}
                         <div>
-                            <label className="block text-xs font-medium text-slate-400 mb-1">Departamentos contratados</label>
-                            <div className="space-y-1.5 bg-slate-800/60 border border-slate-700 rounded-lg p-3">
+                            <label className="block text-xs font-medium text-muted-foreground mb-1">Departamentos contratados</label>
+                            <div className="space-y-1.5 bg-muted/60 border border-border rounded-lg p-3">
                                 {ALL_DEPARTMENTS.map(dept => {
                                     const checked = editForm.departments.includes(dept);
                                     return (
-                                        <label key={dept} className="flex items-center gap-2.5 cursor-pointer text-sm text-slate-200">
+                                        <label key={dept} className="flex items-center gap-2.5 cursor-pointer text-sm text-foreground">
                                             <input
                                                 type="checkbox"
                                                 checked={checked}
@@ -1108,7 +1123,7 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                                         ? f.departments.filter(d => d !== dept)
                                                         : [...f.departments, dept],
                                                 }))}
-                                                className="w-4 h-4 rounded border-slate-600 bg-slate-900 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-slate-900"
+                                                className="w-4 h-4 rounded border-border bg-card text-indigo-500 focus:ring-indigo-500 focus:ring-offset-background"
                                             />
                                             {dept}
                                         </label>
@@ -1116,12 +1131,12 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                 })}
                             </div>
                             {editForm.departments.length === 0 && (
-                                <p className="text-xs text-amber-400 mt-1.5">
+                                <p className="text-xs text-amber-700 mt-1.5">
                                     Sin departamentos, esta organización no podrá agendar ninguna cita.
                                 </p>
                             )}
                             {editOrg.departments?.some(d => !editForm.departments.includes(d)) && (
-                                <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                                <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
                                     Al retirar un departamento, las citas ya agendadas se respetan y se avisa
                                     por correo a los usuarios y especialistas afectados. Solo se bloquean las
                                     citas nuevas.
@@ -1130,16 +1145,16 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                         </div>
 
                         <div>
-                            <label className="block text-xs font-medium text-slate-400 mb-1">Tipo</label>
-                            <select value={editForm.type} onChange={e => setEditForm(f => ({ ...f, type: e.target.value }))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                            <label className="block text-xs font-medium text-muted-foreground mb-1">Tipo</label>
+                            <select value={editForm.type} onChange={e => setEditForm(f => ({ ...f, type: e.target.value }))} className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-indigo-500">
                                 <option value="school">Institución Educativa</option>
                                 <option value="hospital">Hospital / Clínica</option>
                                 <option value="company">Empresa</option>
                             </select>
                         </div>
                         <div>
-                            <label className="block text-xs font-medium text-slate-400 mb-1">Plan</label>
-                            <select value={editForm.plan} onChange={e => setEditForm(f => ({ ...f, plan: e.target.value }))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                            <label className="block text-xs font-medium text-muted-foreground mb-1">Plan</label>
+                            <select value={editForm.plan} onChange={e => setEditForm(f => ({ ...f, plan: e.target.value }))} className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-indigo-500">
                                 <option value="free">Free</option>
                                 <option value="basic">Basic</option>
                                 <option value="enterprise">Enterprise</option>
@@ -1148,20 +1163,20 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
 
                         {/* Logo upload */}
                         <div>
-                            <label className="block text-xs font-medium text-slate-400 mb-2">Logo de la organización</label>
+                            <label className="block text-xs font-medium text-muted-foreground mb-2">Logo de la organización</label>
                             <div className="flex items-center gap-3">
                                 {getUploadUrl(editOrg.logoUrl) ? (
                                     <img
                                         src={getUploadUrl(editOrg.logoUrl)!}
                                         alt="Logo"
-                                        className="w-14 h-14 rounded-xl object-contain bg-slate-800 border border-slate-700 p-1"
+                                        className="w-14 h-14 rounded-xl object-contain bg-muted border border-border p-1"
                                     />
                                 ) : (
-                                    <div className="w-14 h-14 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500 text-xs">{logoFile ? logoFile.name.slice(0, 8) + "…" : "Sin logo"}</div>
+                                    <div className="w-14 h-14 rounded-xl bg-muted border border-border flex items-center justify-center text-muted-foreground text-xs">{logoFile ? logoFile.name.slice(0, 8) + "…" : "Sin logo"}</div>
                                 )}
                                 <div className="flex-1 space-y-1.5">
                                     <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={e => setLogoFile(e.target.files?.[0] ?? null)} />
-                                    <button onClick={() => logoInputRef.current?.click()} className="w-full px-3 py-1.5 rounded-lg text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors">
+                                    <button onClick={() => logoInputRef.current?.click()} className="w-full px-3 py-1.5 rounded-lg text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-200 transition-colors">
                                         {logoFile ? logoFile.name : "Seleccionar imagen"}
                                     </button>
                                     {logoFile && (
@@ -1174,7 +1189,7 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                         </div>
 
                         <div className="flex justify-end gap-2 pt-2">
-                            <button onClick={() => { setEditOrg(null); setLogoFile(null); }} className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-white transition-colors">Cancelar</button>
+                            <button onClick={() => { setEditOrg(null); setLogoFile(null); }} className="px-4 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground transition-colors">Cancelar</button>
                             <button onClick={saveEditOrg} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 transition-colors">
                                 {saving ? "Guardando..." : "Guardar cambios"}
                             </button>
@@ -1187,18 +1202,18 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
             {designOrg && (
                 <Modal title={`Designar admin — ${designOrg.name}`} onClose={() => setDesignOrg(null)}>
                     <div className="space-y-4">
-                        <div className="flex items-start gap-2 p-3 bg-amber-900/20 border border-amber-800/40 rounded-lg text-xs text-amber-300">
+                        <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
                             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                             <span>Se creará una cuenta de administrador y se enviarán las credenciales al correo indicado.</span>
                         </div>
-                        <div className="flex items-start gap-2 p-3 bg-teal-900/20 border border-teal-800/40 rounded-lg text-xs text-teal-300">
+                        <div className="flex items-start gap-2 p-3 bg-teal-50 border border-teal-200 rounded-lg text-xs text-teal-700 dark:text-teal-300">
                             <ShieldCheck className="w-4 h-4 mt-0.5 shrink-0" />
                             <span>El administrador recibirá un correo para activar su cuenta y elegir su contraseña.</span>
                         </div>
                         <Field label="Nombre completo" value={adminForm.name} onChange={v => setAdminForm(f => ({ ...f, name: v }))} placeholder="Director TECNL" />
                         <Field label="Correo" value={adminForm.email} onChange={v => setAdminForm(f => ({ ...f, email: v }))} placeholder="admin@org.com" type="email" />
                         <div className="flex justify-end gap-2 pt-2">
-                            <button onClick={() => setDesignOrg(null)} className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-white transition-colors">Cancelar</button>
+                            <button onClick={() => setDesignOrg(null)} className="px-4 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground transition-colors">Cancelar</button>
                             <button onClick={designateAdmin} disabled={designating} className="px-4 py-2 rounded-lg text-sm font-medium bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50 transition-colors">
                                 {designating ? "Creando..." : "Designar administrador"}
                             </button>
@@ -1216,47 +1231,47 @@ function StatTile({ icon: Icon, label, value, sub, color }: {
     icon: React.ElementType; label: string; value: number; sub?: string; color: string;
 }) {
     const colors: Record<string, string> = {
-        indigo: "bg-indigo-900/30 text-indigo-400",
-        teal:   "bg-teal-900/30 text-teal-400",
-        blue:   "bg-blue-900/30 text-blue-400",
-        rose:   "bg-rose-900/30 text-rose-400",
+        indigo: "bg-indigo-100 text-indigo-700",
+        teal:   "bg-teal-100 text-teal-700 dark:text-teal-400",
+        blue:   "bg-blue-100 text-blue-700",
+        rose:   "bg-rose-100 text-rose-700",
     };
     return (
-        <div className="bg-slate-900 rounded-xl p-4">
+        <div className="bg-card rounded-xl p-4">
             <div className={`w-9 h-9 rounded-lg flex items-center justify-center mb-3 ${colors[color]}`}>
                 <Icon className="w-5 h-5" />
             </div>
-            <p className="text-2xl font-bold text-white">{value.toLocaleString()}</p>
-            <p className="text-xs text-slate-400 mt-0.5">{label}</p>
-            {sub && <p className="text-xs text-slate-600 mt-0.5">{sub}</p>}
+            <p className="text-2xl font-bold text-foreground">{value.toLocaleString()}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+            {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
         </div>
     );
 }
 
 const ACTION_COLOR: Record<string, string> = {
-    CREATE_ORGANIZATION:  "text-teal-400",
-    UPDATE_ORGANIZATION:  "text-blue-400",
-    DEACTIVATE_ORGANIZATION: "text-amber-400",
-    DELETE_ORGANIZATION:  "text-red-400",
-    CREATE_ORG_ADMIN:     "text-indigo-400",
+    CREATE_ORGANIZATION:  "text-teal-700 dark:text-teal-400",
+    UPDATE_ORGANIZATION:  "text-blue-700",
+    DEACTIVATE_ORGANIZATION: "text-amber-700",
+    DELETE_ORGANIZATION:  "text-rose-700",
+    CREATE_ORG_ADMIN:     "text-indigo-700",
 };
 
 function AuditRow({ entry, verbose = false }: { entry: AuditEntry; verbose?: boolean }) {
     return (
-        <div className="flex items-start gap-3 px-4 py-3 border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
-            <Clock className="w-4 h-4 text-slate-600 mt-0.5 shrink-0" />
+        <div className="flex items-start gap-3 px-4 py-3 border-b border-border/50 hover:bg-muted/20 transition-colors">
+            <Clock className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`text-xs font-mono font-semibold ${ACTION_COLOR[entry.action] ?? "text-slate-300"}`}>{entry.action}</span>
-                    <span className="text-xs text-slate-500">{entry.targetEntity} · {entry.targetId.slice(0, 8)}…</span>
+                    <span className={`text-xs font-mono font-semibold ${ACTION_COLOR[entry.action] ?? "text-foreground"}`}>{entry.action}</span>
+                    <span className="text-xs text-muted-foreground">{entry.targetEntity} · {entry.targetId.slice(0, 8)}…</span>
                 </div>
                 {verbose && entry.metadata && (
-                    <p className="text-xs text-slate-600 mt-0.5 truncate">{JSON.stringify(entry.metadata)}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5 truncate">{JSON.stringify(entry.metadata)}</p>
                 )}
             </div>
             <div className="text-right shrink-0">
-                <p className="text-xs text-slate-500">{fmtDateTime(entry.createdAt)}</p>
-                {verbose && entry.ipAddress && <p className="text-xs text-slate-700 font-mono">{entry.ipAddress}</p>}
+                <p className="text-xs text-muted-foreground">{fmtDateTime(entry.createdAt)}</p>
+                {verbose && entry.ipAddress && <p className="text-xs text-foreground font-mono">{entry.ipAddress}</p>}
             </div>
         </div>
     );
@@ -1265,10 +1280,10 @@ function AuditRow({ entry, verbose = false }: { entry: AuditEntry; verbose?: boo
 function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
-                    <h3 className="font-semibold text-white">{title}</h3>
-                    <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors text-xl leading-none">×</button>
+            <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+                    <h3 className="font-semibold text-foreground">{title}</h3>
+                    <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors text-xl leading-none">×</button>
                 </div>
                 <div className="px-6 py-5">{children}</div>
             </div>
@@ -1282,13 +1297,13 @@ function Field({ label, value, onChange, placeholder, type = "text", mono = fals
 }) {
     return (
         <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">{label}</label>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">{label}</label>
             <input
                 type={type}
                 value={value}
                 onChange={e => onChange(e.target.value)}
                 placeholder={placeholder}
-                className={`w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 ${mono ? "font-mono" : ""}`}
+                className={`w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-indigo-500 ${mono ? "font-mono" : ""}`}
             />
         </div>
     );

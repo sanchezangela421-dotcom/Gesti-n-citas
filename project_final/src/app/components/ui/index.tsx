@@ -2,6 +2,7 @@ import {
     CheckCircle2, Clock, Megaphone, RefreshCw, UserPlus, FileText,
     AlertTriangle, CalendarCheck, ChevronLeft, ChevronRight, X,
 } from "lucide-react";
+import { MISSED_STATUS } from "../../../constants";
 import { motion } from "motion/react";
 import { useId } from "react";
 import { Reveal, Stagger, StaggerItem, Skeleton, useCountUp } from "./motion";
@@ -33,7 +34,7 @@ const STATUS_VARIANTS: Record<string, { bg: string; text: string; border: string
     Cancelada:      { bg: "bg-rose-100",    text: "text-rose-700",    border: "border-rose-200",    dot: "bg-rose-500"    },
     // Neutro a propósito, no rojo: una inasistencia se registra para tener el
     // dato, no para señalar a nadie.
-    "No asistió":   { bg: "bg-slate-100",   text: "text-slate-600",   border: "border-slate-300",   dot: "bg-slate-400"   },
+    [MISSED_STATUS]: { bg: "bg-slate-100",   text: "text-slate-600",   border: "border-slate-300",   dot: "bg-slate-400"   },
     "Sin atender":  { bg: "bg-rose-100",    text: "text-rose-700",    border: "border-rose-200",    dot: "bg-rose-400"    },
     "Sesión tardía":{ bg: "bg-amber-100",   text: "text-amber-700",   border: "border-amber-200",   dot: "bg-amber-400"   },
     "Sin cerrar":   { bg: "bg-amber-100",   text: "text-amber-700",   border: "border-amber-200",   dot: "bg-amber-400"   },

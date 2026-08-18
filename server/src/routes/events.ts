@@ -5,6 +5,7 @@ import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { upload } from '../middleware/upload';
 import { orgScope } from '../lib/orgScope';
 import { sanitizeOptionalHttpUrl } from '../lib/urls';
+import { getCallerSpecialist } from '../lib/clinicalAccess';
 
 const router = Router();
 
@@ -228,9 +229,18 @@ router.get('/:id/registrations', verifyToken as any, async (req: AuthRequest, re
     const event = await prisma.appEvent.findFirst({ where: { id, ...orgScope(caller) } });
     if (!event) return res.status(404).json({ error: 'Evento no encontrado' });
 
-    // El especialista solo ve inscritos de los eventos que él creó
-    if (caller.role === 'especialista' && event.createdById !== caller.id) {
-      return res.status(403).json({ error: 'Solo puedes ver inscritos de tus propios eventos' });
+    // El especialista ve los inscritos de los eventos de SU departamento, no solo
+    // los que él publicó: la conferencia es del departamento, y quien la imparte
+    // o la cubre no siempre es quien la dio de alta. Conserva además el acceso a
+    // los eventos que creó (los "General" no pertenecen a ningún departamento).
+    if (caller.role === 'especialista') {
+      const spec = await getCallerSpecialist(req);
+      if (!spec) return res.status(403).json({ error: 'Perfil de especialista no encontrado.' });
+      const sameDepartment = event.department === spec.department;
+      const isAuthor = event.createdById === caller.id;
+      if (!sameDepartment && !isAuthor) {
+        return res.status(403).json({ error: 'Solo puedes ver inscritos de eventos de tu departamento.' });
+      }
     }
 
     const regs = await prisma.eventRegistration.findMany({

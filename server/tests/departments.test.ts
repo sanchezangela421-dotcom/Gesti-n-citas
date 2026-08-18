@@ -172,7 +172,7 @@ describe('las citas ya agendadas se respetan', () => {
     expect((await api('GET', '/api/auth/me', { token: tokenFor(specUser) })).status).toBe(200);
 
     const res = await api('PATCH', `/api/appointments/${appt.id}/status`, {
-      token: tokenFor(specUser), body: { status: 'Completada' },
+      token: tokenFor(specUser), body: { status: 'Completada', notes: 'Sesión concluida.' },
     });
     expect(res.status).toBe(200);
   });

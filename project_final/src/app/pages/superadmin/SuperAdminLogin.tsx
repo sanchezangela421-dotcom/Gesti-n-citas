@@ -47,24 +47,24 @@ export function SuperAdminLogin({ onLogin }: Props) {
     }
 
     return (
-        <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+        <div className="min-h-screen bg-background flex items-center justify-center p-6">
             <div className="w-full max-w-sm space-y-8">
 
                 {/* Logo / header */}
                 <div className="text-center space-y-3">
-                    <div className="w-14 h-14 bg-rose-900/30 border border-rose-800/50 rounded-2xl flex items-center justify-center mx-auto">
-                        <ShieldCheck className="w-7 h-7 text-rose-400" />
+                    <div className="w-14 h-14 bg-rose-100 border border-rose-200 rounded-2xl flex items-center justify-center mx-auto">
+                        <ShieldCheck className="w-7 h-7 text-rose-700" />
                     </div>
                     <div>
-                        <h1 className="text-xl font-bold text-white">Panel de SuperAdmin</h1>
-                        <p className="text-sm text-slate-500 mt-1">Acceso restringido — solo personal autorizado</p>
+                        <h1 className="text-xl font-bold text-foreground">Panel de SuperAdmin</h1>
+                        <p className="text-sm text-muted-foreground mt-1">Acceso restringido — solo personal autorizado</p>
                     </div>
                 </div>
 
                 {/* Form */}
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-xs font-medium text-slate-400 mb-1.5">Correo</label>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">Correo</label>
                         <input
                             type="email"
                             value={email}
@@ -72,12 +72,12 @@ export function SuperAdminLogin({ onLogin }: Props) {
                             required
                             autoComplete="username"
                             placeholder="superadmin@dominio.com"
-                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-rose-600 transition-colors"
+                            className="w-full bg-card border border-border rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-rose-600 transition-colors"
                         />
                     </div>
 
                     <div>
-                        <label className="block text-xs font-medium text-slate-400 mb-1.5">Contraseña</label>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1.5">Contraseña</label>
                         <div className="relative">
                             <input
                                 type={showPass ? "text" : "password"}
@@ -86,12 +86,12 @@ export function SuperAdminLogin({ onLogin }: Props) {
                                 required
                                 autoComplete="current-password"
                                 placeholder="••••••••"
-                                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 pr-10 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-rose-600 transition-colors"
+                                className="w-full bg-card border border-border rounded-xl px-4 py-2.5 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-rose-600 transition-colors"
                             />
                             <button
                                 type="button"
                                 onClick={() => setShowPass(v => !v)}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                             >
                                 {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                             </button>
@@ -99,7 +99,7 @@ export function SuperAdminLogin({ onLogin }: Props) {
                     </div>
 
                     {error && (
-                        <div className="flex items-start gap-2 p-3 bg-rose-900/20 border border-rose-800/40 rounded-xl text-xs text-rose-300">
+                        <div className="flex items-start gap-2 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700">
                             <Lock className="w-4 h-4 mt-0.5 shrink-0" />
                             <span>{error}</span>
                         </div>
@@ -114,7 +114,7 @@ export function SuperAdminLogin({ onLogin }: Props) {
                     </button>
                 </form>
 
-                <p className="text-center text-xs text-slate-700">
+                <p className="text-center text-xs text-foreground">
                     Esta sesión es auditada y monitoreada
                 </p>
             </div>

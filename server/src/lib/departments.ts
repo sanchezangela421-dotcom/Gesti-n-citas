@@ -44,6 +44,21 @@ export function contractedDepartments(org?: { departments?: string[] } | null): 
   return org.departments;
 }
 
+/**
+ * Departamentos cuya atención es clínica y por tanto exige nota de sesión.
+ *
+ * Tutorías queda fuera a propósito: es acompañamiento académico, no un servicio
+ * de salud, así que la NOM-004 no le aplica y exigirle una "nota clínica" no
+ * tendría fundamento. Ahí la anotación existe igual, pero es opcional y se llama
+ * "Observaciones".
+ */
+export const CLINICAL_DEPARTMENTS: readonly string[] = ['Psicología', 'Nutrición'];
+
+/** ¿Cerrar una cita de este departamento obliga a dejar nota? */
+export function requiresClinicalNote(department: string | null | undefined): boolean {
+  return !!department && CLINICAL_DEPARTMENTS.includes(department);
+}
+
 /** Etiqueta usada por eventos y recursos que no pertenecen a un departamento. */
 export const GENERAL_DEPARTMENT = 'General';
 

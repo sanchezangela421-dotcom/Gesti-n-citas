@@ -26,6 +26,14 @@ export const DEPT_REASONS: Record<string, string[]> = {
 export const DAY_NAMES = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 export const DAYS_FULL = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
+/**
+ * Estado de inasistencia. Vive aquí porque se compara en cinco pantallas y una
+ * errata (un acento de menos) no da error de compilación: simplemente deja de
+ * coincidir y la cita desaparece de los listados sin que nadie se entere.
+ * Debe coincidir con la constante MISSED del servidor (routes/appointments.ts).
+ */
+export const MISSED_STATUS = "No asistió";
+
 export const STATUS_BADGE_CONFIG: Record<string, { cls: string }> = {
   Pendiente: { cls: "bg-[#fef3c7] text-[#d97706]" },
   Confirmada: { cls: "bg-[#dbeafe] text-[#2563EB]" },

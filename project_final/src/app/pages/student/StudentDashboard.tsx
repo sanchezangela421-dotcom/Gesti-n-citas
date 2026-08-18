@@ -11,7 +11,7 @@ import { useStore } from "../../../context/StoreContext";
 import { API_BASE, API, authHeaders } from "../../../lib/api";
 import { AppShell } from "../../components/layout/AppShell";
 import { Btn, StatCard, TabNav, Modal, MiniCalendar, StatusBadge, Avatar, EmptyState, Stagger, StaggerItem } from "../../components/ui";
-import { DEPT_CONFIG, DEPT_REASONS } from "../../../constants";
+import { DEPT_CONFIG, DEPT_REASONS, MISSED_STATUS } from "../../../constants";
 import { useAppointmentWizard, useReschedule, useCancelAppointment } from "../../hooks";
 import { useDepartments } from "../../hooks/useDepartments";
 import type { AppEvent } from "../../../types";
@@ -146,7 +146,7 @@ export function StudentDashboard() {
         [appointments, activePeriod]
     );
     const historial = useMemo(
-        () => appointments.filter(a => a.status === "Completada" || a.status === "Cancelada" || a.status === "No asistió"),
+        () => appointments.filter(a => a.status === "Completada" || a.status === "Cancelada" || a.status === MISSED_STATUS),
         [appointments]
     );
 

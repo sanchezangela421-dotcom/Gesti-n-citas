@@ -89,8 +89,9 @@ describe('especialista inactivo', () => {
     await prisma.specialist.update({ where: { id: specialist.id }, data: { active: false } });
 
     // Inactivo no es baja: conserva el acceso y puede cerrar lo que ya tenía
+    // (con su nota, que en un departamento clínico es obligatoria para cerrar)
     const res = await api('PATCH', `/api/appointments/${appt.id}/status`, {
-      token: tokenFor(specUser), body: { status: 'Completada' },
+      token: tokenFor(specUser), body: { status: 'Completada', notes: 'Sesión concluida.' },
     });
     expect(res.status).toBe(200);
   });

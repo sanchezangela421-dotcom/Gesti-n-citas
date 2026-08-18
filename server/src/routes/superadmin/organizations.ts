@@ -6,6 +6,7 @@ import { writeAudit, getClientIp } from '../../services/auditLogger';
 import { ALL_DEPARTMENTS, parseContractedDepartments } from '../../lib/departments';
 import { notifyDepartmentDisabled } from '../../services/departmentNotices';
 import { upload } from '../../middleware/upload';
+import { defaultFieldsForOrgType, normalizeFieldKey } from '../../lib/registrationFields';
 
 const VALID_FIELD_TYPES = ['text', 'number', 'select', 'date', 'radio'];
 
@@ -44,8 +45,33 @@ router.post('/', async (req: SuperAdminRequest, res) => {
     }
 
     const { userRoleLabel } = req.body;
-    const org = await prisma.organization.create({
-      data: { name: name.trim(), slug: slugClean, type, plan: plan ?? 'free', active: true, userRoleLabel: userRoleLabel?.trim() || 'Usuario' },
+
+    // La organización nace CON sus campos de registro. Antes nacía sin ninguno:
+    // su formulario no pedía más que nombre y correo, así que no se capturaba
+    // fecha de nacimiento ni género y las gráficas demográficas quedaban vacías
+    // para siempre sin que nadie lo notara hasta abrir un reporte.
+    //
+    // Van en una transacción para que no pueda existir una organización a medio
+    // configurar, que es justo el estado que produjo el problema.
+    const org = await prisma.$transaction(async (tx) => {
+      const created = await tx.organization.create({
+        data: { name: name.trim(), slug: slugClean, type, plan: plan ?? 'free', active: true, userRoleLabel: userRoleLabel?.trim() || 'Usuario' },
+      });
+
+      await tx.registrationField.createMany({
+        data: defaultFieldsForOrgType(type).map(f => ({
+          organizationId: created.id,
+          key: f.key,
+          label: f.label,
+          type: f.type,
+          required: f.required,
+          order: f.order,
+          options: f.options ?? Prisma.JsonNull,
+          placeholder: f.placeholder,
+        })),
+      });
+
+      return created;
     });
 
     writeAudit({
@@ -213,8 +239,14 @@ router.post('/:id/fields', async (req: SuperAdminRequest, res) => {
       return res.status(400).json({ error: 'Los campos select/radio requieren al menos una opción' });
     }
 
+    // La MISMA forma normalizada para comprobar y para guardar: antes el chequeo
+    // usaba la clave tal cual y la escritura la normalizaba, así que dos etiquetas
+    // distintas podían colapsar en la misma clave, pasar el chequeo y reventar
+    // contra el índice único devolviendo un 500 en vez de un 409 explicativo.
+    const normalizedKey = normalizeFieldKey(key);
+
     const existing = await prisma.registrationField.findUnique({
-      where: { organizationId_key: { organizationId, key: key.trim() } },
+      where: { organizationId_key: { organizationId, key: normalizedKey } },
     });
     if (existing) return res.status(409).json({ error: 'Ya existe un campo con ese identificador' });
 
@@ -226,7 +258,7 @@ router.post('/:id/fields', async (req: SuperAdminRequest, res) => {
     const field = await prisma.registrationField.create({
       data: {
         organizationId,
-        key:         key.trim().toLowerCase().replace(/\s+/g, '_'),
+        key:         normalizedKey,
         label:       label.trim(),
         type,
         required:    required ?? false,

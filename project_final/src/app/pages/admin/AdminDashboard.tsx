@@ -5,7 +5,7 @@ import {
     BarChart3, Plus, Pencil, XCircle, Search, Download,
     Clock3, FileText, Megaphone, Brain, GraduationCap, Apple,
     CalendarDays, Trash2,
-    Scissors, ChevronDown, MapPin,
+    Scissors, ChevronDown, MapPin, RotateCcw, Archive,
 } from "lucide-react";
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -18,59 +18,54 @@ import { useAuth } from "../../../context/AuthContext";
 import { AppShell } from "../../components/layout/AppShell";
 import { Btn, StatCard, Avatar, StatusBadge, Modal, inputCls, EmptyState, Reveal } from "../../components/ui";
 import { Calendar } from "../../components/ui/calendar";
-import { DEPT_CONFIG, ALL_DEPARTMENTS } from "../../../constants";
+import { DEPT_CONFIG, ALL_DEPARTMENTS, MISSED_STATUS } from "../../../constants";
 import { useDepartments } from "../../hooks/useDepartments";
 
 // Presentación de las tarjetas de descarga de reporte, por departamento del
 // catálogo. Cuáles se muestran lo decide la lista de contratados.
-/** Campo de registro de la organización que sirve para agrupar estadísticas. */
-interface GroupableField { key: string; label: string }
-
 /**
- * Claves con gráfica propia hecha a mano, que por eso NO se grafican de forma
- * genérica: duplicarían la que ya existe. Semestre y edad además necesitan un
- * tratamiento que el mecanismo genérico no da (orden numérico y rangos etarios).
+ * Forma de /api/stats. El servidor ya entrega todo agregado —global y por
+ * departamento— porque este panel calculaba la demografía en el navegador
+ * mientras el generador de PDF repetía el mismo cálculo por su cuenta: tres
+ * implementaciones del mismo número que podían discrepar, y que además
+ * obligaban a traerse TODAS las citas y usuarios solo para poder pintarlas.
  */
-const FIELDS_WITH_OWN_CHART = new Set(['carrera', 'genero', 'semestre', 'fechaNacimiento']);
+type Distribution = { name: string; value: number }[];
 
-/**
- * Distribución de citas por el valor de un campo de registro de la organización.
- *
- * Sustituye a las gráficas fijas por carrera o género: cada organización define
- * sus propios campos y aquí se agrupa por lo que haya definido. Solo tiene
- * sentido con campos de conjunto cerrado (select y radio); agrupar por un texto
- * libre daría una barra por respuesta.
- *
- * Devuelve null si NADIE tiene valor: la gráfica solo diría "No especificado"
- * para todos, y mostrar eso es peor que no mostrar nada — parece un dato real.
- */
-function distributionByField(
-    appts: Appointment[],
-    usersById: Map<string, { metadata?: Record<string, string> | null }>,
-    field: GroupableField,
-): { key: string; label: string; data: { name: string; value: number }[] } | null {
-    const counts: Record<string, number> = {};
-    let withValue = 0;
-
-    for (const a of appts) {
-        const raw = usersById.get(a.studentId)?.metadata?.[field.key];
-        const value = typeof raw === "string" ? raw.trim() : "";
-        if (value) withValue++;
-        const name = value || "No especificado";
-        counts[name] = (counts[name] || 0) + 1;
-    }
-
-    if (withValue === 0) return null;
-
-    return {
-        key: field.key,
-        label: field.label,
-        data: Object.entries(counts)
-            .map(([name, value]) => ({ name, value }))
-            .sort((a, b) => b.value - a.value)
-            .slice(0, 8),
+interface StatBlock {
+    summary: {
+        total: number; pendientes: number; confirmadas: number;
+        completadas: number; canceladas: number; noAsistio: number;
+        seguimientos: number;
+    };
+    charts: {
+        monthly: Record<string, string | number>[];
+        motivos: Distribution;
+        modalidad: Distribution;
+        carrera: Distribution;
+        genero: Distribution;
+        semestre: Distribution;
+        edad: Distribution;
+        byField: { key: string; label: string; data: Distribution }[];
     };
 }
+
+interface StatsResponse {
+    summary: StatBlock["summary"] & { byDept?: Record<string, number> };
+    charts: StatBlock["charts"];
+    byDepartment?: Record<string, StatBlock>;
+    departments?: string[];
+}
+
+/**
+ * Bloque neutro para cuando el servidor aún no respondió o la vista apunta a un
+ * departamento que la organización ya no tiene contratado. Evita que el panel
+ * reviente por leer `.motivos` de un undefined.
+ */
+const EMPTY_CHARTS: StatBlock["charts"] = {
+    monthly: [], motivos: [], modalidad: [], carrera: [],
+    genero: [], semestre: [], edad: [], byField: [],
+};
 
 /** true si la gráfica tiene algún dato real y no solo "no especificado"/ceros. */
 function hasRealData(rows: { name: string; value: number }[] | undefined): boolean {
@@ -86,8 +81,7 @@ const REPORT_CARD_STYLE: Record<string, { icon: typeof Brain; gradient: string }
 import { PIE_COLORS } from "../../../data/mockData";
 import { useActionModal } from "../../hooks";
 import { useTheme } from "../../hooks/useTheme";
-import { API, API_BASE, authHeaders } from "../../../lib/api";
-import { calcularEdad } from "../../../utils/date";
+import { API, authHeaders } from "../../../lib/api";
 import { AdminContentTab } from "./AdminContentTab";
 import { AdminEventsTab } from "./AdminEventsTab";
 import type { Appointment, Specialist, OrgLocation, User } from "../../../types";
@@ -261,17 +255,26 @@ async function downloadChartAsImage(
     }
 }
 
-// ─── Age ranges (shared between PDF and charts) ───────────────────────────────
-const AGE_RANGES = [
-    { label: "15–17", min: 15, max: 17 },
-    { label: "18–20", min: 18, max: 20 },
-    { label: "21–23", min: 21, max: 23 },
-    { label: "24–26", min: 24, max: 26 },
-    { label: "27+",   min: 27, max: 99 },
-];
+
+/** jspdf-autotable cuelga el estado de la ultima tabla del doc sin tiparlo. */
+function lastTableEnd(doc: unknown): number {
+    return (doc as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
+}
 
 // ─── PDF report (pure jsPDF + autoTable, no canvas capture) ──────────────────
-async function generatePDFReport(deptReport: string, allAppts: Appointment[], users: { id: string; carrera?: string; genero?: string; semestre?: number; fechaNacimiento?: string }[], periodName?: string, isSchool?: boolean, userRoleLabel?: string, departments: string[] = [...ALL_DEPARTMENTS]) {
+//
+// Ya NO calcula nada: recibe el bloque que agregó el servidor. Antes reimplementaba
+// por su cuenta el mismo cálculo que hacía la pantalla, así que el reporte y las
+// gráficas podían dar números distintos para el mismo período.
+async function generatePDFReport(
+    deptReport: string,
+    detailAppts: Appointment[],
+    stats: StatsResponse,
+    periodName?: string,
+    isSchool?: boolean,
+    userRoleLabel?: string,
+    departments: string[] = [...ALL_DEPARTMENTS],
+) {
     const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
         import("jspdf"),
         import("jspdf-autotable"),
@@ -294,58 +297,21 @@ async function generatePDFReport(deptReport: string, allAppts: Appointment[], us
         doc.line(20, periodName ? 38 : 35, 190, periodName ? 38 : 35);
     };
 
-    const getDeptStats = (list: Appointment[]) => {
-        const motivosMap: Record<string, number> = {};
-        const modalidadMap: Record<string, number> = { Presencial: 0, Virtual: 0 };
-        const carreraMap: Record<string, number> = {};
-        const generoMap: Record<string, number> = {};
-        const semestreMap: Record<string, number> = {};
-        const edadMap: Record<string, number> = {};
-        list.forEach(a => {
-            const m = a.motivo || "Consulta General";
-            motivosMap[m] = (motivosMap[m] || 0) + 1;
-            if (a.modality === "Virtual") modalidadMap.Virtual++; else modalidadMap.Presencial++;
-            const student = users.find(u => u.id === a.studentId);
-            const c = student?.carrera || "No especificada";
-            carreraMap[c] = (carreraMap[c] || 0) + 1;
-            const g = student?.genero || "No especificado";
-            generoMap[g] = (generoMap[g] || 0) + 1;
-            const s = student?.semestre ? `Sem. ${student.semestre}` : "No esp.";
-            semestreMap[s] = (semestreMap[s] || 0) + 1;
-            if (student?.fechaNacimiento) {
-                const edad = calcularEdad(student.fechaNacimiento);
-                const rango = AGE_RANGES.find(r => edad >= r.min && edad <= r.max)?.label ?? "Otro";
-                edadMap[rango] = (edadMap[rango] || 0) + 1;
-            }
-        });
-        return {
-            total: list.length,
-            confirmadas: list.filter(a => a.status === "Confirmada").length,
-            completadas: list.filter(a => a.status === "Completada").length,
-            pendientes: list.filter(a => a.status === "Pendiente").length,
-            canceladas: list.filter(a => a.status === "Cancelada").length,
-            seguimientos: list.filter(a => a.isFollowUp).length,
-            topMotivos: Object.entries(motivosMap).sort(([, a], [, b]) => b - a).slice(0, 5),
-            modalidad: Object.entries(modalidadMap),
-            topCarreras: Object.entries(carreraMap).sort(([, a], [, b]) => b - a).slice(0, 6),
-            genero: Object.entries(generoMap).sort(([, a], [, b]) => b - a),
-            semestre: Object.entries(semestreMap).sort(([a], [b]) => {
-                const na = parseInt(a.replace("Sem. ", "")) || 99;
-                const nb = parseInt(b.replace("Sem. ", "")) || 99;
-                return na - nb;
-            }),
-            edad: AGE_RANGES
-                .map(r => [r.label, edadMap[r.label] ?? 0] as [string, number])
-                .filter(([, v]) => v > 0),
-        };
-    };
-
     const headerBottomY = periodName ? 44 : 41;
 
-    const addStatsPage = (dept: string, list: Appointment[], isFirst: boolean, pageTitle?: string) => {
+    /** Distribución del servidor → filas de autoTable. */
+    const rows = (dist: Distribution | undefined, limit?: number): (string | number)[][] => {
+        const list = dist ?? [];
+        const sliced = limit ? list.slice(0, limit) : list;
+        return sliced.map(d => [d.name, d.value]);
+    };
+
+    const addStatsPage = (block: StatBlock | undefined, isFirst: boolean, pageTitle: string) => {
         if (!isFirst) doc.addPage();
-        drawHeader(pageTitle ?? `Reporte de Atención — ${dept}`);
-        const stats = getDeptStats(list);
+        drawHeader(pageTitle);
+
+        const summary = block?.summary;
+        const charts = block?.charts;
 
         doc.setFontSize(12); doc.setTextColor(30, 41, 59);
         doc.text("Resumen de Actividad", 20, headerBottomY);
@@ -353,108 +319,153 @@ async function generatePDFReport(deptReport: string, allAppts: Appointment[], us
             startY: headerBottomY + 5,
             head: [["Métrica", "Cantidad"]],
             body: [
-                ["Total de Citas", stats.total],
-                ["Confirmadas", stats.confirmadas],
-                ["Completadas", stats.completadas],
-                ["Pendientes", stats.pendientes],
-                ["Canceladas", stats.canceladas],
-                ["De las cuales, seguimientos", stats.seguimientos],
+                ["Total de Citas", summary?.total ?? 0],
+                ["Confirmadas", summary?.confirmadas ?? 0],
+                ["Completadas", summary?.completadas ?? 0],
+                ["Pendientes", summary?.pendientes ?? 0],
+                ["Canceladas", summary?.canceladas ?? 0],
+                // Sin esta fila el total no cuadra con la suma de los estados.
+                [MISSED_STATUS, summary?.noAsistio ?? 0],
+                ["De las cuales, seguimientos", summary?.seguimientos ?? 0],
             ],
             theme: "grid",
             headStyles: { fillColor: [59, 130, 246] },
             margin: { left: 20, right: 20 },
         });
 
-        const currentY = (doc as any).lastAutoTable.finalY + 12;
+        const currentY = lastTableEnd(doc) + 12;
         doc.text("Distribución de Motivos y Modalidad", 20, currentY);
 
         autoTable(doc, {
             startY: currentY + 5,
             head: [["Motivos más frecuentes", "Citas"]],
-            body: stats.topMotivos,
+            body: rows(charts?.motivos, 5),
             theme: "striped",
             headStyles: { fillColor: [71, 85, 105] },
             margin: { left: 20, right: 105 },
         });
-        const motivosEndY = (doc as any).lastAutoTable.finalY;
+        const motivosEndY = lastTableEnd(doc);
 
         autoTable(doc, {
             startY: currentY + 5,
             head: [["Modalidad", "Citas"]],
-            body: stats.modalidad,
+            body: rows(charts?.modalidad),
             theme: "striped",
             headStyles: { fillColor: [71, 85, 105] },
             margin: { left: 110, right: 20 },
         });
-        const modalidadEndY = (doc as any).lastAutoTable.finalY;
+        const modalidadEndY = lastTableEnd(doc);
 
         const demoY = Math.max(motivosEndY, modalidadEndY) + 12;
         doc.setFontSize(12); doc.setTextColor(30, 41, 59);
-        const demoLabel = `${userRoleLabel ?? "Usuario"}s`;
-        doc.text(`Perfil Demográfico de ${demoLabel} Atendidos`, 20, demoY);
+        doc.text(`Perfil Demográfico de ${userRoleLabel ?? "Usuario"}s Atendidos`, 20, demoY);
+
+        // Los rangos etarios vacíos se omiten en el PDF: en pantalla el histograma
+        // los necesita para no verse con huecos, pero una tabla con ceros solo ocupa.
+        const edadRows = rows((charts?.edad ?? []).filter(d => d.value > 0));
 
         let finalNoteY: number;
         if (isSchool !== false) {
             autoTable(doc, {
                 startY: demoY + 5,
                 head: [["Carrera", "Citas"]],
-                body: stats.topCarreras,
+                body: rows(charts?.carrera, 6),
                 theme: "striped",
                 headStyles: { fillColor: [109, 40, 217] },
                 margin: { left: 20, right: 105 },
             });
-            const carreraEndY = (doc as any).lastAutoTable.finalY;
+            const carreraEndY = lastTableEnd(doc);
 
             autoTable(doc, {
                 startY: demoY + 5,
                 head: [["Género", "Citas"]],
-                body: stats.genero,
+                body: rows(charts?.genero),
                 theme: "striped",
                 headStyles: { fillColor: [109, 40, 217] },
                 margin: { left: 110, right: 20 },
             });
-            const generoEndY = (doc as any).lastAutoTable.finalY;
+            const generoEndY = lastTableEnd(doc);
 
             const semY = Math.max(carreraEndY, generoEndY) + 10;
             autoTable(doc, {
                 startY: semY,
                 head: [["Semestre", "Citas"]],
-                body: stats.semestre,
+                body: rows(charts?.semestre),
                 theme: "striped",
                 headStyles: { fillColor: [109, 40, 217] },
                 margin: { left: 20, right: 105 },
             });
-            const semestreEndY = (doc as any).lastAutoTable.finalY;
+            const semestreEndY = lastTableEnd(doc);
 
             autoTable(doc, {
                 startY: semY,
                 head: [["Edad", "Citas"]],
-                body: stats.edad.length > 0 ? stats.edad : [["Sin datos", "—"]],
+                body: edadRows.length > 0 ? edadRows : [["Sin datos", "—"]],
                 theme: "striped",
                 headStyles: { fillColor: [109, 40, 217] },
                 margin: { left: 110, right: 20 },
             });
-            finalNoteY = Math.max(semestreEndY, (doc as any).lastAutoTable.finalY);
+            finalNoteY = Math.max(semestreEndY, lastTableEnd(doc));
         } else {
             autoTable(doc, {
                 startY: demoY + 5,
                 head: [["Género", "Citas"]],
-                body: stats.genero,
+                body: rows(charts?.genero),
                 theme: "striped",
                 headStyles: { fillColor: [109, 40, 217] },
                 margin: { left: 20, right: 105 },
             });
-            const generoEndY = (doc as any).lastAutoTable.finalY;
+            const generoEndY = lastTableEnd(doc);
 
             autoTable(doc, {
                 startY: demoY + 5,
                 head: [["Edad", "Citas"]],
-                body: stats.edad.length > 0 ? stats.edad : [["Sin datos", "—"]],
+                body: edadRows.length > 0 ? edadRows : [["Sin datos", "—"]],
                 theme: "striped",
                 headStyles: { fillColor: [109, 40, 217] },
                 margin: { left: 110, right: 20 },
             });
-            finalNoteY = Math.max(generoEndY, (doc as any).lastAutoTable.finalY);
+            finalNoteY = Math.max(generoEndY, lastTableEnd(doc));
+        }
+
+        // Distribuciones por los campos propios de la organización. Antes el reporte
+        // solo sabía de carrera/género/semestre/edad —los campos de una escuela—, así
+        // que una organización con los suyos exportaba un PDF de "No especificado".
+        const byField = charts?.byField ?? [];
+        if (byField.length > 0) {
+            let y = finalNoteY + 12;
+            doc.setFontSize(12); doc.setTextColor(30, 41, 59);
+            doc.text("Distribución por Campos de la Organización", 20, y);
+            y += 5;
+
+            for (let i = 0; i < byField.length; i += 2) {
+                const left = byField[i];
+                const right = byField[i + 1];
+
+                autoTable(doc, {
+                    startY: y,
+                    head: [[left.label, "Citas"]],
+                    body: rows(left.data),
+                    theme: "striped",
+                    headStyles: { fillColor: [13, 148, 136] },
+                    margin: { left: 20, right: 105 },
+                });
+                let rowEnd = lastTableEnd(doc);
+
+                if (right) {
+                    autoTable(doc, {
+                        startY: y,
+                        head: [[right.label, "Citas"]],
+                        body: rows(right.data),
+                        theme: "striped",
+                        headStyles: { fillColor: [13, 148, 136] },
+                        margin: { left: 110, right: 20 },
+                    });
+                    rowEnd = Math.max(rowEnd, lastTableEnd(doc));
+                }
+                y = rowEnd + 10;
+            }
+            finalNoteY = y;
         }
 
         doc.setFontSize(10); doc.setTextColor(100, 116, 139);
@@ -465,9 +476,8 @@ async function generatePDFReport(deptReport: string, allAppts: Appointment[], us
     };
 
     if (deptReport === "Reporte Global") {
-        const depts = departments;
-        depts.forEach((dept, i) => {
-            addStatsPage(dept, allAppts.filter(a => a.department === dept), i === 0);
+        departments.forEach((dept, i) => {
+            addStatsPage(stats.byDepartment?.[dept], i === 0, `Reporte de Atención — ${dept}`);
         });
 
         // Global summary page
@@ -478,41 +488,40 @@ async function generatePDFReport(deptReport: string, allAppts: Appointment[], us
         autoTable(doc, {
             startY: 50,
             head: [["Departamento", "Total Citas", "Completadas", "Pendientes"]],
-            body: depts.map(d => {
-                const dl = allAppts.filter(a => a.department === d);
-                return [d, dl.length, dl.filter(a => a.status === "Completada").length, dl.filter(a => a.status === "Pendiente").length];
+            body: departments.map(d => {
+                const s = stats.byDepartment?.[d]?.summary;
+                return [d, s?.total ?? 0, s?.completadas ?? 0, s?.pendientes ?? 0];
             }),
             theme: "grid",
             headStyles: { fillColor: [30, 41, 59] },
             margin: { left: 20, right: 20 },
         });
     } else {
-        addStatsPage(
-            deptReport,
-            allAppts.filter(a => a.department === deptReport),
-            true,
-            `Informe de Atención — ${deptReport}`
-        );
+        addStatsPage(stats.byDepartment?.[deptReport], true, `Informe de Atención — ${deptReport}`);
     }
 
-    // Detailed breakdown (last page)
+    // Detailed breakdown (last page) — es un listado, no un agregado, así que
+    // sigue saliendo de las citas que ya tiene el panel.
     doc.addPage();
     doc.setFontSize(12); doc.setTextColor(30, 41, 59);
     doc.text("Desglose Detallado de Citas", 20, 15);
-    const finalList = deptReport === "Reporte Global" ? allAppts : allAppts.filter(a => a.department === deptReport);
+    const finalList = deptReport === "Reporte Global"
+        ? detailAppts
+        : detailAppts.filter(a => a.department === deptReport);
     autoTable(doc, {
         startY: 20,
         head: [["Departamento", "Especialista", "Fecha", "Hora", "Estado", "Motivo", "Modalidad"]],
         body: finalList.slice(0, 100).map(a => [
             a.department,
             a.specialistName,
-            new Date(a.date + "T12:00:00").toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" }),
+            a.date,
             a.time,
             a.status,
             a.motivo || "—",
-            a.modality || "—",
+            a.modality,
         ]),
-        styles: { fontSize: 8 },
+        theme: "grid",
+        styles: { fontSize: 8, cellPadding: 2 },
         headStyles: { fillColor: [30, 41, 59], fontSize: 8 },
         margin: { left: 10, right: 10 },
         columnStyles: {
@@ -522,7 +531,7 @@ async function generatePDFReport(deptReport: string, allAppts: Appointment[], us
     });
     if (finalList.length > 100) {
         doc.setFontSize(8);
-        doc.text(`* Mostrando los primeros 100 registros de ${finalList.length} totales.`, 20, (doc as any).lastAutoTable.finalY + 10);
+        doc.text(`* Mostrando los primeros 100 registros de ${finalList.length} totales.`, 20, lastTableEnd(doc) + 10);
     }
 
     const suffix = periodName
@@ -545,8 +554,8 @@ export function AdminDashboard() {
 
     const {
         getAppointments, getStats, activePeriod: storeActivePeriod,
-        specialists, addSpecialist, updateSpecialist, removeSpecialist,
-        users, deleteUser,
+        specialists, addSpecialist, updateSpecialist, removeSpecialist, restoreSpecialist,
+        users, deleteUser, restoreUser,
     } = useStore();
 
     const [activeTab, setActiveTab] = useState("citas");
@@ -725,25 +734,72 @@ export function AdminDashboard() {
     const [deactivatingUser, setDeactivatingUser] = useState<User | null>(null);
     const [deactivateReason, setDeactivateReason] = useState("");
 
-    // Campos de registro de la organización que sirven para agrupar: solo los de
-    // conjunto cerrado (select/radio). De aquí salen las gráficas demográficas,
-    // que antes estaban fijas a los campos de una escuela.
-    const [groupableFields, setGroupableFields] = useState<GroupableField[]>([]);
-    useEffect(() => {
-        const slug = authUser?.organization?.slug;
-        if (!slug) return;
-        fetch(`${API_BASE}/api/public/organizations/${slug}/fields`)
-            .then(r => r.ok ? r.json() : null)
-            .then(data => {
-                const fields: Array<{ key: string; label: string; type: string }> = data?.registrationFields ?? [];
-                setGroupableFields(
-                    fields
-                        .filter(f => (f.type === "select" || f.type === "radio") && !FIELDS_WITH_OWN_CHART.has(f.key))
-                        .map(f => ({ key: f.key, label: f.label }))
-                );
-            })
-            .catch(() => { /* sin campos dinámicos: se muestran solo las gráficas de la cita */ });
-    }, [authUser?.organization?.slug]);
+    // Especialistas dados de baja. No viven en el store —que solo guarda a los
+    // vigentes, porque de ahí salen los selectores para agendar— sino aparte y
+    // solo cuando el admin los pide, que es justo cuando necesita reactivar a
+    // alguien. El backend los devuelve con ?includeDeleted=1.
+    const [showDeletedSpecs, setShowDeletedSpecs] = useState(false);
+    const [deletedSpecs, setDeletedSpecs] = useState<Specialist[]>([]);
+    const [deletedSpecsLoading, setDeletedSpecsLoading] = useState(false);
+
+    const loadDeletedSpecs = useCallback(async () => {
+        setDeletedSpecsLoading(true);
+        try {
+            const res = await fetch(`${API}/specialists?includeDeleted=1`, { headers: authHeaders() });
+            if (res.ok) {
+                // El backend devuelve `schedules`; el store trabaja con `schedule`.
+                const all: (Specialist & { schedules?: Specialist["schedule"] })[] = await res.json();
+                setDeletedSpecs(all
+                    .filter(sp => sp.deletedAt)
+                    .map(sp => ({ ...sp, schedule: sp.schedules ?? [] })));
+            }
+        } catch {
+            /* la sección queda vacía; el resto del panel sigue funcionando */
+        } finally {
+            setDeletedSpecsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { if (showDeletedSpecs) loadDeletedSpecs(); }, [showDeletedSpecs, loadDeletedSpecs]);
+
+    // Mismo criterio que con los especialistas: las cuentas dadas de baja no
+    // viven en el store (de ahí salen las listas operativas) y se piden aparte
+    // solo cuando el admin necesita reactivar a alguien.
+    const [showDeletedUsers, setShowDeletedUsers] = useState(false);
+    const [deletedUsers, setDeletedUsers] = useState<User[]>([]);
+    const [deletedUsersLoading, setDeletedUsersLoading] = useState(false);
+
+    const loadDeletedUsers = useCallback(async () => {
+        setDeletedUsersLoading(true);
+        try {
+            const res = await fetch(`${API}/users?includeDeleted=1`, { headers: authHeaders() });
+            if (res.ok) {
+                const all: User[] = await res.json();
+                // Los especialistas se reactivan desde su propia pestaña, que además
+                // restaura el perfil Specialist; aquí solo los usuarios finales.
+                setDeletedUsers(all.filter(u => u.deletedAt && u.role !== "especialista"));
+            }
+        } catch {
+            /* la sección queda vacía; el resto del panel sigue funcionando */
+        } finally {
+            setDeletedUsersLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { if (showDeletedUsers) loadDeletedUsers(); }, [showDeletedUsers, loadDeletedUsers]);
+
+    const handleRestoreUser = async (id: string) => {
+        await restoreUser(id);
+        loadDeletedUsers();
+    };
+
+    // Reactivar devuelve al especialista al store (y por tanto al directorio
+    // activo); aquí solo hay que refrescar la lista de bajas para que salga de ella.
+    const handleRestoreSpec = async (id: string) => {
+        await restoreSpecialist(id);
+        loadDeletedSpecs();
+    };
+
 
     // Sedes de la organización (catálogo) — solo el admin las da de alta
     const [orgLocations, setOrgLocations] = useState<OrgLocation[]>([]);
@@ -776,11 +832,54 @@ export function AdminDashboard() {
         }
     };
 
+    // Estado de los modales de sede. El borrado pide confirmación porque deja sin
+    // sede a los especialistas que la tuvieran asignada (FK SetNull).
+    const [editingLoc, setEditingLoc] = useState<OrgLocation | null>(null);
+    const [deletingLoc, setDeletingLoc] = useState<OrgLocation | null>(null);
+    const [savingLoc, setSavingLoc] = useState(false);
+
+    const patchLocation = async (id: string, data: Record<string, unknown>, okMsg: string) => {
+        setSavingLoc(true);
+        try {
+            const res = await fetch(`${API}/locations/${id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json", ...authHeaders() },
+                body: JSON.stringify(data),
+            });
+            if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || "Error"); }
+            await loadLocations();
+            toast.success(okMsg);
+            return true;
+        } catch (e) {
+            toast.error(e instanceof Error && e.message ? e.message : "No se pudo actualizar la sede.");
+            return false;
+        } finally {
+            setSavingLoc(false);
+        }
+    };
+
+    const saveEditedLocation = async () => {
+        if (!editingLoc) return;
+        const name = editingLoc.name.trim();
+        if (!name) { toast.error("El nombre de la sede es requerido"); return; }
+        const ok = await patchLocation(editingLoc.id,
+            { name, address: editingLoc.address?.trim() || null },
+            "Sede actualizada");
+        if (ok) setEditingLoc(null);
+    };
+
+    // Desactivar es la alternativa segura a borrar: la sede desaparece del
+    // selector de los especialistas pero no se pierde nada, y es reversible.
+    const toggleLocationActive = (loc: OrgLocation) =>
+        patchLocation(loc.id, { active: !loc.active },
+            loc.active ? "Sede desactivada" : "Sede reactivada");
+
     const deleteLocation = async (id: string) => {
         try {
             const res = await fetch(`${API}/locations/${id}`, { method: "DELETE", headers: authHeaders() });
             if (!res.ok) throw new Error();
             await loadLocations();
+            setDeletingLoc(null);
             toast.success("Sede eliminada");
         } catch {
             toast.error("No se pudo eliminar la sede.");
@@ -818,99 +917,37 @@ export function AdminDashboard() {
         new Date(a.date + "T12:00:00") < todayMidnightAdmin
     ).length;
 
-    // Índice por id: las gráficas recorren miles de citas y buscar el alumno con
-    // un find() por cada una convierte el cálculo en cuadrático.
-    const usersById = useMemo(
-        () => new Map(users.map(u => [u.id, u as { metadata?: Record<string, string> | null }])),
-        [users]
-    );
+    // El reporte se arma con lo que agrega el servidor para el período que se
+    // eligió en el selector del PDF, que no tiene por qué ser el que muestra la
+    // pantalla. Antes se recalculaba en el navegador y podía discrepar.
+    const [downloadingReport, setDownloadingReport] = useState<string | null>(null);
 
-    const deptChartData = useMemo(() => {
-        const depts = departments;
-        const result: Record<string, any> = {};
-        depts.forEach(d => {
-            const dAppts = allAppts.filter(a => a.department === d);
-            const monMap: Record<string, any> = {};
-            dAppts.forEach(a => {
-                const mon = new Date(a.date + "T12:00:00").toLocaleString("es-MX", { month: "short" });
-                if (!monMap[mon]) monMap[mon] = { month: mon, [d]: 0 };
-                monMap[mon][d]++;
-            });
-            const motMap: Record<string, number> = {};
-            const modMap: Record<string, number> = { Presencial: 0, Virtual: 0 };
-            const carMap: Record<string, number> = {};
-            const genMap: Record<string, number> = {};
-            const semMap: Record<string, number> = {};
-            const edaMap: Record<string, number> = {};
-            dAppts.forEach(a => {
-                const m = a.motivo || "Consulta General";
-                motMap[m] = (motMap[m] || 0) + 1;
-                if (a.modality === "Virtual") modMap.Virtual++; else modMap.Presencial++;
-                const student = users.find((u: any) => u.id === a.studentId);
-                const c = student?.carrera || "No especificada";
-                carMap[c] = (carMap[c] || 0) + 1;
-                const g = student?.genero || "No especificado";
-                genMap[g] = (genMap[g] || 0) + 1;
-                const s = student?.semestre ? `Sem. ${student.semestre}` : "No esp.";
-                semMap[s] = (semMap[s] || 0) + 1;
-                if (student?.fechaNacimiento) {
-                    const edad = calcularEdad(student.fechaNacimiento);
-                    const rango = AGE_RANGES.find(r => edad >= r.min && edad <= r.max)?.label ?? "Otro";
-                    edaMap[rango] = (edaMap[rango] || 0) + 1;
-                }
-            });
-            result[d] = {
-                monthly: Object.values(monMap),
-                motivos: Object.entries(motMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8),
-                modalidad: Object.entries(modMap).map(([name, value]) => ({ name, value })),
-                carrera: Object.entries(carMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8),
-                genero: Object.entries(genMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
-                semestre: Object.entries(semMap).map(([name, value]) => ({ name, value })).sort((a, b) => {
-                    const na = parseInt(a.name.replace("Sem. ", "")) || 99;
-                    const nb = parseInt(b.name.replace("Sem. ", "")) || 99;
-                    return na - nb;
-                }),
-                edad: AGE_RANGES.map(r => ({ name: r.label, value: edaMap[r.label] ?? 0 })),
-                // Distribuciones por los campos que definio la organizacion
-                byField: groupableFields
-                    .map(f => distributionByField(dAppts, usersById, f))
-                    .filter((x): x is NonNullable<typeof x> => x !== null),
-            };
-        });
-        return result;
-    }, [allAppts, users, usersById, departments, groupableFields]);
+    const handleDownloadReport = async (label: string) => {
+        setDownloadingReport(label);
+        try {
+            const url = pdfPeriodId === "all" ? `${API}/stats` : `${API}/stats?periodId=${pdfPeriodId}`;
+            const res = await fetch(url, { headers: authHeaders() });
+            if (!res.ok) throw new Error("stats");
+            const reportStats: StatsResponse = await res.json();
+            const reportAppts = pdfPeriodId === "all"
+                ? allAppts
+                : allAppts.filter(a => a.periodId === pdfPeriodId);
+            const reportPeriodName = pdfPeriodId === "all"
+                ? undefined
+                : periods.find(x => x.id === pdfPeriodId)?.name;
+            await generatePDFReport(
+                label, reportAppts, reportStats, reportPeriodName,
+                isSchool, endUserLabel, departments,
+            );
+        } catch {
+            toast.error("No se pudo generar el reporte. Intenta de nuevo.");
+        } finally {
+            setDownloadingReport(null);
+        }
+    };
 
-    // Demographic data for Global view (computed client-side)
-    const globalDemoData = useMemo(() => {
-        const genMap: Record<string, number> = {};
-        const semMap: Record<string, number> = {};
-        const edaMap: Record<string, number> = {};
-        allAppts.forEach(a => {
-            const student = users.find((u: any) => u.id === a.studentId);
-            const g = student?.genero || "No especificado";
-            genMap[g] = (genMap[g] || 0) + 1;
-            const s = student?.semestre ? `Sem. ${student.semestre}` : "No esp.";
-            semMap[s] = (semMap[s] || 0) + 1;
-            if (student?.fechaNacimiento) {
-                const edad = calcularEdad(student.fechaNacimiento);
-                const rango = AGE_RANGES.find(r => edad >= r.min && edad <= r.max)?.label ?? "Otro";
-                edaMap[rango] = (edaMap[rango] || 0) + 1;
-            }
-        });
-        return {
-            genero: Object.entries(genMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
-            semestre: Object.entries(semMap).map(([name, value]) => ({ name, value })).sort((a, b) => {
-                const na = parseInt(a.name.replace("Sem. ", "")) || 99;
-                const nb = parseInt(b.name.replace("Sem. ", "")) || 99;
-                return na - nb;
-            }),
-            edad: AGE_RANGES.map(r => ({ name: r.label, value: edaMap[r.label] ?? 0 })),
-            // Distribuciones por los campos que definió la organización
-            byField: groupableFields
-                .map(f => distributionByField(allAppts, usersById, f))
-                .filter((x): x is NonNullable<typeof x> => x !== null),
-        };
-    }, [allAppts, users, usersById, groupableFields]);
+    // Bloques por departamento, ya agregados por el servidor.
+    const byDepartment: Record<string, StatBlock> = fullStats.byDepartment ?? {};
 
     const filteredAppts = useMemo(() => allAppts.filter(a => {
         // Filtro por período
@@ -969,6 +1006,8 @@ export function AdminDashboard() {
 
     const endUserTabLabel = `${authUser?.organization?.userRoleLabel ?? "Usuario"}s`;
     const endUserLabel = authUser?.organization?.userRoleLabel ?? "Usuario";
+    // Minúscula para usarla a mitad de frase ("buscar alumno/paciente/empleado").
+    const endUserLower = endUserLabel.toLowerCase();
     const isSchool = authUser?.organization?.type === "school";
 
     const sidebarTabs = [
@@ -1055,7 +1094,7 @@ export function AdminDashboard() {
                                     </div>
                                     <div className="relative w-full md:w-64">
                                         <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                        <input type="text" placeholder="Buscar alumno o especialista..." value={searchTerm}
+                                        <input type="text" placeholder={`Buscar ${endUserLower} o especialista...`} value={searchTerm}
                                             onChange={e => setSearchTerm(e.target.value)}
                                             className="w-full pl-9 pr-4 py-2 bg-white dark:bg-slate-700 dark:text-white dark:border-slate-600 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600" />
                                     </div>
@@ -1084,7 +1123,7 @@ export function AdminDashboard() {
                                 <table className="w-full text-left border-collapse">
                                     <thead>
                                         <tr className="border-b border-slate-200 bg-slate-50/50 dark:bg-slate-800/50 dark:border-slate-700">
-                                            {["Alumno", "Departamento", "Especialista", "Fecha", "Hora", "Modalidad", "Estado"].map(h => (
+                                            {[endUserLabel, "Departamento", "Especialista", "Fecha", "Hora", "Modalidad", "Estado"].map(h => (
                                                 <th key={h} className="px-6 py-4 text-slate-500 font-bold tracking-wider uppercase text-[0.65rem]">{h}</th>
                                             ))}
                                         </tr>
@@ -1151,9 +1190,19 @@ export function AdminDashboard() {
                         <div className="p-8">
                             <div className="flex items-center justify-between mb-8">
                                 <div>
-                                    <h3 className="text-2xl font-bold text-slate-900">Gestión de Especialistas</h3>
+                                    <h3 className="text-2xl font-bold text-slate-900 dark:text-white">Gestión de Especialistas</h3>
                                     <p className="text-slate-500 font-medium mt-1">{specialists.length} especialistas registrados en el sistema.</p>
                                 </div>
+                                <button
+                                    onClick={() => setShowDeletedSpecs(v => !v)}
+                                    className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-bold transition-colors cursor-pointer shrink-0
+                                        ${showDeletedSpecs
+                                            ? "bg-slate-800 border-slate-800 text-white dark:bg-slate-200 dark:border-slate-200 dark:text-slate-900"
+                                            : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-slate-300"}`}
+                                >
+                                    <Archive className="w-3.5 h-3.5" />
+                                    {showDeletedSpecs ? "Ocultar dados de baja" : "Ver dados de baja"}
+                                </button>
                             </div>
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                 {/* List */}
@@ -1190,6 +1239,52 @@ export function AdminDashboard() {
                                             </div>
                                         );
                                     })}
+
+                                    {/* Dados de baja — solo bajo petición. La cuenta y el
+                                        expediente se conservan (NOM-004); reactivar revierte
+                                        la baja pero NO reabre las citas que se cancelaron. */}
+                                    {showDeletedSpecs && (
+                                        <div className="pt-6 mt-6 border-t border-dashed border-slate-200 dark:border-slate-700">
+                                            <h4 className="text-slate-900 dark:text-white font-bold mb-1 uppercase tracking-wider text-xs flex items-center gap-2">
+                                                <Archive className="w-3.5 h-3.5 text-slate-400" /> Dados de baja
+                                            </h4>
+                                            <p className="text-slate-400 text-xs mb-4">Reactivar restaura su acceso y su perfil. Las citas canceladas al darlo de baja no se reabren.</p>
+
+                                            {deletedSpecsLoading ? (
+                                                <p className="text-slate-400 text-xs italic py-2">Cargando...</p>
+                                            ) : deletedSpecs.length === 0 ? (
+                                                <EmptyState icon={Archive} title="Sin especialistas dados de baja" />
+                                            ) : (
+                                                <div className="space-y-3">
+                                                    {deletedSpecs.map((esp: Specialist) => {
+                                                        const conf = DEPT_CONFIG[esp.department];
+                                                        return (
+                                                            <div key={esp.id} className="bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 flex items-center gap-4">
+                                                                <div className="opacity-50 shrink-0"><Avatar name={esp.name} avatarUrl={esp.avatarUrl} /></div>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-slate-600 dark:text-slate-300 font-bold truncate tracking-tight">{esp.name}</p>
+                                                                    <div className="flex flex-wrap items-center gap-2 mt-1">
+                                                                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-400 text-xs font-bold">
+                                                                            {conf && <conf.icon className="w-3 h-3" style={{ color: conf.color }} />} {esp.department}
+                                                                        </span>
+                                                                        <span className="text-slate-400 text-xs font-medium truncate">{esp.email}</span>
+                                                                    </div>
+                                                                    {esp.deletedAt && (
+                                                                        <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-2">
+                                                                            Baja el {new Date(esp.deletedAt).toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })}
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                                <Btn size="sm" variant="outline" onClick={() => handleRestoreSpec(esp.id)} className="shrink-0">
+                                                                    <RotateCcw className="w-3.5 h-3.5" /> Reactivar
+                                                                </Btn>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Add form */}
@@ -1238,8 +1333,18 @@ export function AdminDashboard() {
                             : [endUserLabel, "Datos de registro", "Correo", "Acción"];
                         return (
                         <div className="p-8">
-                            <div className="flex items-center justify-between mb-6">
+                            <div className="flex items-center justify-between gap-4 mb-6">
                                 <h3 className="text-2xl font-bold text-slate-900 dark:text-white">{endUserLabel}s Registrados <span className="text-slate-400 font-normal text-lg">({alumnosAll.length})</span></h3>
+                                <button
+                                    onClick={() => setShowDeletedUsers(v => !v)}
+                                    className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-bold transition-colors cursor-pointer shrink-0
+                                        ${showDeletedUsers
+                                            ? "bg-slate-800 border-slate-800 text-white dark:bg-slate-200 dark:border-slate-200 dark:text-slate-900"
+                                            : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-slate-300"}`}
+                                >
+                                    <Archive className="w-3.5 h-3.5" />
+                                    {showDeletedUsers ? "Ocultar dados de baja" : "Ver dados de baja"}
+                                </button>
                             </div>
                             <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden overflow-x-auto">
                                 <table className="w-full min-w-[640px]">
@@ -1311,6 +1416,44 @@ export function AdminDashboard() {
                                     </div>
                                 )}
                             </div>
+
+                            {/* Cuentas dadas de baja — la fila nunca se borra porque el
+                                expediente clínico la referencia (NOM-004). Reactivar
+                                devuelve el acceso; las citas canceladas no se reabren. */}
+                            {showDeletedUsers && (
+                                <div className="mt-8 pt-6 border-t border-dashed border-slate-200 dark:border-slate-700">
+                                    <h4 className="text-slate-900 dark:text-white font-bold mb-1 uppercase tracking-wider text-xs flex items-center gap-2">
+                                        <Archive className="w-3.5 h-3.5 text-slate-400" /> Dados de baja
+                                    </h4>
+                                    <p className="text-slate-400 text-xs mb-4">Reactivar restaura el acceso a la cuenta. Las citas canceladas al darla de baja no se reabren.</p>
+
+                                    {deletedUsersLoading ? (
+                                        <p className="text-slate-400 text-xs italic py-2">Cargando...</p>
+                                    ) : deletedUsers.length === 0 ? (
+                                        <EmptyState icon={Archive} title={`Sin ${endUserLower}s dados de baja`} />
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {deletedUsers.map(u => (
+                                                <div key={u.id} className="bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 p-4 flex items-center gap-4">
+                                                    <div className="opacity-50 shrink-0"><Avatar name={u.name} size="sm" /></div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-slate-600 dark:text-slate-300 font-bold truncate text-sm">{u.name}</p>
+                                                        <p className="text-slate-400 text-xs truncate">{u.email}</p>
+                                                        {u.deletedAt && (
+                                                            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-1.5">
+                                                                Baja el {new Date(u.deletedAt).toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                    <Btn size="sm" variant="outline" onClick={() => handleRestoreUser(u.id)} className="shrink-0">
+                                                        <RotateCcw className="w-3.5 h-3.5" /> Reactivar
+                                                    </Btn>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         );
                     })()}
@@ -1361,7 +1504,9 @@ export function AdminDashboard() {
                             <div className="space-y-6">
                                 {(() => {
                                     const isGlobal = statsView === "Global";
-                                    const data = isGlobal ? { ...charts, ...globalDemoData } : deptChartData[statsView];
+                                    const data = isGlobal
+                                        ? charts
+                                        : (byDepartment[statsView]?.charts ?? EMPTY_CHARTS);
                                     const refs = deptRefs[statsView];
                                     if (!data || !refs) return null;
 
@@ -1725,8 +1870,9 @@ export function AdminDashboard() {
                                                         {pdfPeriodName ? `Período: ${pdfPeriodName}` : "Todos los períodos"}
                                                         {" · "}{(r.label === "Reporte Global" ? pdfAppts : pdfAppts.filter(a => a.department === r.label)).length} citas
                                                     </p>
-                                                    <Btn onClick={() => generatePDFReport(r.label, pdfAppts, users, pdfPeriodName, isSchool, endUserLabel, departments)} variant="outline" className="w-full">
-                                                        <Download className="w-4 h-4 mr-2" /> PDF Export
+                                                    <Btn onClick={() => handleDownloadReport(r.label)} disabled={downloadingReport !== null} variant="outline" className="w-full">
+                                                        <Download className="w-4 h-4 mr-2" />
+                                                        {downloadingReport === r.label ? "Generando..." : "PDF Export"}
                                                     </Btn>
                                                 </div>
                                             ))}
@@ -1744,38 +1890,91 @@ export function AdminDashboard() {
 
                     {/* ─── Eventos Tab ─── */}
                     {activeTab === "sedes" && (
-                        <div>
-                            <div className="mb-6">
+                        <div className="p-8">
+                            <div className="mb-8">
                                 <h3 className="text-2xl font-bold text-slate-900 dark:text-white">Sedes de la organización</h3>
                                 <p className="text-slate-500 font-medium mt-1">Define las ubicaciones físicas. Los especialistas elegirán la suya de esta lista para sus citas presenciales.</p>
                             </div>
 
-                            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-6 shadow-sm">
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    <input value={newLocName} onChange={e => setNewLocName(e.target.value)} placeholder="Nombre (ej. Campus Centro)" className={inputCls} />
-                                    <input value={newLocAddress} onChange={e => setNewLocAddress(e.target.value)} placeholder="Dirección o referencia (opcional)" className={inputCls} />
-                                </div>
-                                <Btn size="sm" className="mt-3" onClick={addLocation}><Plus className="w-4 h-4" /> Agregar sede</Btn>
-                            </div>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                {/* Listado */}
+                                <div className="space-y-3">
+                                    <h4 className="text-slate-900 dark:text-white font-bold mb-4 uppercase tracking-wider text-xs">
+                                        Sedes registradas ({orgLocations.length})
+                                    </h4>
 
-                            {orgLocations.length === 0 ? (
-                                <EmptyState icon={MapPin} title="Sin sedes registradas" subtitle="Agrega la primera arriba." />
-                            ) : (
-                                <div className="space-y-2">
-                                    {orgLocations.map(l => (
-                                        <div key={l.id} className="flex items-center justify-between gap-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4">
-                                            <div className="min-w-0">
-                                                <p className="font-bold text-slate-800 dark:text-white text-sm flex items-center gap-2"><MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> {l.name}</p>
-                                                {l.address && <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5 truncate">{l.address}</p>}
+                                    {orgLocations.length === 0 ? (
+                                        <EmptyState icon={MapPin} title="Sin sedes registradas" subtitle="Agrega la primera con el formulario de al lado." />
+                                    ) : orgLocations.map(l => (
+                                        <div key={l.id}
+                                            className={`rounded-2xl border p-4 shadow-sm transition-shadow hover:shadow-md group
+                                                ${l.active
+                                                    ? "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700"
+                                                    : "bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700"}`}>
+                                            {/* Apilado en móvil: el nombre y las acciones no caben en una fila estrecha */}
+                                            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                                                <div className="flex-1 min-w-0">
+                                                    <p className={`font-bold text-sm flex items-center gap-2 ${l.active ? "text-slate-800 dark:text-white" : "text-slate-500 dark:text-slate-400"}`}>
+                                                        <MapPin className={`w-3.5 h-3.5 shrink-0 ${l.active ? "text-emerald-600" : "text-slate-400"}`} />
+                                                        <span className="truncate">{l.name}</span>
+                                                    </p>
+                                                    {l.address && <p className="text-slate-500 dark:text-slate-400 text-xs mt-1 sm:ml-5.5 break-words">{l.address}</p>}
+                                                </div>
+
+                                                <div className="flex items-center gap-2 shrink-0">
+                                                    <span className={`px-2.5 py-1 rounded-full font-bold text-[0.65rem] uppercase tracking-wider border
+                                                        ${l.active
+                                                            ? "bg-emerald-50 text-emerald-600 border-emerald-100"
+                                                            : "bg-slate-100 text-slate-400 border-slate-200"}`}>
+                                                        {l.active ? "Activa" : "Inactiva"}
+                                                    </span>
+                                                    <div className="flex gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                                        <button onClick={() => setEditingLoc(l)} title="Editar sede"
+                                                            className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg cursor-pointer transition-colors">
+                                                            <Pencil className="w-4 h-4" />
+                                                        </button>
+                                                        <button onClick={() => toggleLocationActive(l)} title={l.active ? "Desactivar sede" : "Reactivar sede"}
+                                                            className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg cursor-pointer transition-colors">
+                                                            {l.active ? <XCircle className="w-4 h-4" /> : <RotateCcw className="w-4 h-4" />}
+                                                        </button>
+                                                        <button onClick={() => setDeletingLoc(l)} title="Eliminar sede"
+                                                            className="p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg cursor-pointer transition-colors">
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             </div>
-                                            <button onClick={() => deleteLocation(l.id)} title="Eliminar sede"
-                                                className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-all cursor-pointer shrink-0">
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
                                         </div>
                                     ))}
                                 </div>
-                            )}
+
+                                {/* Alta */}
+                                <div>
+                                    <h4 className="text-slate-900 dark:text-white font-bold mb-4 uppercase tracking-wider text-xs flex items-center gap-2">
+                                        <Plus className="w-4 h-4 text-blue-600" /> Nueva sede
+                                    </h4>
+                                    <div className="bg-slate-50 dark:bg-slate-800/50 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm space-y-5">
+                                        <div>
+                                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">
+                                                Nombre <span className="text-rose-500">*</span>
+                                            </label>
+                                            <input value={newLocName} onChange={e => setNewLocName(e.target.value)}
+                                                placeholder="Ej. Campus Centro" className={inputCls} />
+                                        </div>
+                                        <div>
+                                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">
+                                                Dirección o referencia <span className="font-normal text-slate-400">(opcional)</span>
+                                            </label>
+                                            <input value={newLocAddress} onChange={e => setNewLocAddress(e.target.value)}
+                                                placeholder="Ej. Edificio A — Consultorio 3" className={inputCls} />
+                                        </div>
+                                        <p className="text-slate-400 text-xs">Se mostrará al usuario junto con la confirmación de sus citas presenciales.</p>
+                                        <Btn onClick={addLocation} size="lg" className="w-full">
+                                            <Plus className="w-5 h-5 mr-2" /> Agregar sede
+                                        </Btn>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     )}
 
@@ -1785,6 +1984,53 @@ export function AdminDashboard() {
 
                 </div>{/* end card */}
                 </Reveal>
+
+                {/* ─── Editar sede ─── */}
+                <Modal open={!!editingLoc} onClose={() => setEditingLoc(null)} title="Editar sede" subtitle={editingLoc?.name} maxWidth="max-w-md">
+                    <div className="space-y-5">
+                        <div>
+                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Nombre <span className="text-rose-500">*</span></label>
+                            <input value={editingLoc?.name ?? ""} className={inputCls}
+                                onChange={e => setEditingLoc(prev => prev ? { ...prev, name: e.target.value } : null)} />
+                        </div>
+                        <div>
+                            <label className="block mb-2 text-slate-900 dark:text-slate-200 font-bold text-sm">Dirección o referencia</label>
+                            <input value={editingLoc?.address ?? ""} className={inputCls}
+                                onChange={e => setEditingLoc(prev => prev ? { ...prev, address: e.target.value } : null)} />
+                        </div>
+                        <p className="text-slate-400 text-xs">
+                            Las citas ya confirmadas conservan la sede tal como se escribió al confirmarlas; el cambio aplica a las siguientes.
+                        </p>
+                        <div className="flex gap-3">
+                            <Btn variant="outline" onClick={() => setEditingLoc(null)} className="flex-1">Cancelar</Btn>
+                            <Btn onClick={saveEditedLocation} disabled={savingLoc} className="flex-1">
+                                {savingLoc ? "Guardando..." : "Guardar cambios"}
+                            </Btn>
+                        </div>
+                    </div>
+                </Modal>
+
+                {/* ─── Eliminar sede ─── */}
+                <Modal open={!!deletingLoc} onClose={() => setDeletingLoc(null)} title="Eliminar sede" subtitle={deletingLoc?.name} maxWidth="max-w-md">
+                    <div className="space-y-5">
+                        <div className="p-3.5 bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-800 rounded-xl">
+                            <p className="text-slate-600 dark:text-slate-300 text-xs leading-relaxed">
+                                Los especialistas que tengan esta sede asignada quedarán <span className="font-bold">sin sede</span>.
+                                Las citas ya confirmadas no se ven afectadas: conservan la ubicación tal como se les comunicó.
+                            </p>
+                        </div>
+                        <p className="text-slate-500 dark:text-slate-400 text-xs">
+                            Si solo quieres que deje de aparecer en el selector, <span className="font-bold">desactívala</span> en vez de eliminarla: es reversible.
+                        </p>
+                        <div className="flex gap-3">
+                            <Btn variant="outline" onClick={() => setDeletingLoc(null)} className="flex-1">Cancelar</Btn>
+                            <Btn onClick={() => deletingLoc && deleteLocation(deletingLoc.id)}
+                                className="flex-1 bg-rose-600 hover:bg-rose-700 text-white border-0 shadow-lg">
+                                Sí, eliminar
+                            </Btn>
+                        </div>
+                    </div>
+                </Modal>
 
                 {/* ─── Action Modal ─── */}
                 <Modal open={!!action.appt && !!action.status} onClose={action.close}

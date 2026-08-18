@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo, createContext, useContext } from
 import { localISODate } from "../utils/date";
 import { API, API_BASE, authHeaders, getImageUrl } from "../lib/api";
 import type { StoreContextType, ReportPeriod } from "../types";
+import { MISSED_STATUS } from "../constants";
 
 // ── Domain stores ──────────────────────────────────────────
 import { useUsersStore }        from "../store/useUsersStore";
@@ -58,14 +59,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         confirmadas: a.filter(x => x.status === "Confirmada").length,
         completadas: a.filter(x => x.status === "Completada").length,
         canceladas:  a.filter(x => x.status === "Cancelada").length,
-        noAsistio:   a.filter(x => x.status === "No asistió").length,
+        noAsistio:   a.filter(x => x.status === MISSED_STATUS).length,
+        seguimientos: a.filter(x => x.isFollowUp).length,
         byDept: {
           Psicología: a.filter(x => x.department === "Psicología").length,
           Tutorías:   a.filter(x => x.department === "Tutorías").length,
           Nutrición:  a.filter(x => x.department === "Nutrición").length,
         },
       },
-      charts: { monthly: [], motivos: [], modalidad: [], carrera: [] },
+      // Misma forma que /api/stats: si el panel cae aquí porque la petición falló,
+      // debe poder pintar sin claves ausentes que revienten al leerlas.
+      charts: {
+        monthly: [], motivos: [], modalidad: [], carrera: [],
+        genero: [], semestre: [], edad: [], byField: [],
+      },
+      byDepartment: {},
     };
   }, [appointmentsStore.appointments, realStats]);
 

@@ -7,6 +7,7 @@ import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../services/email';
 import { upload } from '../middleware/upload';
+import { metadataValue, type LegacyField } from '../lib/registrationFields';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -127,6 +128,26 @@ router.post('/register', async (req, res) => {
       userRole = org.type === 'school' ? UserRole.alumno : UserRole.usuario;
     }
 
+    // Volcado a las columnas legacy.
+    //
+    // El panel normaliza la clave del campo al guardarla (`fechaNacimiento` se
+    // almacena como `fechanacimiento`), pero aquí se buscaba en camelCase: por eso
+    // ninguna organización creada desde el panel llenaba estas columnas y sus
+    // gráficas demográficas salían vacías. `metadataValue` compara las claves sin
+    // mayúsculas, acentos ni separadores, así que da igual cómo se haya nombrado.
+    const legacyField = (field: LegacyField, direct: unknown): string | null => {
+      const fromMetadata = metadataValue(data.metadata, field);
+      if (fromMetadata) return fromMetadata;
+      if (typeof direct === "string" && direct.trim()) return direct.trim();
+      if (typeof direct === "number") return String(direct);
+      return null;
+    };
+
+    const semestreRaw = legacyField("semestre", data.semestre);
+    const semestre = semestreRaw !== null && Number.isFinite(Number(semestreRaw))
+      ? Number(semestreRaw)
+      : null;
+
     const user = await prisma.user.create({
       data: {
         email: data.email,
@@ -135,12 +156,12 @@ router.post('/register', async (req, res) => {
         role: userRole,
         organizationId: data.organizationId || null,
         metadata: data.metadata || null,
-        // Campos legacy para compatibilidad con TECNL — se poblan desde metadata si existen
-        matricula: data.metadata?.matricula || data.matricula || null,
-        carrera: data.metadata?.carrera || data.carrera || null,
-        semestre: data.metadata?.semestre ? Number(data.metadata.semestre) : (data.semestre ? Number(data.semestre) : null),
-        fechaNacimiento: data.metadata?.fechaNacimiento || data.fechaNacimiento || null,
-        genero: data.metadata?.genero || data.genero || null,
+        // Campos legacy para compatibilidad con TECNL — se pueblan desde metadata
+        matricula: legacyField("matricula", data.matricula),
+        carrera: legacyField("carrera", data.carrera),
+        semestre,
+        fechaNacimiento: legacyField("fechaNacimiento", data.fechaNacimiento),
+        genero: legacyField("genero", data.genero),
         emailVerified: false,
         verificationToken,
         verificationTokenExpiresAt,
