@@ -231,6 +231,9 @@ model Appointment {
   cancellationReason String? // motivo de cancelación (NO confidencial; visible al alumno)
   meetingUrl         String?
   location           String? // lugar de la cita presencial (snapshot al confirmar)
+  // Recordatorio de 24 h: NULL = pendiente de enviar. El planificador
+  // (services/appointmentReminders.ts) lo usa como candado de idempotencia.
+  reminderSentAt     DateTime?
   isFollowUp         Boolean       @default(false)
   parentId           String?
   parent             Appointment?  @relation("AppointmentFollowUps", fields: [parentId], references: [id], onDelete: SetNull)
@@ -243,6 +246,12 @@ model Appointment {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
+  // OJO: existe además un índice ÚNICO PARCIAL que Prisma no puede declarar aquí:
+  //   Appointment_active_slot_key ON ("specialistId","date","time")
+  //     WHERE "status" <> 'Cancelada'
+  // Impide dos citas vivas del mismo especialista a la misma hora incluso bajo
+  // peticiones concurrentes (la comprobación en la ruta no basta: READ COMMITTED
+  // no serializa). Vive en la migración 20260906000000_appointment_slot_unique.
   @@index([organizationId, status])
   @@index([organizationId, studentId])
   @@index([organizationId, specialistId])

@@ -86,41 +86,37 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return [];
   }, []);
 
+  /**
+   * Días con hueco del mes indicado y el siguiente.
+   *
+   * Antes esto se resolvía en el navegador: por cada día candidato se pedía
+   * `available-slots`, ~60 peticiones por especialista para pintar el
+   * calendario. Con el límite de 500 cada 15 minutos, un alumno comparando
+   * especialistas agotaba su propia cuota y la aplicación se le rompía sin
+   * explicación. Ahora el servidor lo resuelve en una consulta y esto es UNA
+   * petición.
+   */
   const getAvailableDays = useCallback(async (specialistId: string, year: number, month: number): Promise<Date[]> => {
-    const spec = specialistsStore.getSpecialistById(specialistId);
-    if (!spec) return [];
-
-    const recurringDows = [...new Set(spec.schedule.filter(s => s.available && !s.specificDate).map(s => s.dayOfWeek))];
-    const specificDates = [...new Set(spec.schedule.filter(s => s.available && s.specificDate).map(s => s.specificDate as string))];
-
+    // Desde hoy (el pasado no se agenda) hasta el fin del mes siguiente.
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const dayChecks: { date: Date; promise: Promise<{ start: string; end: string }[]> }[] = [];
+    const firstOfMonth = new Date(year, month, 1);
+    const from = localISODate(firstOfMonth < today ? today : firstOfMonth);
+    const to   = localISODate(new Date(year, month + 2, 0));
 
-    for (let m = 0; m < 2; m++) {
-      const targetMonth = month + m;
-      const targetYear  = targetMonth > 11 ? year + 1 : year;
-      const normMonth   = targetMonth % 12;
-      for (
-        let d = new Date(targetYear, normMonth, 1), end = new Date(targetYear, normMonth + 1, 0);
-        d <= end;
-        d.setDate(d.getDate() + 1)
-      ) {
-        if (d < today) continue;
-        const ds = localISODate(d);
-        if (recurringDows.includes(d.getDay()) || specificDates.includes(ds)) {
-          dayChecks.push({ date: new Date(d), promise: getAvailableSlots(specialistId, ds) });
-        }
-      }
+    try {
+      const res = await fetch(
+        `${API}/specialists/${specialistId}/available-days?from=${from}&to=${to}`,
+        { headers: authHeaders() },
+      );
+      if (!res.ok) return [];
+      const dates: string[] = await res.json();
+      // El servidor responde "YYYY-MM-DD"; el calendario espera objetos Date.
+      // El mediodía evita que el desfase de zona horaria corra la fecha un día.
+      return dates.map(d => new Date(d + "T12:00:00"));
+    } catch {
+      return [];
     }
-
-    const results = await Promise.all(
-      dayChecks.map(async ({ date, promise }) => {
-        const slots = await promise;
-        return slots.length > 0 ? date : null;
-      })
-    );
-    return results.filter((d): d is Date => d !== null);
-  }, [specialistsStore.getSpecialistById, getAvailableSlots]);
+  }, []);
 
   // ── #25 Smart polling ──────────────────────────────────
   // fetchAll: loads everything (called on login / visibility / slow poll)

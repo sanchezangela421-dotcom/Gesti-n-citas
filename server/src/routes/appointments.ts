@@ -57,6 +57,30 @@ function fireEmail(fn: () => Promise<void>) {
   fn().catch((err) => console.error('[email]', err));
 }
 
+/** Nombre del índice único parcial que protege el horario (ver migración 20260906000000). */
+const SLOT_INDEX = 'Appointment_active_slot_key';
+
+/**
+ * ¿El error es el choque de horario que atrapó la base de datos?
+ *
+ * La comprobación previa de la ruta resuelve el caso normal, pero dos peticiones
+ * simultáneas pueden pasarla las dos: READ COMMITTED no deja que una transacción
+ * vea lo que otra aún no confirmó. Quien pierde la carrera choca contra el índice
+ * único y llega aquí como P2002. Se traduce al MISMO 409 que el camino normal:
+ * para quien reserva es el mismo hecho, que alguien se le adelantó.
+ */
+function isSlotConflict(error: unknown): boolean {
+  const e = error as { code?: string; meta?: { target?: unknown } };
+  if (e?.code !== 'P2002') return false;
+  const target = e.meta?.target;
+  // `target` es el nombre del índice (string) o la lista de columnas, según versión.
+  if (typeof target === 'string') return target.includes(SLOT_INDEX);
+  if (Array.isArray(target)) return target.includes('specialistId') || target.includes(SLOT_INDEX);
+  // Sin metadatos utilizables: en esta tabla el único índice único es el del
+  // horario, así que un P2002 aquí no puede ser otra cosa.
+  return true;
+}
+
 // ── GET /api/appointments ─────────────────────────────────────────────────────
 
 router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
@@ -248,7 +272,7 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
 
     res.status(201).json(appointment);
   } catch (error: any) {
-    if (error.message === 'SLOT_TAKEN') {
+    if (error.message === 'SLOT_TAKEN' || isSlotConflict(error)) {
       return res.status(409).json({ error: 'Este horario ya fue reservado. Por favor elige otro.' });
     }
     if (error.message === 'DUPLICATE_FOLLOW_UP') {
@@ -632,7 +656,7 @@ router.patch('/:id/reschedule', verifyToken as any, async (req: AuthRequest, res
 
     res.json(appointment);
   } catch (error: any) {
-    if (error.message === 'SLOT_TAKEN') {
+    if (error.message === 'SLOT_TAKEN' || isSlotConflict(error)) {
       return res.status(409).json({ error: 'Este horario ya fue reservado. Por favor elige otro.' });
     }
     if (error.message === 'NOT_FOUND') {

@@ -1,14 +1,22 @@
-# Plan de pruebas — departamentos por organización, notas obligatorias y correcciones de QA
+# Plan de pruebas — endurecimiento previo al lanzamiento
 
-Guía para el equipo de QA. Cubre **únicamente** los cambios posteriores a la
-ronda de inasistencias (commit `749fb82a`). Lo validado en rondas anteriores
-—retención del expediente, bajas lógicas, estados de especialista y
-organización, horarios solapados, inasistencias y plantillas de correo— **no se
-repite aquí**.
+Guía para el equipo de QA. Cubre **únicamente** los cambios del commit
+`9c3a39b2`, posteriores a la ronda de departamentos por organización
+(`7447adcd`). Todo lo validado en rondas anteriores —departamentos propios,
+notas obligatorias, retención del expediente, bajas lógicas, reportes, sedes,
+eventos— **no se repite aquí**.
+
+Son tres cambios, y conviene entender qué problema resolvía cada uno:
+
+| Cambio | Problema que resolvía |
+|---|---|
+| **Reserva única de horario** | Dos personas podían quedarse con la **misma cita** si pulsaban a la vez |
+| **Recordatorios de 24 h** | Las plantillas de correo existían pero **nadie las enviaba** |
+| **Calendario en una petición** | El asistente de cita disparaba **~60 peticiones** y podía dejar al usuario bloqueado |
 
 > **Importante:** la base de datos **no se regenera**. Los cambios se aplican con
-> migraciones, que añaden tablas y columnas **conservando los datos**. Recrear la
-> base destruiría expedientes clínicos, cuya conservación es obligación legal.
+> migraciones, que añaden columnas e índices **conservando los datos**. Recrear
+> la base destruiría expedientes clínicos, cuya conservación es obligación legal.
 
 ---
 
@@ -17,16 +25,16 @@ repite aquí**.
 ### Requisitos
 
 - Node ≥ 18 · pnpm ≥ 9 · PostgreSQL corriendo (local o Docker)
-- Una bandeja de correo de prueba ([Mailtrap](https://mailtrap.io) recomendado):
-  varias pruebas verifican correos.
+- Una bandeja de correo de prueba ([Mailtrap](https://mailtrap.io) recomendado).
+  **El bloque B depende de ella por completo.**
 
 ### Backend
 
 > ### ⚠️ Al clonar o al hacer `git pull`, corre SIEMPRE los pasos (1) y (2)
 >
 > Si te saltas `prisma migrate deploy`, la aplicación arranca pero **falla al
-> primer uso** con errores del tipo `The table "public.OrgDepartment" does not
-> exist`. No es un bug: es que tu base va atrasada respecto al código.
+> primer uso**, con errores del tipo `The column "Appointment.reminderSentAt"
+> does not exist`. No es un bug: es que tu base va atrasada respecto al código.
 > Para ver si te falta algo: `pnpm exec prisma migrate status`.
 
 ```bash
@@ -36,7 +44,6 @@ pnpm install
 pnpm exec prisma generate         # (1) OBLIGATORIO — ver nota
 pnpm exec prisma migrate deploy   # (2) OBLIGATORIO — aplica las migraciones nuevas
 pnpm db:seed                      # (3) SOLO si la base está vacía
-pnpm db:backfill-fields           # (4) SOLO si ya tenías organizaciones creadas
 pnpm dev                          # arranca en http://localhost:3000
 ```
 
@@ -48,26 +55,52 @@ este paso.
 
 **(2)** Aplica solo lo pendiente y conserva los datos existentes.
 
-Migración que introduce esta tanda:
+Migraciones que introduce esta tanda:
 
 | Migración | Qué hace |
 |---|---|
-| `20260818164913_org_departments` | Tabla `OrgDepartment`: cada organización define sus departamentos. Convierte los que ya tenía en filas, conservando el nombre exacto |
+| `20260906000000_appointment_slot_unique` | Índice **único parcial** sobre `(specialistId, date, time)`. Impide dos citas vivas del mismo especialista a la misma hora. Es **parcial**: excluye las canceladas, para que cancelar libere el horario |
+| `20260906010000_appointment_reminder_sent` | Columna `Appointment.reminderSentAt` + su índice. Es el candado que evita que un recordatorio se envíe dos veces |
 
-**No borra nada.** Siembra el catálogo a partir de lo que cada organización tenía
-contratado. Si un departamento estaba retirado pero seguía con citas o
-especialistas, se crea igualmente pero **inactivo**, para no perder su
-configuración de nota clínica.
+**No borran nada** y son puramente aditivas: una columna nullable y dos índices.
+
+> ⚠️ **Si la primera migración falla** con
+> `could not create unique index "Appointment_active_slot_key"`, **no la fuerces
+> ni borres nada**: significa que tu base ya tiene citas duplicadas en el mismo
+> horario, creadas por el bug que este cambio corrige. Repórtalo indicando el
+> mensaje completo — hay que decidir con qué cita se queda cada choque.
+>
+> Para ver los choques antes de migrar:
+> ```sql
+> SELECT "specialistId", "date", "time", COUNT(*)
+> FROM "Appointment" WHERE "status" <> 'Cancelada'
+> GROUP BY 1,2,3 HAVING COUNT(*) > 1;
+> ```
 
 **(3)** El seed es **destructivo si ya hay datos** (hace `upsert` sobre la
 organización TECNL). Sobre una base con datos reales, sáltalo.
 
-**(4)** Solo hace falta si creaste organizaciones **antes** de esta tanda:
-nacían sin campos de registro, así que su formulario no pedía fecha de
-nacimiento ni género y sus gráficas demográficas salían vacías. Es aditivo e
-idempotente — solo toca organizaciones con cero campos y nunca pisa una
-configurada a mano. Para ver qué haría sin escribir:
-`pnpm db:backfill-fields -- --dry-run`.
+### Variables de entorno nuevas
+
+Las dos son opcionales y traen valores por defecto sanos. Están en
+`server/.env.example`:
+
+| Variable | Por defecto | Para qué |
+|---|---|---|
+| `REMINDERS_ENABLED` | `true` | `false` apaga los recordatorios sin tocar código |
+| `REMINDERS_INTERVAL_MINUTES` | `60` | Cada cuánto revisa si hay recordatorios pendientes |
+
+> **Para el bloque B, pon `REMINDERS_INTERVAL_MINUTES=1`.** Con el valor por
+> defecto tendrías que esperar una hora entre comprobaciones.
+
+Al arrancar el backend debe aparecer en consola:
+
+```
+[reminders] Planificador activo — revisión cada 1 min
+```
+
+Si no aparece esa línea, los recordatorios **no están corriendo** y el bloque B
+no se puede probar.
 
 ### Frontend
 
@@ -90,17 +123,22 @@ Todas con contraseña **`Admin1234`**:
 | Alumno | `alumno@mail.com` | `/` |
 | SuperAdmin | `superadmin@gestioncitas.app` | **`/superadmin`** |
 
-> El superadmin **no** entra por el login normal: tiene su propia ruta y su
-> propia sesión.
-
 ### Pruebas automatizadas
 
 ```bash
 cd server
-pnpm test          # 201 pruebas
+pnpm test          # 229 pruebas
 ```
 
 Crea y migra sola una base aparte con sufijo `_test`. No toca la de desarrollo.
+
+De esas, **28 son nuevas de esta tanda**:
+
+```bash
+pnpm exec vitest run tests/appointment-slot-race.test.ts   # 5
+pnpm exec vitest run tests/appointment-reminders.test.ts   # 10
+pnpm exec vitest run tests/available-days.test.ts          # 13
+```
 
 ---
 
@@ -111,304 +149,278 @@ Prioridad: **🔴 crítica** (pérdida de datos o acceso indebido) · **🟠 alt
 
 ---
 
-### Bloque A — Departamentos por organización 🔴
+### Bloque A — Una cita, una persona 🔴
 
-> **El cambio más grande de esta tanda.** Los tres departamentos dejaron de ser
-> un catálogo fijo de plataforma: **cada organización define los suyos**, con su
-> color, su icono y si exigen nota clínica. Se gestionan desde el botón
-> **Departamentos** de la tarjeta de la organización en `/superadmin` — ya no son
-> casillas en el formulario de edición.
+> **El cambio más importante de esta tanda.** Antes, dos personas que pulsaban
+> "agendar" en el mismo horario con milisegundos de diferencia se llevaban
+> **ambas** la cita. El especialista se enteraba cuando llegaban dos personas a
+> la misma hora.
 
-#### A1 · Nada se perdió con la migración 🔴
+#### A0 · Sobre cómo probar esto 📌 **Léelo antes de empezar**
 
-**Precondición:** una base que ya tenía organizaciones antes de esta tanda.
+La condición de carrera **no se reproduce a mano de forma fiable**: hay que
+disparar las peticiones con milisegundos de diferencia, y dos personas pulsando
+en dos navegadores casi nunca lo consiguen. **Que no logres reproducirlo
+pulsando botones no demuestra nada.**
 
-1. Entrar en `/superadmin` → **Departamentos** de una organización existente.
+Por eso hay una prueba automatizada que sí lo fuerza, y es la verificación
+principal:
 
-**Resultado esperado:** aparecen los mismos que tenía contratados, con sus
-colores de siempre (Psicología azul, Tutorías verde, Nutrición naranja) y con
-*"Nota obligatoria"* marcado en **Psicología y Nutrición**, no en Tutorías.
-⚠️ Si alguno cambió de nombre o desapareció, es un fallo grave: el expediente
-clínico los referencia por nombre.
+```bash
+cd server
+pnpm exec vitest run tests/appointment-slot-race.test.ts
+```
 
-#### A2 · Crear un departamento propio 🟠
+**Resultado esperado:** 5 pruebas en verde.
 
-1. *Agregar departamento* → nombre "Trabajo Social", elegir color e icono,
-   **sin** marcar *"Exige nota"*.
-2. Como admin de esa organización, crear un especialista ahí.
-3. Como usuario, agendar una cita en ese departamento.
+Los casos A1–A4 de abajo **sí** son comprobables a mano y es lo que se te pide
+verificar en la interfaz.
 
-**Resultado esperado:**
-- Al crear, avisa de que el nombre no podrá cambiarse una vez tenga citas.
-- Aparece en el panel del admin **con el color y el icono elegidos**, no genéricos.
-- El asistente de nueva cita lo ofrece y, como no tiene motivos preestablecidos,
-  pide el motivo en un **campo de texto libre**.
-- El especialista **puede cerrar la cita sin escribir nota**.
+#### A1 · El segundo en llegar recibe un aviso claro 🟠
 
-#### A3 · Departamento propio que SÍ exige nota 🔴
+**Precondición:** un especialista con horario publicado y dos cuentas de usuario.
 
-1. Crear "Psiquiatría" **marcando** *"Exige nota al cerrar la cita"*.
-2. Agendar y confirmar una cita ahí. Como especialista, intentar completarla
-   con las anotaciones **vacías**.
+1. Con el usuario 1, agendar una cita en un horario concreto.
+2. Con el usuario 2, intentar agendar **ese mismo horario**.
 
-**Resultado esperado:** no se permite. El campo aparece como obligatorio y el
-servidor lo rechaza. Con la nota escrita, se completa.
+**Resultado esperado:** el horario **ya no aparece** en la lista de horas libres.
+Si se fuerza (recargando el asistente antes de que refresque), sale un mensaje
+tipo *"Este horario ya fue reservado. Por favor elige otro."* — nunca un error
+genérico ni una pantalla en blanco.
 
-#### A4 · El nombre se sella al primer uso 🔴
+#### A2 · Cancelar libera el horario 🔴
 
-1. Sobre el departamento de A2 (que ya tiene citas), intentar **renombrarlo**.
+1. Sobre la cita creada en A1, que el usuario 1 la **cancele**.
+2. Con el usuario 2, intentar agendar ese mismo horario.
 
-**Resultado esperado:** se rechaza explicando que ya tiene citas o especialistas.
-⚠️ Intencional: el expediente lo referencia **por nombre**, y renombrarlo
-desconectaría al paciente de su historial.
+**Resultado esperado:** **ahora sí se puede.** ⚠️ Es el caso más importante del
+bloque: el índice se hizo *parcial* justo para esto. Si el horario quedara
+bloqueado para siempre tras una cancelación, es un fallo grave.
 
-2. Cambiarle solo el **color** o el **icono**.
+#### A3 · Reagendar a un horario ocupado se rechaza 🟠
 
-**Resultado esperado:** eso **sí** se permite. Lo sellado es el nombre.
+**Precondición:** dos citas del **mismo especialista** en horarios distintos.
 
-3. Intentar **eliminarlo**.
+1. Reagendar la primera cita al horario que ocupa la segunda.
 
-**Resultado esperado:** se rechaza y sugiere retirarlo. Uno recién creado por
-error, sin citas, **sí** se puede eliminar.
+**Resultado esperado:** se rechaza con el mismo aviso de horario ocupado. La cita
+original **se queda donde estaba**, sin cambios.
 
-#### A5 · Retirar un departamento 🟠
+#### A4 · El historial de cancelaciones no estorba 🟠
 
-**Precondición:** un especialista de *Nutrición* y un usuario con cita
-**Confirmada** en Nutrición.
+1. Agendar y **cancelar** una cita en un horario.
+2. Volver a agendar ese mismo horario y **cancelarla** también.
+3. Agendar una tercera vez.
 
-1. En el gestor, pulsar el icono de apagado en *Nutrición*.
+**Resultado esperado:** las tres operaciones funcionan. Pueden convivir varias
+citas canceladas en el mismo hueco — son historial y deben conservarse. Solo se
+impide que haya **dos vivas a la vez**.
 
-**Resultado esperado:**
-- **La cita Confirmada NO se cancela.** ⚠️ Si se cancela, es un fallo.
-- El usuario y el especialista reciben **correo** avisando; el usuario ve que
-  **su cita se mantiene**.
-- Nutrición desaparece del selector del alumno y el admin no puede crear
-  especialistas ahí.
-- El especialista de Nutrición entra con normalidad y **puede cerrar sus citas**.
-- Volver a activarlo lo restaura sin efectos secundarios.
+#### A5 · (Opcional) Forzar la carrera desde la terminal 🟡
 
-#### A6 · Aislamiento entre organizaciones 🔴
+Solo si quieres verlo con tus propios ojos. En **Git Bash** (el `&` final es lo
+que las lanza de verdad en paralelo):
 
-1. Crear "Trabajo Social" en la organización A.
-2. Abrir el gestor de la organización B.
+```bash
+TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"alumno@mail.com","password":"Admin1234"}' | grep -o '"token":"[^"]*' | cut -d'"' -f4)
 
-**Resultado esperado:** B **no** lo ve. Dos organizaciones pueden tener un
-departamento con el mismo nombre sin interferir.
+# Sustituye SPEC_ID y la fecha por un horario libre real
+for i in 1 2 3 4 5; do
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:3000/api/appointments \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d '{"specialistId":"SPEC_ID","date":"2026-10-15","time":"10:00","modality":"Virtual","motivo":"Prueba"}' &
+done; wait
+```
 
----
-
-### Bloque B — Notas al cerrar la cita 🔴
-
-#### B1 · Cerrar exige nota en departamentos clínicos 🔴
-
-**Precondición:** una cita **Confirmada** de **Psicología** o **Nutrición**.
-
-1. Como el especialista asignado, pulsar *Completar* y dejar el campo vacío.
-
-**Resultado esperado:** no se permite. El campo se llama **Nota clínica** y lleva
-asterisco de obligatorio. Con la nota escrita, la cita se completa y queda en el
-expediente.
-
-#### B2 · Tutorías no la exige 🟠
-
-1. Repetir sobre una cita de **Tutorías**.
-
-**Resultado esperado:** el campo se llama **Observaciones**, es **opcional** y la
-cita se cierra sin escribir nada. ⚠️ Intencional: Tutorías es acompañamiento
-académico, no atención clínica, y la NOM-004 no le aplica. Si el tutor sí
-escribe algo, se guarda igual.
-
-#### B3 · El admin ya no puede completar citas 🔴
-
-1. Como **admin**, intentar marcar una cita como *Completada*.
-
-**Resultado esperado:** no se permite. El admin gestiona la agenda —confirmar,
-cancelar, reagendar— pero **no cierra la atención**. Registrar una
-**inasistencia** sí sigue pudiendo: es un hecho administrativo, no clínico.
+**Resultado esperado:** exactamente **un `201`** y **cuatro `409`**. Si sale más
+de un `201`, es un fallo bloqueante.
 
 ---
 
-### Bloque C — Reactivar bajas desde el panel 🟠
+### Bloque B — Recordatorios de 24 h 🟠
 
-> Dar de baja ya funcionaba; lo que faltaba era **poder deshacerlo desde la
-> interfaz**. El backend ya lo soportaba pero ninguna pantalla lo ofrecía.
+> Funcionalidad **nueva**: nunca se había enviado un recordatorio. Las plantillas
+> llevaban meses escritas sin que nadie las llamara.
 
-#### C1 · Reactivar un especialista 🟠
+**Precondición para todo el bloque:** `REMINDERS_INTERVAL_MINUTES=1` en el `.env`
+del servidor, Mailtrap configurado, y la línea `[reminders] Planificador activo`
+visible en la consola al arrancar.
 
-**Precondición:** un especialista dado de baja.
+#### B1 · Llega el recordatorio a las dos partes 🟠
 
-1. Como admin → pestaña *Especialistas* → botón **"Ver dados de baja"**.
+1. Agendar una cita para **mañana** y que el especialista la **confirme**.
+2. Esperar a la siguiente revisión (con el intervalo en 1, hasta un minuto).
 
-**Resultado esperado:**
-- Aparece una sección con los dados de baja y su **fecha de baja**.
-- Al pulsar *Reactivar*, vuelve al directorio activo y puede iniciar sesión.
-- Sus citas canceladas **no** se reabren.
+**Resultado esperado:** en Mailtrap llegan **dos correos**:
+- Al usuario: *"Recordatorio: tienes una cita mañana"*.
+- Al especialista: *"Recordatorio: cita con [nombre] mañana"*.
 
-#### C2 · Reactivar un usuario 🟠
+Ambos con **fecha y hora legibles** (*"martes, 10 de septiembre de 2026"*,
+*"10:00 AM"*), nunca en crudo (`2026-09-10`, `10:00`). Si la cita es virtual,
+el correo del usuario incluye el enlace.
 
-**Precondición:** un alumno/paciente dado de baja.
+En la consola aparece una línea como:
+`[reminders] 1 enviados, 0 omitidos, 0 fallidos (de 1 candidatas)`
 
-1. Como admin → pestaña de usuarios → **"Ver dados de baja"** → *Reactivar*.
+#### B2 · No se envía dos veces 🔴
 
-**Resultado esperado:** recupera el acceso. Los **especialistas no aparecen** en
-esa lista: se reactivan desde su propia pestaña, que además restaura su perfil.
+1. Tras B1, **esperar varias revisiones más** (2–3 minutos).
 
----
+**Resultado esperado:** **no llegan más correos** de esa cita. ⚠️ Es el caso
+crítico del bloque: sin esto el usuario recibiría un recordatorio cada hora hasta
+la cita. La consola deja de mencionar candidatas.
 
-### Bloque D — Reportes y estadísticas 🟠
+2. **Reiniciar el backend** y esperar otra revisión.
 
-> El cálculo de las gráficas se movió del navegador al servidor. La consecuencia
-> a vigilar: **la pantalla y el PDF deben dar exactamente los mismos números**.
+**Resultado esperado:** sigue sin reenviarse. La marca vive en la base de datos,
+no en memoria.
 
-#### D1 · Pantalla y PDF coinciden 🟠
+#### B3 · Una cita solo Pendiente no se recuerda 🟠
 
-1. Como admin → *Estadísticas*, anotar el total y el reparto por departamento.
-2. Descargar el PDF del mismo período.
+1. Agendar una cita para mañana y **NO confirmarla** (dejarla en *Pendiente*).
+2. Esperar varias revisiones.
 
-**Resultado esperado:** los números **cuadran**. Antes cada uno los calculaba por
-su cuenta y podían discrepar.
+**Resultado esperado:** **no llega recordatorio.** ⚠️ Es intencional: una cita
+pendiente todavía no es un acuerdo entre las dos partes, y avisar *"tienes una
+cita mañana"* de algo que el especialista aún no aceptó genera más confusión que
+asistencia.
 
-#### D2 · "No asistió" aparece en el reporte 🟠
+#### B4 · Una cita cancelada no se recuerda 🟠
 
-1. Con al menos una inasistencia registrada, descargar el PDF.
+1. Confirmar una cita de mañana y **cancelarla** antes de la siguiente revisión.
 
-**Resultado esperado:** en *Resumen de Actividad* hay una fila **"No asistió"**, y
-el **Total de Citas cuadra con la suma** de los estados. Antes las inasistencias
-desaparecían de la contabilidad.
+**Resultado esperado:** no llega recordatorio.
 
-#### D3 · Distribución de Edad en una organización nueva 🔴
+#### B5 · Solo se recuerda lo de mañana 🟠
 
-1. En `/superadmin`, **crear una organización nueva**.
-2. Registrar usuarios rellenando la **fecha de nacimiento** y agendarles citas.
-3. Como admin de esa organización → *Estadísticas*.
+1. Tener citas confirmadas para **hoy**, **mañana** y **pasado mañana**.
 
-**Resultado esperado:**
-- El formulario de registro **sí pide** fecha de nacimiento y género: una
-  organización nueva ya nace con esos campos.
-- **"Distribución de Edad" muestra datos.** ⚠️ Antes salía siempre vacía: la
-  clave se guardaba normalizada y el servidor la buscaba en otro formato.
+**Resultado esperado:** solo llega el recordatorio de la de **mañana**. Las otras
+dos se quedan sin correo (la de pasado mañana lo recibirá al día siguiente).
 
-#### D4 · Campos propios en el PDF 🟠
+#### B6 · Organización suspendida y personas dadas de baja 🟠
 
-**Precondición:** una organización con un campo de registro tipo **select**
-(ej. "Área" con opciones Urgencias / Consulta externa), con usuarios que lo
-rellenaron y citas agendadas.
+1. Con una cita confirmada para mañana, **suspender la organización** desde
+   `/superadmin` antes de la revisión.
 
-1. Descargar el reporte PDF.
+**Resultado esperado:** **no se envía correo.** No se manda correo en nombre de
+una organización suspendida.
 
-**Resultado esperado:** incluye una sección **"Distribución por Campos de la
-Organización"** con ese campo. Antes el PDF solo sabía de carrera, género,
-semestre y edad, así que una organización no escolar exportaba tablas de
-"No especificado".
+2. Repetir con una cita cuyo **usuario haya sido dado de baja**.
 
----
+**Resultado esperado:** tampoco se envía. En consola cuenta como *omitidos*.
 
-### Bloque E — Etiquetas del usuario final 🟡
+#### B7 · El interruptor apaga de verdad 🟡
 
-> Cada organización nombra a sus usuarios (Alumno / Paciente / Empleado). Varios
-> textos seguían diciendo "alumno" a secas.
+1. Poner `REMINDERS_ENABLED=false` y reiniciar el backend.
 
-#### E1 · Los avisos usan la etiqueta correcta 🟡
-
-**Precondición:** una organización cuyo nombre de usuario **no** sea "Alumno"
-(ej. un hospital con "Paciente").
-
-1. Como especialista de esa organización, abrir los modales de **confirmar cita
-   virtual**, **confirmar presencial**, **finalizar cita** y **reagendar**.
-2. Como admin, revisar el **encabezado de la tabla de citas** y el **buscador**.
-
-**Resultado esperado:** todos dicen "paciente" / "Paciente", nunca "alumno".
+**Resultado esperado:** en consola aparece
+`[reminders] Desactivados por REMINDERS_ENABLED=false` y **no se envía ningún
+recordatorio**, aunque haya citas confirmadas para mañana.
 
 ---
 
-### Bloque F — Sedes 🟡
+### Bloque C — Calendario en una sola petición 🟠
 
-#### F1 · La pestaña se ve correctamente 🟡
+> El asistente de nueva cita preguntaba al servidor **día por día** qué días
+> tenían hueco: unas 60 peticiones por especialista y mes. Con el límite de 500
+> peticiones cada 15 minutos, un usuario comparando varios especialistas
+> **agotaba su propia cuota** y la aplicación se le rompía sin explicación.
+>
+> **El comportamiento visible no debe cambiar en nada.** Lo que cambia es cuánto
+> cuesta.
 
-1. Como admin → pestaña *Sedes*.
+#### C1 · La mejora se ve en la red 🟠
 
-**Resultado esperado:** el contenido respeta el margen de la tarjeta como el
-resto de las pestañas (antes iba pegado al borde), con el listado a la izquierda
-y el alta a la derecha. En móvil las filas se apilan.
+1. Abrir las **herramientas de desarrollo** del navegador (F12) → pestaña
+   **Red / Network**, y filtrar por `available`.
+2. Como usuario, abrir el asistente de nueva cita y llegar al paso del
+   **calendario**, eligiendo un especialista.
 
-#### F2 · Editar, desactivar y eliminar 🟠
+**Resultado esperado:** **una sola petición** a `available-days`. ⚠️ Si ves
+decenas de peticiones a `available-slots` seguidas, el cambio no está aplicado
+(¿frontend sin reconstruir?).
 
-1. Crear una sede, luego **editarle el nombre**.
-2. **Desactivarla** con el botón correspondiente.
-3. Intentar **eliminarla**.
+3. Pulsar un día concreto.
 
-**Resultado esperado:**
-- Editar y desactivar funcionan; una sede inactiva se marca como **"Inactiva"** y
-  **desaparece del selector del especialista**, pero se puede reactivar.
-- Eliminar **pide confirmación** explicando que los especialistas que la tengan
-  asignada quedarán sin sede, y que **las citas ya confirmadas no se ven
-  afectadas** porque guardan la ubicación como texto.
+**Resultado esperado:** *ahí sí* aparece **una** petición a `available-slots`,
+la del día elegido. Eso es correcto.
+
+4. Cambiar de mes adelante y atrás varias veces.
+
+**Resultado esperado:** una petición por cambio, no una ráfaga.
+
+#### C2 · Los días marcados son los correctos 🔴
+
+**Precondición:** un especialista con horarios publicados en **varios días** del
+mes.
+
+1. Como usuario, abrir el calendario de ese especialista.
+
+**Resultado esperado:** aparecen seleccionables **exactamente** los días con
+horario publicado. Los días sin horario están deshabilitados, y **los días
+pasados nunca son seleccionables**, ni siquiera al retroceder de mes.
+
+#### C3 · Coherencia entre el día y sus horas 🔴
+
+1. Pulsar **uno por uno** todos los días marcados como disponibles.
+
+**Resultado esperado:** **todos** ofrecen al menos un horario. ⚠️ Es la garantía
+que sostiene el calendario: si un día aparece disponible y al abrirlo está
+vacío, es un fallo — significa que el cálculo del calendario y el de las horas se
+han separado.
+
+#### C4 · Un día que se llena desaparece 🟠
+
+**Precondición:** un día en que el especialista tenga **un solo horario** libre.
+
+1. Reservar ese horario con otro usuario.
+2. Recargar el asistente y mirar el calendario.
+
+**Resultado esperado:** ese día **ya no es seleccionable**.
+
+3. **Cancelar** esa cita y recargar.
+
+**Resultado esperado:** el día **vuelve a estar disponible**.
+
+#### C5 · Especialista inactivo 🟠
+
+1. Como admin, **desactivar** un especialista.
+2. Como usuario, intentar llegar a su calendario.
+
+**Resultado esperado:** no aparece como opción. Si se fuerza, el calendario sale
+**vacío** — sin error ni pantalla rota.
+
+#### C6 · Hoy no ofrece horas ya pasadas 🟠
+
+**Precondición:** un especialista con horarios publicados **para hoy**, algunos
+ya pasados y otros por venir.
+
+1. Abrir el calendario y seleccionar **hoy**.
+
+**Resultado esperado:** solo aparecen los horarios **futuros**. Si ya pasaron
+todos los de hoy, el día no debería ofrecerse.
 
 ---
 
-### Bloque G — Panel de SuperAdmin 🟡
+### Bloque D — Regresión 🟠
 
-#### G1 · Modo claro 🟡
+Recorrido completo, para confirmar que estos cambios no rompieron el flujo:
 
-1. Entrar en `/superadmin` y pulsar el **icono de sol/luna** de la barra superior.
+1. Iniciar sesión como usuario y **agendar una cita** (departamento →
+   especialista → fecha → hora → motivo).
+2. Como especialista, **confirmarla** (virtual con enlace y presencial con sede).
+3. **Reagendarla** desde cada lado.
+4. **Completarla** con su nota (obligatoria en Psicología y Nutrición).
+5. Consultar el **expediente** del paciente.
+6. Como admin, revisar que aparece en el **listado** y en las **estadísticas**.
+7. Descargar el **PDF** del período.
 
-**Resultado esperado:** el panel cambia a modo claro por completo — fondos,
-tarjetas, tablas, modales, insignias y textos de color. ⚠️ Revisar sobre todo
-los **mensajes de error** y las **insignias de rol y plan**: son los que antes
-estaban afinados solo para oscuro y podían quedar ilegibles. La preferencia se
-recuerda al recargar y se comparte con el resto de la aplicación.
-
-#### G2 · El aviso de baja dice la verdad 🔴
-
-1. En la pestaña de usuarios, pulsar el botón de baja de un usuario.
-
-**Resultado esperado:** el modal dice que la cuenta **pierde el acceso** y que
-**los datos NO se eliminan** por retención del expediente. ⚠️ Antes afirmaba
-*"Esta acción es irreversible, se eliminarán todos los datos"*, lo cual era
-falso.
-
-#### G3 · Iconos coherentes 🟡
-
-1. Comparar el botón de eliminar un **campo de registro** con el de dar de baja
-   un **usuario** y el de suspender una **organización**.
-
-**Resultado esperado:** solo el de campos de registro es una **papelera** (es el
-único que borra de verdad). Los otros dos son iconos de **apagado**, porque
-suspenden sin borrar.
-
----
-
-### Bloque H — Eventos 🟠
-
-#### H1 · Inscritos visibles por departamento 🟠
-
-**Precondición:** una conferencia publicada por un especialista, con al menos un
-inscrito, y **otro especialista del mismo departamento**.
-
-1. Entrar como el segundo especialista → pestaña de eventos → pulsar el contador
-   de inscritos.
-
-**Resultado esperado:** **ve la lista**. Antes solo la veía quien publicó el
-evento, aunque la conferencia sea del departamento.
-
-2. Entrar como un especialista de **otro departamento**.
-
-**Resultado esperado:** no puede verla.
-
----
-
-### Bloque I — Regresión 🟠
-
-Recorrido completo, para confirmar que nada de lo anterior rompió el flujo:
-
-1. Registrar un usuario nuevo → verificar correo → iniciar sesión.
-2. Agendar una cita (departamento → especialista → fecha → hora → motivo).
-3. Como especialista, confirmarla (virtual con enlace y presencial con sede).
-4. Reagendarla desde cada lado.
-5. Completarla con su nota.
-6. Consultar el expediente del paciente.
-7. Como admin, revisar que aparece en el listado y en las estadísticas.
-8. Hacer un corte de período y descargar el PDF.
+**Resultado esperado:** todo funciona igual que antes. Los tres cambios de esta
+tanda son de robustez y rendimiento; **ninguno debía alterar el flujo visible**,
+salvo el aviso de horario ocupado y los correos de recordatorio.
 
 ---
 
@@ -416,24 +428,27 @@ Recorrido completo, para confirmar que nada de lo anterior rompió el flujo:
 
 Cosas que **no** cambian y no hace falta probar como nuevas:
 
-- Los **motivos de cita preestablecidos** solo existen para Psicología, Tutorías
-  y Nutrición. Un departamento propio pide el motivo como texto libre; no hay
-  pantalla para configurarle una lista.
-- El **admin de la organización no gestiona departamentos**: solo el superadmin
-  los crea, renombra y retira.
-- La **tarjeta de descarga del PDF** de un departamento propio usa un degradado
-  gris genérico (sí respeta su icono). Los tres originales conservan el suyo.
-- El panel del login muestra siempre los tres originales: es previo al inicio de
-  sesión y no hay organización de la que leer.
-- Todo lo validado en rondas anteriores: retención del expediente, bajas
-  lógicas, estados de especialista y organización, horarios solapados,
-  inasistencias y plantillas de correo.
+- **La carrera de doble reserva no se reproduce a mano.** Ver A0: la verificación
+  real es la prueba automatizada. No inviertas horas pulsando botones en dos
+  navegadores.
+- **Los recordatorios no son configurables por organización ni por usuario.** No
+  hay pantalla para activarlos o desactivarlos: es global, por variable de
+  entorno. Tampoco hay recordatorio a otras horas (48 h, 1 h antes).
+- **Si el envío del recordatorio falla** (SMTP caído), **no se reintenta** a
+  propósito: molestar dos veces se consideró peor que perder uno. El fallo queda
+  en el log del servidor.
+- **El recordatorio no aparece como notificación dentro de la aplicación**, solo
+  como correo.
+- Todo lo validado en rondas anteriores: departamentos por organización, notas
+  obligatorias al cerrar, retención del expediente, bajas lógicas, reportes y
+  estadísticas, sedes, eventos y plantillas de correo.
 
 ## 4. Cómo reportar
 
-Al abrir una incidencia, incluir: **caso** (ej. A4), rol usado, pasos, resultado
+Al abrir una incidencia, incluir: **caso** (ej. A2), rol usado, pasos, resultado
 esperado y obtenido. Para fallos del backend, adjuntar la consola donde corre
-`pnpm dev`.
+`pnpm dev` — los recordatorios escriben ahí su resultado en cada revisión.
 
 Marcar como **bloqueante** cualquier fallo marcado 🔴: son los que pueden
-implicar pérdida de expedientes o acceso indebido.
+implicar dos personas en la misma cita, un horario bloqueado para siempre o un
+recordatorio enviado en bucle.

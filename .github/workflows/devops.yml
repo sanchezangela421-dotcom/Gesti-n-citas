@@ -120,17 +120,6 @@ jobs:
         working-directory: server
         run: pnpm run typecheck
 
-      # Bloquea solo por dependencias que llegan a producción. Las de desarrollo
-      # se reportan pero no rompen el build: sus avisos aparecen y desaparecen
-      # constantemente y bloquearían PRs sin relación con el cambio.
-      - name: Auditar Dependencias (informe completo)
-        working-directory: server
-        run: pnpm audit --audit-level=high --json > npm-audit.json 2>&1 || true
-
-      - name: Auditar Dependencias de producción (bloqueante)
-        working-directory: server
-        run: pnpm audit --prod --audit-level=high
-
       - name: Build
         working-directory: server
         run: pnpm run build > build-error.log 2>&1
@@ -145,6 +134,31 @@ jobs:
         env:
           DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/gestion_citas"
           TEST_DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/gestion_citas_test"
+
+      # ── Auditoría de dependencias ─────────────────────────────────────
+      # Va AL FINAL, y no antes de compilar, por lo que ocurrió el 2026-09-10:
+      # se publicaron avisos nuevos contra nodemailer y multer —dependencias que
+      # nadie había tocado— y el pipeline se cortó aquí sin llegar a compilar ni
+      # a ejecutar una sola prueba. El rojo no decía nada sobre el código.
+      #
+      # `pnpm audit` depende de la FECHA, no del commit: un pipeline verde puede
+      # amanecer en rojo sin que nadie cambie una línea. Esa señal es válida,
+      # pero no debe tapar a las demás.
+      #
+      # `!cancelled()` en vez de dejar que un fallo anterior salte estos pasos:
+      # así una corrida enseña TODO lo que está mal, no solo lo primero.
+      - name: Auditar Dependencias (informe completo)
+        if: ${{ !cancelled() }}
+        working-directory: server
+        run: pnpm audit --audit-level=high --json > npm-audit.json 2>&1 || true
+
+      # Bloquea solo por dependencias que llegan a producción. Las de desarrollo
+      # se reportan pero no rompen el build: sus avisos aparecen y desaparecen
+      # constantemente y bloquearían PRs sin relación con el cambio.
+      - name: Auditar Dependencias de producción (bloqueante)
+        if: ${{ !cancelled() }}
+        working-directory: server
+        run: pnpm audit --prod --audit-level=high
 
       - name: Subir Reportes
         if: always()
@@ -197,19 +211,23 @@ jobs:
         working-directory: project_final
         run: pnpm run typecheck
 
-      - name: Auditar Dependencias (informe completo)
-        working-directory: project_final
-        run: pnpm audit --audit-level=high --json > npm-audit.json 2>&1 || true
-
-      - name: Auditar Dependencias de producción (bloqueante)
-        working-directory: project_final
-        run: pnpm audit --prod --audit-level=high
-
       - name: Build
         working-directory: project_final
         run: pnpm run build > build-error.log 2>&1
         env:
           NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+
+      # Al final por el mismo motivo que en el backend: que un aviso nuevo no
+      # impida saber si el código compila. Ver la nota extensa de ese job.
+      - name: Auditar Dependencias (informe completo)
+        if: ${{ !cancelled() }}
+        working-directory: project_final
+        run: pnpm audit --audit-level=high --json > npm-audit.json 2>&1 || true
+
+      - name: Auditar Dependencias de producción (bloqueante)
+        if: ${{ !cancelled() }}
+        working-directory: project_final
+        run: pnpm audit --prod --audit-level=high
 
       - name: Subir Reportes
         if: always()

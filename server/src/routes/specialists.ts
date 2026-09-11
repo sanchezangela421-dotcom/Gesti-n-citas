@@ -365,6 +365,139 @@ router.get('/:id', verifyToken as any, async (req: AuthRequest, res) => {
   }
 });
 
+/**
+ * Huecos libres de un día concreto, a partir de los horarios del especialista.
+ *
+ * Vive fuera de las rutas porque lo usan DOS: `available-slots` (los horarios de
+ * un día) y `available-days` (qué días del mes tienen alguno). Si cada una
+ * tuviera su copia, acabarían discrepando y el calendario pintaría como
+ * disponible un día que luego aparece sin horarios.
+ */
+function freeSlotsForDate(
+  schedules: { dayOfWeek: number; startTime: string; endTime: string; available: boolean; specificDate: string | null; week: number | null }[],
+  date: string,
+  occupiedTimes: Set<string>,
+  now: Date,
+): { start: string; end: string }[] {
+  const dayOfWeek = new Date(date + 'T12:00:00').getDay();
+
+  // Slots de fecha específica + recurrentes semanales (week null).
+  // La marca week=0/1 era relativa a "hoy" (los slots de semana reaparecían
+  // eternamente); ahora esos slots se anclan por specificDate (ver migración
+  // 20260719000000) y aquí ya no se comparan semanas.
+  const activeSlotsForDay = schedules.filter(s =>
+    s.available && (
+      s.specificDate === date ||
+      (s.specificDate === null && s.week === null && s.dayOfWeek === dayOfWeek)
+    )
+  );
+
+  // Fecha local del servidor (TZ), no UTC: con toISOString, a partir de las
+  // 18:00 hora de México "hoy" era mañana y el filtro de horas pasadas fallaba.
+  const isToday = date === localISODate(now);
+
+  const seen = new Set<string>();
+  const results: { start: string; end: string }[] = [];
+
+  for (const slot of activeSlotsForDay) {
+    if (occupiedTimes.has(slot.startTime) || seen.has(slot.startTime)) continue;
+    // Si la fecha solicitada es hoy, omitir horarios que ya pasaron
+    if (isToday) {
+      const [sh, sm] = slot.startTime.split(':').map(Number);
+      const slotTime = new Date(now);
+      slotTime.setHours(sh, sm, 0, 0);
+      if (slotTime <= now) continue;
+    }
+    seen.add(slot.startTime);
+    results.push({ start: slot.startTime, end: slot.endTime });
+  }
+
+  return results.sort((a, b) => a.start.localeCompare(b.start));
+}
+
+/** Tope del rango de `available-days`: evita que se pida un calendario infinito. */
+const MAX_DAYS_RANGE = 93;
+
+// GET /api/specialists/:id/available-days?from=YYYY-MM-DD&to=YYYY-MM-DD
+//
+// Devuelve las fechas del rango que tienen al menos un hueco libre.
+//
+// Existe para reemplazar lo que hacía el navegador: pedir `available-slots` día
+// por día para pintar el calendario, ~60 peticiones por especialista y mes. Con
+// un límite de 500 peticiones cada 15 min, un alumno comparando especialistas
+// agotaba su propia cuota y la aplicación se le rompía sin explicación.
+router.get('/:id/available-days', verifyToken as any, async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const from = req.query.from as string | undefined;
+    const to   = req.query.to   as string | undefined;
+
+    const ISO = /^\d{4}-\d{2}-\d{2}$/;
+    if (!from || !to || !ISO.test(from) || !ISO.test(to)) {
+      return res.status(400).json({ error: 'Rango requerido: from y to en formato YYYY-MM-DD' });
+    }
+
+    const start = new Date(from + 'T12:00:00');
+    const end   = new Date(to   + 'T12:00:00');
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start) {
+      return res.status(422).json({ error: 'Rango de fechas inválido' });
+    }
+
+    const spanDays = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+    if (spanDays > MAX_DAYS_RANGE) {
+      return res.status(422).json({ error: `El rango no puede exceder ${MAX_DAYS_RANGE} días.` });
+    }
+
+    const specialist = await prisma.specialist.findFirst({
+      where: { id, deletedAt: null, ...orgScope(req.user) },
+      include: { schedules: true },
+    });
+    if (!specialist) return res.status(404).json({ error: 'No encontrado' });
+
+    // Mismo criterio que available-slots: se responde vacío, no 404, para que el
+    // calendario simplemente no ofrezca días.
+    if (!specialist.active) return res.json([]);
+    if (!(await isDepartmentContracted(specialist.organizationId, specialist.department))) {
+      return res.json([]);
+    }
+
+    // UNA sola consulta para todo el rango. Es el punto de la ruta: antes era
+    // una por día, y encima desde el navegador.
+    const appointments = await prisma.appointment.findMany({
+      where: { specialistId: id, date: { gte: from, lte: to }, status: { not: 'Cancelada' } },
+      select: { date: true, time: true },
+    });
+
+    const occupiedByDate = new Map<string, Set<string>>();
+    for (const appt of appointments) {
+      let set = occupiedByDate.get(appt.date);
+      if (!set) { set = new Set(); occupiedByDate.set(appt.date, set); }
+      set.add(appt.time);
+    }
+
+    const now = new Date();
+    const today = localISODate(now);
+    const days: string[] = [];
+
+    for (const cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+      const date = localISODate(cursor);
+      if (date < today) continue; // el pasado no se agenda
+      const free = freeSlotsForDate(
+        specialist.schedules,
+        date,
+        occupiedByDate.get(date) ?? new Set(),
+        now,
+      );
+      if (free.length > 0) days.push(date);
+    }
+
+    res.json(days);
+  } catch (error) {
+    console.error('Error fetching available days:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
 // GET /api/specialists/:id/available-slots
 router.get('/:id/available-slots', verifyToken as any, async (req: AuthRequest, res) => {
   try {
@@ -372,10 +505,6 @@ router.get('/:id/available-slots', verifyToken as any, async (req: AuthRequest, 
     const date = req.query.date as string | undefined;
 
     if (!date) return res.status(400).json({ error: 'Fecha requerida' });
-
-    const requestedDate = new Date(date + 'T12:00:00');
-    requestedDate.setHours(0, 0, 0, 0);
-    const dayOfWeek = requestedDate.getDay();
 
     const specialist = await prisma.specialist.findFirst({
       where: { id, deletedAt: null, ...orgScope(req.user) },
@@ -392,50 +521,14 @@ router.get('/:id/available-slots', verifyToken as any, async (req: AuthRequest, 
       return res.json([]);
     }
 
-    // Slots de fecha específica + recurrentes semanales (week null).
-    // La marca week=0/1 era relativa a "hoy" (los slots de semana reaparecían
-    // eternamente); ahora esos slots se anclan por specificDate (ver migración
-    // 20260719000000) y aquí ya no se comparan semanas.
-    const specificSlots = specialist.schedules.filter((s: any) =>
-      s.specificDate === date && s.available
-    );
-
-    const recurringSlots = specialist.schedules.filter((s: any) =>
-      s.dayOfWeek === dayOfWeek &&
-      s.available &&
-      s.specificDate === null &&
-      s.week === null
-    );
-
-    const activeSlotsForDay = [...specificSlots, ...recurringSlots];
-
     const appointmentsOnDate = await prisma.appointment.findMany({
-      where: { specialistId: id, date, status: { not: 'Cancelada' } }
+      where: { specialistId: id, date, status: { not: 'Cancelada' } },
+      select: { time: true },
     });
 
-    const occupiedTimes = new Set(appointmentsOnDate.map((a: any) => a.time));
-    const nowTime = new Date();
-    // Fecha local del servidor (TZ), no UTC: con toISOString, a partir de las
-    // 18:00 hora de México "hoy" era mañana y el filtro de horas pasadas fallaba.
-    const todayISO = localISODate(nowTime);
-    const isToday = date === todayISO;
+    const occupiedTimes = new Set(appointmentsOnDate.map(a => a.time));
 
-    const seen = new Set<string>();
-    const results: { start: string; end: string }[] = [];
-    activeSlotsForDay.forEach((slot: any) => {
-      if (occupiedTimes.has(slot.startTime) || seen.has(slot.startTime)) return;
-      // Si la fecha solicitada es hoy, omitir horarios que ya pasaron
-      if (isToday) {
-        const [sh, sm] = slot.startTime.split(':').map(Number);
-        const slotTime = new Date();
-        slotTime.setHours(sh, sm, 0, 0);
-        if (slotTime <= nowTime) return;
-      }
-      seen.add(slot.startTime);
-      results.push({ start: slot.startTime, end: slot.endTime });
-    });
-
-    res.json(results.sort((a, b) => a.start.localeCompare(b.start)));
+    res.json(freeSlotsForDate(specialist.schedules, date, occupiedTimes, new Date()));
   } catch (error) {
     console.error('Error fetching slots:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
