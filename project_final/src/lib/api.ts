@@ -1,9 +1,18 @@
 /**
- * Base URL del backend. Se toma de la variable de entorno VITE_API_URL si está
- * definida (producción), o cae a localhost:3000 en desarrollo.
+ * Base URL del backend.
+ *
+ * Por defecto es vacía: el frontend llama a `/api` en su MISMO origen. En
+ * producción nginx reenvía esas rutas al backend (docker-compose ya construye
+ * con VITE_API_URL=""), y en desarrollo lo hace el proxy de Vite
+ * (vite.config.ts). Solo hay que definir VITE_API_URL si el backend vive en
+ * otro dominio (ver DEPLOYMENT.md).
+ *
+ * Antes caía a `http://localhost:3000`, que solo funciona en la máquina del
+ * desarrollador: abierta desde otro dispositivo, ese localhost es el propio
+ * dispositivo y ninguna petición llegaba al servidor.
  */
 export const API_BASE: string =
-  (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:3000';
+  (import.meta as any).env?.VITE_API_URL ?? '';
 
 export const API = `${API_BASE}/api`;
 

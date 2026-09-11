@@ -3,13 +3,14 @@ import {
     AlertTriangle, CalendarCheck, ChevronLeft, ChevronRight, X,
 } from "lucide-react";
 import { MISSED_STATUS } from "../../../constants";
+// La base del backend vive en un solo sitio: tenerla duplicada aquí dejaba los
+// avatares apuntando a localhost aunque el resto de la app ya no lo hiciera.
+import { API_BASE as AVATAR_API_BASE } from "../../../lib/api";
 import { motion } from "motion/react";
 import { useId } from "react";
 import { Reveal, Stagger, StaggerItem, Skeleton, useCountUp } from "./motion";
 
 export { Reveal, Stagger, StaggerItem, Skeleton, useCountUp };
-
-const AVATAR_API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
 // ─── NotifIcon ───────────────────────────────────────────
 export function NotifIcon({ type }: { type: string }) {
