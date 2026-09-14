@@ -801,7 +801,7 @@ export function StudentDashboard() {
                         </div>
                         <div className="flex gap-3">
                             <Btn variant="ghost" onClick={() => resch.setShow(false)} className="flex-1">Cancelar</Btn>
-                            <Btn disabled={!resch.slot} onClick={() => { resch.confirm(); toast.success("Cita reagendada exitosamente"); }} className="flex-1">
+                            <Btn disabled={!resch.slot} onClick={async () => { if (await resch.confirm()) toast.success("Cita reagendada exitosamente"); }} className="flex-1">
                                 Confirmar
                             </Btn>
                         </div>

@@ -97,7 +97,15 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
     }
   }, [specialists, users, addNotification]);
 
-  const updateAppointmentStatus = useCallback((id: string, status: string, notes?: string, byStudent?: boolean, meetingUrl?: string, locationId?: string) => {
+  /**
+   * Cambia el estado de una cita. Devuelve si el servidor lo ACEPTÓ.
+   *
+   * Antes no devolvía nada y quien la llamaba anunciaba "Cita confirmada" en la
+   * línea siguiente: si el servidor rechazaba el cambio (la cita ya estaba
+   * cancelada, falta la nota clínica, transición inválida) aparecían el éxito y
+   * el error a la vez, y el modal se cerraba perdiendo lo escrito.
+   */
+  const updateAppointmentStatus = useCallback(async (id: string, status: string, notes?: string, byStudent?: boolean, meetingUrl?: string, locationId?: string): Promise<boolean> => {
     let originalStatus: string | null = null;
     let capturedAppt: Appointment | null = null;
 
@@ -111,7 +119,7 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
       return p.map(a => a.id === id ? { ...a, status, ...(notes && status === "Cancelada" ? { cancellationReason: notes } : {}), ...(meetingUrl ? { meetingUrl } : {}) } : a);
     });
 
-    fetch(`${API}/appointments/${id}/status`, {
+    return fetch(`${API}/appointments/${id}/status`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ status, notes, ...(meetingUrl ? { meetingUrl } : {}), ...(locationId ? { locationId } : {}) }),
@@ -121,7 +129,7 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
         throw new Error(body.error || "Error al actualizar la cita");
       }
       // Notify ONLY after server confirms the change
-      if (!capturedAppt) return;
+      if (!capturedAppt) return true;
       const appt = capturedAppt;
       if (status === "Confirmada") {
         const virtualInfo = appt.modality === "Virtual"
@@ -159,6 +167,7 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
           }
         }
       }
+      return true;
     }).catch(err => {
       console.error("Error updating appointment status:", err);
       toast.error(err.message || "No se pudo actualizar el estado de la cita.");
@@ -166,13 +175,15 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
       if (originalStatus) {
         setAppointments(p => p.map(a => a.id === id ? { ...a, status: originalStatus! } : a));
       }
+      return false;
     });
   }, [addNotification, specialists]);
 
-  const rescheduleAppointment = useCallback((
+  /** Reagenda una cita. Devuelve si el servidor lo aceptó (mismo criterio que arriba). */
+  const rescheduleAppointment = useCallback(async (
     id: string, newDate: string, newTime: string,
     byRole?: "specialist" | "student", modality?: string
-  ) => {
+  ): Promise<boolean> => {
     // Capture original values before optimistic update for rollback
     let original: { date: string; time: string; modality: string; status: string } | null = null;
     let capturedAppt: Appointment | null = null;
@@ -187,7 +198,7 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
       return p.map(a => a.id === id ? { ...a, date: newDate, time: newTime, ...(byRole === "student" && { status: "Pendiente" }), ...(modality && { modality }) } : a);
     });
 
-    fetch(`${API}/appointments/${id}/reschedule`, {
+    return fetch(`${API}/appointments/${id}/reschedule`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ date: newDate, time: newTime, modality, byRole }),
@@ -197,7 +208,7 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
         throw new Error(body.error || "Error al reagendar la cita");
       }
       // Notify ONLY after server confirms the change
-      if (!capturedAppt) return;
+      if (!capturedAppt) return true;
       const appt = capturedAppt;
       const newModality = modality ?? appt.modality;
       const modalityChanged = modality && modality !== appt.modality;
@@ -218,12 +229,14 @@ export function useAppointmentsStore({ specialists, users, addNotification }: Ap
           });
         }
       }
+      return true;
     }).catch(err => {
       console.error("Error rescheduling appointment:", err);
       toast.error(err.message || "No se pudo reagendar la cita.");
       if (original) {
         setAppointments(p => p.map(a => a.id === id ? { ...a, ...original! } : a));
       }
+      return false;
     });
   }, [addNotification, specialists]);
 

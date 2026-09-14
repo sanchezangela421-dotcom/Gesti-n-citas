@@ -3,4 +3,8 @@
 
 @import 'tw-animate-css';
 
-@variant dark (&:where(.dark, .dark *));
+/* La variante `dark` se define UNA sola vez, en theme.css, junto a los tokens
+   y a los overrides que dependen de ella. Aqui habia una segunda definicion con
+   `:where()` en vez de `:is()`: no cambiaba el resultado (ganaba la de theme.css
+   por ser la ultima en importarse), pero dejaba la especificidad de TODAS las
+   utilidades `dark:` dependiendo de cual de las dos se aplicara. */

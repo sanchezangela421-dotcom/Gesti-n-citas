@@ -252,12 +252,16 @@ export interface StoreContextType {
   appointments: Appointment[];
   getAppointments: (filters?: AppointmentFilters) => Appointment[];
   createAppointment: (req: { studentId: string; studentName?: string; specialistId: string; department: string; motivo: string; modality: string; preferredDate: string; preferredTime: string; isFollowUp?: boolean; parentId?: string }) => Promise<boolean>;
-  updateAppointmentStatus: (id: string, status: string, notes?: string, byStudent?: boolean, meetingUrl?: string, locationId?: string) => void;
-  rescheduleAppointment: (id: string, newDate: string, newTime: string, byRole?: 'specialist' | 'student', modality?: string) => void;
+  // Devuelven si el servidor aceptó: nunca anunciar éxito ni cerrar el modal
+  // antes de saberlo (ver useAppointmentsStore).
+  updateAppointmentStatus: (id: string, status: string, notes?: string, byStudent?: boolean, meetingUrl?: string, locationId?: string) => Promise<boolean>;
+  rescheduleAppointment: (id: string, newDate: string, newTime: string, byRole?: 'specialist' | 'student', modality?: string) => Promise<boolean>;
   getAvailableSlots: (specialistId: string, dateStr: string) => Promise<AvailableSlot[]>;
   getAvailableDays: (specialistId: string, year: number, month: number) => Promise<Date[]>;
-  addScheduleSlot: (specialistId: string, slot: Omit<ScheduleSlot, "id">) => void;
-  removeScheduleSlot: (specialistId: string, slotId: string) => void;
+  // Devuelven si el servidor aceptó la operación: quien las llama no debe
+  // anunciar éxito antes de saberlo (ver useSpecialistsStore).
+  addScheduleSlot: (specialistId: string, slot: Omit<ScheduleSlot, "id">) => Promise<boolean>;
+  removeScheduleSlot: (specialistId: string, slotId: string) => Promise<boolean>;
   updateMeetingUrl: (specialistId: string, meetingUrl: string | null) => Promise<void>;
   updateSpecialistLocation: (specialistId: string, locationId: string | null) => Promise<void>;
   events: AppEvent[];

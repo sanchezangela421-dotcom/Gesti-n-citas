@@ -124,30 +124,37 @@ export function useSpecialistsStore(setUsers: Dispatch<SetStateAction<User[]>>) 
     }
   }, [refreshUsers]);
 
-  const addScheduleSlot = useCallback((specialistId: string, slot: Omit<ScheduleSlot, "id">) => {
-    fetch(`${API}/specialists/${specialistId}/schedules`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify(slot),
-    })
-      .then(async res => {
-        if (!res.ok) {
-          // El servidor explica el motivo (solape, fecha pasada, rango inválido);
-          // mostrarlo evita el genérico "no se pudo" que no dice qué corregir.
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || "No se pudo agregar el horario.");
-        }
-        return res.json();
-      })
-      .then(newSlot => {
-        setSpecialists(p =>
-          p.map(s => s.id === specialistId ? { ...s, schedule: [...s.schedule, newSlot] } : s)
-        );
-      })
-      .catch(err => {
-        console.error("Error adding schedule slot:", err);
-        toast.error(errorMessage(err, "No se pudo agregar el horario."));
+  /**
+   * Publica un horario. Devuelve si el servidor lo ACEPTÓ.
+   *
+   * Antes no devolvía nada, así que quien la llamaba cantaba "Horario agregado"
+   * sin esperar respuesta: con un rango inválido (5pm-1pm) aparecían los dos
+   * avisos a la vez, el de éxito y el de error. Ahora el mensaje lo decide el
+   * resultado real.
+   */
+  const addScheduleSlot = useCallback(async (specialistId: string, slot: Omit<ScheduleSlot, "id">): Promise<boolean> => {
+    try {
+      const res = await fetch(`${API}/specialists/${specialistId}/schedules`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify(slot),
       });
+      if (!res.ok) {
+        // El servidor explica el motivo (solape, fecha pasada, rango inválido);
+        // mostrarlo evita el genérico "no se pudo" que no dice qué corregir.
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "No se pudo agregar el horario.");
+      }
+      const newSlot = await res.json();
+      setSpecialists(p =>
+        p.map(s => s.id === specialistId ? { ...s, schedule: [...s.schedule, newSlot] } : s)
+      );
+      return true;
+    } catch (err) {
+      console.error("Error adding schedule slot:", err);
+      toast.error(errorMessage(err, "No se pudo agregar el horario."));
+      return false;
+    }
   }, []);
 
   const updateMeetingUrl = useCallback(async (specialistId: string, meetingUrl: string | null) => {
@@ -184,18 +191,46 @@ export function useSpecialistsStore(setUsers: Dispatch<SetStateAction<User[]>>) 
     }
   }, []);
 
-  const removeScheduleSlot = useCallback((specialistId: string, slotId: string) => {
+  /**
+   * Elimina un horario. Devuelve si el servidor lo aceptó.
+   *
+   * Si falla, el horario se DEVUELVE a la lista: antes se quitaba de la pantalla
+   * de forma optimista y ahí se quedaba, así que el especialista lo veía
+   * desaparecer aunque siguiera existiendo en el servidor (reaparecía solo al
+   * refrescar). Tampoco se miraba el código de respuesta: un 403 o un 404 se
+   * daban por buenos.
+   */
+  const removeScheduleSlot = useCallback(async (specialistId: string, slotId: string): Promise<boolean> => {
+    let removed: ScheduleSlot | undefined;
     // Optimistic update
     setSpecialists(p =>
-      p.map(s => s.id === specialistId ? { ...s, schedule: s.schedule.filter(sl => sl.id !== slotId) } : s)
+      p.map(s => {
+        if (s.id !== specialistId) return s;
+        removed = s.schedule.find(sl => sl.id === slotId);
+        return { ...s, schedule: s.schedule.filter(sl => sl.id !== slotId) };
+      })
     );
-    fetch(`${API}/specialists/${specialistId}/schedules/${slotId}`, {
-      method: "DELETE",
-      headers: authHeaders(),
-    }).catch(err => {
+    try {
+      const res = await fetch(`${API}/specialists/${specialistId}/schedules/${slotId}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "No se pudo eliminar el horario.");
+      }
+      return true;
+    } catch (err) {
       console.error("Error removing schedule slot:", err);
-      toast.error("No se pudo eliminar el horario.");
-    });
+      if (removed) {
+        const back = removed;
+        setSpecialists(p =>
+          p.map(s => s.id === specialistId ? { ...s, schedule: [...s.schedule, back] } : s)
+        );
+      }
+      toast.error(errorMessage(err, "No se pudo eliminar el horario."));
+      return false;
+    }
   }, []);
 
   return {

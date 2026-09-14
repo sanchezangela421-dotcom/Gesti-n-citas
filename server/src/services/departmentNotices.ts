@@ -44,13 +44,34 @@ export function notifyDepartmentDisabled(
 
     const timeNow = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 
-    // ── Usuarios con cita abierta ────────────────────────────────────────────
-    if (nextByStudent.size > 0) {
-      const students = await prisma.user.findMany({
-        where: { id: { in: [...nextByStudent.keys()] }, deletedAt: null },
-        select: { id: true, name: true, email: true },
-      });
+    // ── 1. Destinatarios ─────────────────────────────────────────────────────
+    const students = nextByStudent.size > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: [...nextByStudent.keys()] }, deletedAt: null },
+          select: { id: true, name: true, email: true },
+        })
+      : [];
 
+    const specialists = await prisma.specialist.findMany({
+      where: { organizationId: org.id, department, deletedAt: null },
+      select: { id: true, name: true, userId: true, user: { select: { email: true, deletedAt: true } } },
+    });
+    const activeSpecialists = specialists.filter(s => !s.user.deletedAt);
+
+    const openBySpecialist = await prisma.appointment.groupBy({
+      by: ['specialistId'],
+      where: { organizationId: org.id, department, status: { in: OPEN } },
+      _count: { _all: true },
+    });
+    const openCount = new Map(openBySpecialist.map(g => [g.specialistId, g._count._all]));
+
+    // ── 2. Primero TODAS las notificaciones dentro de la aplicación ──────────
+    // Van antes que los correos a propósito: escribirlas es instantáneo, y el
+    // correo sale por una cola con una separación deliberada entre envíos (ver
+    // services/email.ts). Cuando los avisos a los especialistas se creaban
+    // DESPUÉS de mandar los correos de los alumnos, una organización con muchas
+    // citas abiertas los dejaba esperando un minuto o más sin motivo.
+    if (students.length > 0) {
       await prisma.notification.createMany({
         data: students.map(s => ({
           userId: s.id,
@@ -61,40 +82,8 @@ export function notifyDepartmentDisabled(
           organizationId: org.id,
         })),
       });
-
-      // En serie: el proveedor SMTP limita el ritmo de envío.
-      for (const s of students) {
-        const pending = nextByStudent.get(s.id);
-        try {
-          await sendDepartmentDisabledUserEmail(s.email, s.name, {
-            department,
-            orgName: org.name,
-            pending: pending && {
-              date: formatLongDate(pending.date),
-              time: formatTime12h(pending.time),
-              specialistName: pending.specialistName,
-            },
-          });
-        } catch (err) {
-          console.error(`[departmentNotices] Error avisando al usuario ${s.id}:`, err);
-        }
-      }
     }
 
-    // ── Especialistas del departamento retirado ──────────────────────────────
-    const specialists = await prisma.specialist.findMany({
-      where: { organizationId: org.id, department, deletedAt: null },
-      select: { id: true, name: true, userId: true, user: { select: { email: true, deletedAt: true } } },
-    });
-
-    const openBySpecialist = await prisma.appointment.groupBy({
-      by: ['specialistId'],
-      where: { organizationId: org.id, department, status: { in: OPEN } },
-      _count: { _all: true },
-    });
-    const openCount = new Map(openBySpecialist.map(g => [g.specialistId, g._count._all]));
-
-    const activeSpecialists = specialists.filter(s => !s.user.deletedAt);
     if (activeSpecialists.length > 0) {
       await prisma.notification.createMany({
         data: activeSpecialists.map(s => ({
@@ -106,17 +95,36 @@ export function notifyDepartmentDisabled(
           organizationId: org.id,
         })),
       });
+    }
 
-      for (const s of activeSpecialists) {
-        try {
-          await sendDepartmentDisabledSpecialistEmail(s.user.email, s.name, {
-            department,
-            orgName: org.name,
-            openAppointments: openCount.get(s.id) ?? 0,
-          });
-        } catch (err) {
-          console.error(`[departmentNotices] Error avisando al especialista ${s.id}:`, err);
-        }
+    // ── 3. Y después los correos ─────────────────────────────────────────────
+    // Un fallo de envío no interrumpe al resto: cada uno se registra y se sigue.
+    for (const s of students) {
+      const pending = nextByStudent.get(s.id);
+      try {
+        await sendDepartmentDisabledUserEmail(s.email, s.name, {
+          department,
+          orgName: org.name,
+          pending: pending && {
+            date: formatLongDate(pending.date),
+            time: formatTime12h(pending.time),
+            specialistName: pending.specialistName,
+          },
+        });
+      } catch (err) {
+        console.error(`[departmentNotices] Error avisando al usuario ${s.id}:`, err);
+      }
+    }
+
+    for (const s of activeSpecialists) {
+      try {
+        await sendDepartmentDisabledSpecialistEmail(s.user.email, s.name, {
+          department,
+          orgName: org.name,
+          openAppointments: openCount.get(s.id) ?? 0,
+        });
+      } catch (err) {
+        console.error(`[departmentNotices] Error avisando al especialista ${s.id}:`, err);
       }
     }
   })().catch(err => console.error('[departmentNotices] Error notificando la retirada del departamento:', err));

@@ -110,10 +110,18 @@ model AuditLog {
   organizationId String?
   metadata       Json?
   ipAddress      String?
+  // Navegador/cliente. Junto con ipAddress es lo que permite caracterizar un
+  // intento: sin él, una persona y un script se ven exactamente igual.
+  userAgent      String?
   createdAt      DateTime @default(now())
 
   @@index([organizationId, createdAt])
   @@index([actorId])
+  // Las tres preguntas que se le hacen a un registro de seguridad: qué acción,
+  // qué pasó últimamente en toda la plataforma, y qué ha hecho esta IP.
+  @@index([action, createdAt])
+  @@index([createdAt])
+  @@index([ipAddress, createdAt])
 }
 
 // ── Business models ────────────────────────────────────────────────────────────

@@ -54,8 +54,32 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
         setShow(true);
     };
 
-    const save = () => {
+    const save = async () => {
         if (!specId) return;
+
+        // La hora de fin debe ser posterior a la de inicio. Se comprueba AQUÍ y no
+        // solo en el servidor por dos motivos: el aviso es inmediato, y sobre todo
+        // porque al editar se borra el horario anterior ANTES de crear el nuevo —
+        // si el servidor rechazaba el nuevo, el especialista se quedaba sin ninguno.
+        if (newStart >= newEnd) {
+            toast.error("La hora de fin debe ser posterior a la de inicio.");
+            return;
+        }
+
+        // Copia del horario que se está editando, tomada antes de borrarlo, para
+        // devolverlo si la creación del nuevo no prospera.
+        const previous = editingSlotId ? schedule.find(s => s.id === editingSlotId) : undefined;
+        const restorePrevious = async () => {
+            if (!previous || !specId) return;
+            await addScheduleSlot(specId, {
+                dayOfWeek: previous.dayOfWeek,
+                startTime: previous.startTime,
+                endTime: previous.endTime,
+                available: previous.available,
+                week: previous.week,
+                specificDate: previous.specificDate,
+            });
+        };
 
         // ── "Esta semana": reparte el horario a los días hábiles (Lun-Vie) de la
         //    semana del día seleccionado, creando slots de FECHA ESPECÍFICA.
@@ -94,20 +118,26 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
                 return;
             }
 
-            if (editingSlotId) removeScheduleSlot(specId, editingSlotId);
-            daysToCreate.forEach(({ dow, iso }) =>
-                addScheduleSlot(specId, {
-                    dayOfWeek: dow,
-                    startTime: newStart,
-                    endTime: newEnd,
-                    available: true,
-                    week: undefined,
-                    specificDate: iso, // anclado a fecha: no "renace" en semanas futuras
-                })
+            if (editingSlotId) await removeScheduleSlot(specId, editingSlotId);
+            const results = await Promise.all(
+                daysToCreate.map(({ dow, iso }) =>
+                    addScheduleSlot(specId, {
+                        dayOfWeek: dow,
+                        startTime: newStart,
+                        endTime: newEnd,
+                        available: true,
+                        week: undefined,
+                        specificDate: iso, // anclado a fecha: no "renace" en semanas futuras
+                    })
+                )
             );
 
+            // Se anuncia lo que el servidor aceptó de verdad, no lo que se intentó.
+            const created = results.filter(Boolean).length;
+            if (created === 0) { await restorePrevious(); return; }
+
             setShow(false); setEditingSlotId(null);
-            toast.success(`${daysToCreate.length} horario${daysToCreate.length === 1 ? "" : "s"} para esta semana`);
+            toast.success(`${created} horario${created === 1 ? "" : "s"} para esta semana`);
             return;
         }
 
@@ -129,9 +159,9 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
         if (hasOverlap) { toast.error("Ya existe un horario solapado para este rango."); return; }
 
         const wasEditing = !!editingSlotId;
-        if (editingSlotId) removeScheduleSlot(specId, editingSlotId);
+        if (editingSlotId) await removeScheduleSlot(specId, editingSlotId);
 
-        addScheduleSlot(specId, {
+        const ok = await addScheduleSlot(specId, {
             dayOfWeek: dayInt,
             startTime: newStart,
             endTime: newEnd,
@@ -139,6 +169,12 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
             week: undefined,
             specificDate: selectedBaseDate,
         });
+
+        // Si no prosperó, el motivo ya lo mostró addScheduleSlot con el texto del
+        // servidor. Aquí solo se evita cantar éxito y cerrar el formulario: se deja
+        // abierto para corregir, y se devuelve el horario que se estaba editando.
+        if (!ok) { await restorePrevious(); return; }
+
         setShow(false); setEditingSlotId(null);
         toast.success(wasEditing ? "Horario actualizado" : "Horario agregado");
     };
@@ -147,7 +183,13 @@ function useScheduleSlots(specId: string | undefined, schedule: any[]) {
         show, setShow, editingSlotId, newDay, setNewDay,
         newWeek, setNewWeek, newStart, setNewStart, newEnd, setNewEnd,
         selectedBaseDate, openEditSlot, openAddSlot, save,
-        removeSlot: (id: string) => { if (specId) { removeScheduleSlot(specId, id); toast.success("Horario eliminado"); } },
+        // Mismo criterio que al guardar: el aviso espera a que el servidor
+        // confirme. Antes decía "Horario eliminado" y, si fallaba, aparecía
+        // también el error justo después.
+        removeSlot: async (id: string) => {
+            if (!specId) return;
+            if (await removeScheduleSlot(specId, id)) toast.success("Horario eliminado");
+        },
     };
 }
 
@@ -238,22 +280,24 @@ export function SpecialistDashboard() {
 
     // ── Direct confirm (no modal) ───────────────────────────────
     const { updateAppointmentStatus } = useStore();
-    const handleConfirmDirect = (appt: Appointment) => {
+    const handleConfirmDirect = async (appt: Appointment) => {
         if (appt.modality === "Virtual") {
             setVirtualConfirmAppt(appt);
             setVirtualConfirmUrl(spec?.meetingUrl ?? "");
         } else if (appt.modality === "Presencial" && orgLocations.length > 0) {
             setPresencialConfirmAppt(appt);
             setPresencialConfirmLocationId(spec?.locationId ?? (orgLocations[0]?.id ?? ""));
-        } else {
-            updateAppointmentStatus(appt.id, "Confirmada", undefined);
+        } else if (await updateAppointmentStatus(appt.id, "Confirmada", undefined)) {
+            // El aviso espera la respuesta del servidor: si rechaza el cambio, el
+            // motivo lo muestra el store y aquí no se canta un éxito que no hubo.
             toast.success("Cita confirmada");
         }
     };
 
-    const handleConfirmPresencial = () => {
+    const handleConfirmPresencial = async () => {
         if (!presencialConfirmAppt) return;
-        updateAppointmentStatus(presencialConfirmAppt.id, "Confirmada", undefined, false, undefined, presencialConfirmLocationId || undefined);
+        const ok = await updateAppointmentStatus(presencialConfirmAppt.id, "Confirmada", undefined, false, undefined, presencialConfirmLocationId || undefined);
+        if (!ok) return; // el modal queda abierto con la sede elegida
         toast.success("Cita presencial confirmada");
         setPresencialConfirmAppt(null);
         setPresencialConfirmLocationId("");
@@ -265,7 +309,8 @@ export function SpecialistDashboard() {
             toast.error("Agrega el enlace de videollamada antes de confirmar.");
             return;
         }
-        updateAppointmentStatus(virtualConfirmAppt.id, "Confirmada", undefined, false, virtualConfirmUrl.trim());
+        const ok = await updateAppointmentStatus(virtualConfirmAppt.id, "Confirmada", undefined, false, virtualConfirmUrl.trim());
+        if (!ok) return; // se conserva el enlace escrito para reintentar
         toast.success("Cita virtual confirmada");
         setVirtualConfirmAppt(null);
         setVirtualConfirmUrl("");
@@ -1069,7 +1114,7 @@ export function SpecialistDashboard() {
                         </div>
                         <div className="pt-4 border-t border-slate-100 flex gap-3">
                             <Btn variant="ghost" onClick={() => resch.setShow(false)} className="flex-1">Cancelar</Btn>
-                            <Btn disabled={!resch.slot} onClick={() => { resch.confirm(); toast.success("Cita reagendada"); }} className="flex-1">
+                            <Btn disabled={!resch.slot} onClick={async () => { if (await resch.confirm()) toast.success("Cita reagendada"); }} className="flex-1">
                                 Confirmar Reagendamiento
                             </Btn>
                         </div>

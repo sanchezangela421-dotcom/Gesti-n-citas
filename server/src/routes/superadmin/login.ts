@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { prisma } from '../../db';
-import { writeAudit, getClientIp } from '../../services/auditLogger';
+import { writeAuditNow, requestContext } from '../../services/auditLogger';
 
 const router = Router();
 
@@ -23,7 +23,7 @@ const loginLimiter = rateLimit({
 
 // POST /api/superadmin/login
 router.post('/', loginLimiter, async (req, res) => {
-  const ip = getClientIp(req);
+  const ctx = requestContext(req);
 
   try {
     const { email, password } = req.body as { email?: string; password?: string };
@@ -36,14 +36,14 @@ router.post('/', loginLimiter, async (req, res) => {
 
     // Respuesta genérica — no revela si el email existe, el rol, ni si fue dado de baja
     if (!user || user.role !== 'superadmin' || user.deletedAt) {
-      writeAudit({
+      await writeAuditNow({
         actorId:      'unknown',
         actorRole:    'unknown',
         action:       'SUPERADMIN_LOGIN_FAILED',
         targetEntity: 'Auth',
         targetId:     'login',
         metadata:     { email, reason: 'user_not_found_or_wrong_role' },
-        ipAddress:    ip,
+        ...ctx,
       });
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
@@ -51,14 +51,14 @@ router.post('/', loginLimiter, async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
-      writeAudit({
+      await writeAuditNow({
         actorId:      user.id,
         actorRole:    'superadmin',
         action:       'SUPERADMIN_LOGIN_FAILED',
         targetEntity: 'Auth',
         targetId:     user.id,
         metadata:     { reason: 'wrong_password' },
-        ipAddress:    ip,
+        ...ctx,
       });
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
@@ -70,14 +70,14 @@ router.post('/', loginLimiter, async (req, res) => {
       { expiresIn: '2h', algorithm: 'HS256' }
     );
 
-    writeAudit({
+    await writeAuditNow({
       actorId:      user.id,
       actorRole:    'superadmin',
       action:       'SUPERADMIN_LOGIN_SUCCESS',
       targetEntity: 'Auth',
       targetId:     user.id,
       metadata:     { email: user.email },
-      ipAddress:    ip,
+      ...ctx,
     });
 
     res.json({

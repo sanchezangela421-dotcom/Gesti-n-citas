@@ -9,7 +9,7 @@ import { contractedDepartmentNames, isDepartmentContracted } from '../lib/depart
 import { localISODate } from '../lib/dates';
 import { sendAccountInvitation } from '../services/email';
 import { cancelOpenAppointments, notifyCancelledByDeactivation } from '../services/deactivation';
-import { writeAudit, getClientIp } from '../services/auditLogger';
+import { writeAudit, requestContext } from '../services/auditLogger';
 
 const EMAIL_REGEX = /^[^\s@,;]+@[^\s@,;.]+(\.[^\s@,;.]+)+$/;
 
@@ -296,7 +296,7 @@ router.delete('/:id', verifyToken as any, async (req: AuthRequest, res) => {
       targetId: id,
       organizationId: specialist.organizationId,
       metadata: { name: specialist.name, email: specialist.email, reason, cancelledAppointments: cancelled.length },
-      ipAddress: getClientIp(req),
+      ...requestContext(req),
     });
 
     res.json({ success: true, cancelledAppointments: cancelled.length });
@@ -337,7 +337,7 @@ router.post('/:id/restore', verifyToken as any, async (req: AuthRequest, res) =>
       targetId: id,
       organizationId: specialist.organizationId,
       metadata: { name: specialist.name, email: specialist.email },
-      ipAddress: getClientIp(req),
+      ...requestContext(req),
     });
 
     res.json(restored);

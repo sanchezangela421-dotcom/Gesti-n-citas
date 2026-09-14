@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { ShieldCheck, Eye, EyeOff, Lock } from "lucide-react";
+import { ShieldCheck, Eye, EyeOff, Lock, Sun, Moon } from "lucide-react";
 import { API } from "../../../lib/api";
+import { useTheme } from "../../hooks/useTheme";
 
 interface Props {
     onLogin: (token: string, user: { id: string; email: string; name: string }) => void;
@@ -12,6 +13,9 @@ export function SuperAdminLogin({ onLogin }: Props) {
     const [showPass, setShowPass] = useState(false);
     const [loading, setLoading]   = useState(false);
     const [error, setError]       = useState("");
+    // El interruptor tambien aqui: es la primera pantalla que se ve, y sin el
+    // habia que entrar para poder cambiar de tema.
+    const { dark, toggle: toggleTheme } = useTheme();
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
@@ -48,6 +52,15 @@ export function SuperAdminLogin({ onLogin }: Props) {
 
     return (
         <div className="min-h-screen bg-background flex items-center justify-center p-6">
+            <button
+                onClick={toggleTheme}
+                title={dark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+                aria-label={dark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+                className="fixed top-4 right-4 p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+            >
+                {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+
             <div className="w-full max-w-sm space-y-8">
 
                 {/* Logo / header */}

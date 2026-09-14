@@ -8,6 +8,10 @@ import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../services/email';
 import { upload } from '../middleware/upload';
 import { metadataValue, type LegacyField } from '../lib/registrationFields';
+import {
+  writeAuditNow, requestContext, auditText,
+  AUTH_ACTION, LOGIN_FAILURE, UNKNOWN_ACTOR,
+} from '../services/auditLogger';
 
 const router = Router();
 
@@ -37,7 +41,29 @@ const EMAIL_REGEX = /^[^\s@,;]+@[^\s@,;.]+(\.[^\s@,;.]+)+$/;
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    
+    const ctx = requestContext(req);
+
+    /**
+     * Registra un acceso rechazado con su motivo REAL.
+     *
+     * La respuesta al cliente es deliberadamente vaga para no revelar si un
+     * correo existe; la bitácora sí guarda el motivo, que es lo que distingue
+     * un tanteo masivo de la insistencia sobre una cuenta concreta.
+     */
+    const auditFailure = (
+      reason: string,
+      u?: { id: string; role: string; organizationId: string | null },
+    ) => writeAuditNow({
+      actorId:      u?.id ?? UNKNOWN_ACTOR,
+      actorRole:    u?.role ?? UNKNOWN_ACTOR,
+      action:       AUTH_ACTION.LOGIN_FAILED,
+      targetEntity: 'Auth',
+      targetId:     u?.id ?? 'login',
+      organizationId: u?.organizationId ?? null,
+      metadata:     { reason, email: auditText(email) },
+      ...ctx,
+    });
+
     // Find user
     const user = await prisma.user.findUnique({
       where: { email },
@@ -45,34 +71,42 @@ router.post('/login', async (req, res) => {
     });
     
     if (!user) {
+      await auditFailure(LOGIN_FAILURE.USER_NOT_FOUND);
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
     
     const isMatch = await bcrypt.compare(password, user.password);
     
     if (!isMatch) {
+      await auditFailure(LOGIN_FAILURE.WRONG_PASSWORD, user);
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
     // Superadmin must use the dedicated /api/superadmin/login endpoint
     if (user.role === 'superadmin') {
+      // Con la contraseña correcta: o el superadmin se equivocó de puerta, o
+      // alguien con sus credenciales está tanteando por dónde entrar.
+      await auditFailure(LOGIN_FAILURE.SUPERADMIN_VIA_USER_LOGIN, user);
       return res.status(403).json({ error: 'Credenciales inválidas' });
     }
 
     // Cuenta dada de baja: la fila se conserva por retención del expediente, pero
     // no puede volver a operar hasta que un administrador la reactive.
     if (user.deletedAt) {
+      await auditFailure(LOGIN_FAILURE.ACCOUNT_DEACTIVATED, user);
       return res.status(403).json({ code: 'ACCOUNT_DEACTIVATED', error: 'Esta cuenta fue dada de baja. Contacta al administrador de tu organización.' });
     }
 
     // Organización suspendida: suspender un tenant debe dejar fuera también a los
     // usuarios que ya existían, no solo impedir registros nuevos.
     if (user.organization && !user.organization.active) {
+      await auditFailure(LOGIN_FAILURE.ORG_SUSPENDED, user);
       return res.status(403).json({ code: 'ORGANIZATION_SUSPENDED', error: 'El acceso de tu organización está suspendido. Contacta a soporte.' });
     }
 
     // Block unverified end-users (alumno y usuario)
     if ((user.role === 'alumno' || user.role === 'usuario') && !user.emailVerified) {
+      await auditFailure(LOGIN_FAILURE.EMAIL_NOT_VERIFIED, user);
       return res.status(403).json({ code: 'EMAIL_NOT_VERIFIED', error: 'Debes verificar tu correo antes de iniciar sesión.' });
     }
 
@@ -82,7 +116,18 @@ router.post('/login', async (req, res) => {
       JWT_SECRET,
       { expiresIn: '24h', algorithm: 'HS256' }
     );
-    
+
+    await writeAuditNow({
+      actorId:      user.id,
+      actorRole:    user.role,
+      action:       AUTH_ACTION.LOGIN_SUCCESS,
+      targetEntity: 'Auth',
+      targetId:     user.id,
+      organizationId: user.organizationId ?? null,
+      metadata:     { email: user.email },
+      ...ctx,
+    });
+
     // Remove password from object before sending
     const { password: _, ...userWithoutPassword } = user;
     
@@ -191,6 +236,19 @@ router.post('/register', async (req, res) => {
       console.error('Error sending verification email:', err);
     });
 
+    // El alta es el momento en que una cuenta entra a existir: sin registrarla,
+    // una creación masiva de cuentas no dejaría rastro en ninguna parte.
+    await writeAuditNow({
+      actorId:      user.id,
+      actorRole:    user.role,
+      action:       AUTH_ACTION.REGISTER_SUCCESS,
+      targetEntity: 'User',
+      targetId:     user.id,
+      organizationId: user.organizationId ?? null,
+      metadata:     { email: user.email, role: user.role },
+      ...requestContext(req),
+    });
+
     res.status(201).json({ message: 'Registro exitoso. Revisa tu correo para verificar tu cuenta.' });
 
   } catch (error) {
@@ -218,6 +276,17 @@ router.get('/verify/:token', async (req, res) => {
     await prisma.user.update({
       where: { id: user.id },
       data: { emailVerified: true, verificationToken: null, verificationTokenExpiresAt: null }
+    });
+
+    await writeAuditNow({
+      actorId:      user.id,
+      actorRole:    user.role,
+      action:       AUTH_ACTION.EMAIL_VERIFIED,
+      targetEntity: 'User',
+      targetId:     user.id,
+      organizationId: user.organizationId ?? null,
+      metadata:     { email: user.email },
+      ...requestContext(req),
     });
 
     res.redirect(`${frontendUrl}?verified=true`);
@@ -266,6 +335,19 @@ router.post('/forgot-password', async (req, res) => {
     // Always respond OK to avoid leaking which emails exist
     // (las cuentas dadas de baja tampoco reciben correo, pero la respuesta no lo revela)
     if (!user || user.deletedAt) {
+      // Se audita IGUAL que el caso bueno: la respuesta al cliente no distingue,
+      // pero recorrer este endpoint con una lista de correos es una forma de
+      // enumerar cuentas, y sin registrar los fallidos no habría cómo verlo.
+      await writeAuditNow({
+        actorId:      user?.id ?? UNKNOWN_ACTOR,
+        actorRole:    user?.role ?? UNKNOWN_ACTOR,
+        action:       AUTH_ACTION.PASSWORD_RESET_REQUESTED,
+        targetEntity: 'Auth',
+        targetId:     user?.id ?? 'forgot-password',
+        organizationId: user?.organizationId ?? null,
+        metadata:     { email: auditText(email), delivered: false, reason: user ? 'account_deactivated' : 'user_not_found' },
+        ...requestContext(req),
+      });
       return res.json({ message: 'Si el correo existe, recibirás un enlace para restablecer tu contraseña.' });
     }
 
@@ -279,6 +361,17 @@ router.post('/forgot-password', async (req, res) => {
 
     sendPasswordResetEmail(user.name, user.email, resetPasswordToken).catch(err => {
       console.error('Error sending reset email:', err);
+    });
+
+    await writeAuditNow({
+      actorId:      user.id,
+      actorRole:    user.role,
+      action:       AUTH_ACTION.PASSWORD_RESET_REQUESTED,
+      targetEntity: 'Auth',
+      targetId:     user.id,
+      organizationId: user.organizationId ?? null,
+      metadata:     { email: user.email, delivered: true },
+      ...requestContext(req),
     });
 
     res.json({ message: 'Si el correo existe, recibirás un enlace para restablecer tu contraseña.' });
@@ -304,10 +397,32 @@ router.post('/reset-password', async (req, res) => {
     // Una cuenta dada de baja no puede reactivarse a sí misma por el enlace de
     // recuperación: la reactivación es una decisión del administrador.
     if (!user || user.deletedAt) {
+      // Un enlace que no corresponde a nadie es, o un enlace ya usado, o alguien
+      // probando tokens. En ningún caso debe pasar en silencio.
+      await writeAuditNow({
+        actorId:      user?.id ?? UNKNOWN_ACTOR,
+        actorRole:    user?.role ?? UNKNOWN_ACTOR,
+        action:       AUTH_ACTION.PASSWORD_RESET_FAILED,
+        targetEntity: 'Auth',
+        targetId:     user?.id ?? 'reset-password',
+        organizationId: user?.organizationId ?? null,
+        metadata:     { reason: user ? 'account_deactivated' : 'invalid_token' },
+        ...requestContext(req),
+      });
       return res.status(400).json({ code: 'INVALID_TOKEN', error: 'El enlace no es válido.' });
     }
 
     if (user.resetPasswordTokenExpiresAt && user.resetPasswordTokenExpiresAt < new Date()) {
+      await writeAuditNow({
+        actorId:      user.id,
+        actorRole:    user.role,
+        action:       AUTH_ACTION.PASSWORD_RESET_FAILED,
+        targetEntity: 'Auth',
+        targetId:     user.id,
+        organizationId: user.organizationId ?? null,
+        metadata:     { email: user.email, reason: 'expired_token' },
+        ...requestContext(req),
+      });
       return res.status(400).json({ code: 'EXPIRED_TOKEN', error: 'El enlace ha expirado. Solicita uno nuevo.' });
     }
 
@@ -324,6 +439,19 @@ router.post('/reset-password', async (req, res) => {
         // Si el usuario nunca verificó su email (creado por SuperAdmin), lo marca al activar
         ...(user.emailVerified ? {} : { emailVerified: true }),
       }
+    });
+
+    // Cambiar la contraseña invalida las sesiones abiertas: es la acción con la
+    // que se recupera una cuenta comprometida, y también con la que se secuestra.
+    await writeAuditNow({
+      actorId:      user.id,
+      actorRole:    user.role,
+      action:       AUTH_ACTION.PASSWORD_RESET_COMPLETED,
+      targetEntity: 'User',
+      targetId:     user.id,
+      organizationId: user.organizationId ?? null,
+      metadata:     { email: user.email },
+      ...requestContext(req),
     });
 
     res.json({ message: 'Contraseña actualizada correctamente.' });

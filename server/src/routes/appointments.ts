@@ -5,7 +5,7 @@ import { orgScope } from '../lib/orgScope';
 import { sanitizeOptionalHttpUrl } from '../lib/urls';
 import { isDepartmentContracted, departmentRequiresNote } from '../lib/departments';
 import { getCallerSpecialist } from '../lib/clinicalAccess';
-import { writeAudit, getClientIp } from '../services/auditLogger';
+import { writeAudit, requestContext } from '../services/auditLogger';
 import {
   sendAppointmentNewEmails,
   sendAppointmentConfirmedEmail,
@@ -483,7 +483,7 @@ router.patch('/:id/status', verifyToken as any, async (req: AuthRequest, res) =>
         targetId: noteAudit.id,
         organizationId: req.user?.organizationId ?? null,
         metadata: { appointmentId: id, studentId: current.studentId, department: current.department, via: 'complete' },
-        ipAddress: getClientIp(req),
+        ...requestContext(req),
       });
     }
 
@@ -745,7 +745,7 @@ router.put('/:id/note', verifyToken as any, async (req: AuthRequest, res) => {
       targetId: note.id,
       organizationId: req.user?.organizationId ?? null,
       metadata: { appointmentId: id, studentId: appt.studentId, department: appt.department },
-      ipAddress: getClientIp(req),
+      ...requestContext(req),
     });
 
     res.json(note);

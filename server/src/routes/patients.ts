@@ -3,7 +3,7 @@ import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { orgScope } from '../lib/orgScope';
 import { getCallerSpecialist } from '../lib/clinicalAccess';
-import { writeAudit, getClientIp } from '../services/auditLogger';
+import { writeAudit, requestContext } from '../services/auditLogger';
 
 const router = Router();
 
@@ -114,7 +114,7 @@ router.get('/:studentId/record', verifyToken as any, async (req: AuthRequest, re
       targetId: studentId,
       organizationId: req.user?.organizationId ?? null,
       metadata: { department: spec.department, notesCount: notes.length, viaContinuidad },
-      ipAddress: getClientIp(req),
+      ...requestContext(req),
     });
 
     res.json({ studentId, department: spec.department, inactive: !!patient?.deletedAt, timeline });

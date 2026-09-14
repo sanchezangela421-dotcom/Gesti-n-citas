@@ -58,6 +58,12 @@ export default defineConfig({
       SUPERADMIN_ALLOWED_IPS: '',
       FRONTEND_URL: 'http://localhost:5173',
       BACKEND_URL: 'http://localhost:3000',
+      // La cola de correo no impone ritmo ni reintenta durante las pruebas: la
+      // separación de producción (1100 ms por envío) y los reintentos con espera
+      // creciente alargarían la suite por algo que no es su objeto. La prueba de
+      // la cola en sí fija sus propios valores antes de cargar el módulo.
+      EMAIL_MIN_INTERVAL_MS: '0',
+      EMAIL_MAX_RETRIES: '0',
     },
   },
 });

@@ -37,13 +37,18 @@ export interface ApiResponse<T = any> {
   body: T;
 }
 
-/** Petición autenticada (o anónima si `token` es null) contra la API de pruebas. */
+/**
+ * Petición autenticada (o anónima si `token` es null) contra la API de pruebas.
+ *
+ * `headers` permite fijar cabeceras extra; se usa sobre todo para mandar un
+ * `User-Agent` concreto y comprobar que la bitácora lo guarda.
+ */
 export async function api<T = any>(
   method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
   path: string,
-  opts: { token?: string | null; body?: unknown } = {},
+  opts: { token?: string | null; body?: unknown; headers?: Record<string, string> } = {},
 ): Promise<ApiResponse<T>> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...opts.headers };
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
 
   const res = await fetch(`${baseUrl}${path}`, {

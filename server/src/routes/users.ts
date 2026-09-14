@@ -3,7 +3,7 @@ import { prisma } from '../db';
 import { verifyToken, AuthRequest } from '../middleware/verifyToken';
 import { orgScope } from '../lib/orgScope';
 import { cancelOpenAppointments, notifyCancelledByDeactivation } from '../services/deactivation';
-import { writeAudit, getClientIp } from '../services/auditLogger';
+import { writeAudit, requestContext } from '../services/auditLogger';
 
 const router = Router();
 
@@ -129,7 +129,7 @@ router.delete('/:id', verifyToken as any, async (req: AuthRequest, res) => {
       targetId: id,
       organizationId: user.organizationId,
       metadata: { name: user.name, email: user.email, role: user.role, reason, cancelledAppointments: cancelled.length },
-      ipAddress: getClientIp(req),
+      ...requestContext(req),
     });
 
     res.json({ success: true, cancelledAppointments: cancelled.length });
@@ -169,7 +169,7 @@ router.post('/:id/restore', verifyToken as any, async (req: AuthRequest, res) =>
       targetId: id,
       organizationId: user.organizationId,
       metadata: { name: user.name, email: user.email, role: user.role },
-      ipAddress: getClientIp(req),
+      ...requestContext(req),
     });
 
     res.json(restored);

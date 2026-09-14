@@ -184,10 +184,18 @@ export function useReschedule(role: "student" | "specialist") {
         setShow(true);
     };
 
-    const confirm = () => {
-        if (!apptId || !date || !slot) return;
-        rescheduleAppointment(apptId, localISODate(date), slot, role, selModality);
+    /**
+     * Devuelve si el reagendamiento prosperó. El modal solo se cierra si el
+     * servidor aceptó: antes se cerraba siempre, así que un rechazo (horario ya
+     * tomado, menos de 24 h) dejaba al usuario sin el formulario y con un aviso
+     * de éxito que no correspondía.
+     */
+    const confirm = async (): Promise<boolean> => {
+        if (!apptId || !date || !slot) return false;
+        const ok = await rescheduleAppointment(apptId, localISODate(date), slot, role, selModality);
+        if (!ok) return false;
         setShow(false); setApptId(null); setDate(null); setSlot(null);
+        return true;
     };
 
     return {
@@ -210,10 +218,13 @@ export function useCancelAppointment() {
     const open = (id: string) => { setApptId(id); setReason(""); setShow(true); };
     const close = () => setShow(false);
 
-    const confirm = () => {
-        if (!apptId) return;
-        updateAppointmentStatus(apptId, "Cancelada", reason, true);
+    const confirm = async (): Promise<boolean> => {
+        if (!apptId) return false;
+        const ok = await updateAppointmentStatus(apptId, "Cancelada", reason, true);
+        // Si falla, se conserva el motivo escrito para no obligar a teclearlo otra vez.
+        if (!ok) return false;
         setShow(false); setApptId(null); setReason("");
+        return true;
     };
 
     return { show, open, close, apptId, reason, setReason, confirm };
@@ -234,10 +245,14 @@ export function useActionModal() {
     const open = (a: Appointment, s: string) => { setAppt(a); setStatus(s); setNotes(""); };
     const close = () => { setAppt(null); setStatus(null); };
 
-    const confirm = (notifyStudent = false) => {
-        if (!appt || !status) return;
-        updateAppointmentStatus(appt.id, status, notes || undefined, notifyStudent);
+    const confirm = async (notifyStudent = false): Promise<boolean> => {
+        if (!appt || !status) return false;
+        const ok = await updateAppointmentStatus(appt.id, status, notes || undefined, notifyStudent);
+        // No se cierra si falla: la nota clínica escrita se perdía cuando el
+        // servidor rechazaba el cierre de la cita.
+        if (!ok) return false;
         close();
+        return true;
     };
 
     return { appt, status, notes, setNotes, open, close, confirm };

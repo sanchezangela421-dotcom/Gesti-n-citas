@@ -27,14 +27,28 @@ import {
   departmentDisabledSpecialistTemplate,
 } from './email_templates/departmentDisabled';
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+// Las pruebas NO mandan correo de verdad.
+//
+// `vitest.config.mts` carga el .env del desarrollador y sobreescribe la base de
+// datos y el JWT, pero no el SMTP: la suite enviaba a la cuenta real de Mailtrap.
+// Llenaba la bandeja de direcciones `@test.local` y —peor— gastaba la MISMA cuota
+// que necesita quien está probando la aplicación, provocando justo el
+// "Too many emails per second" que se investigó el 2026-09-13.
+//
+// `jsonTransport` arma el mensaje y lo descarta, sin abrir ninguna conexión.
+// Dos llamadas y no un ternario dentro de createTransport: nodemailer tiene una
+// sobrecarga por tipo de transporte y un argumento de tipo unión no encaja en
+// ninguna.
+const transporter = process.env.NODE_ENV === 'test'
+  ? nodemailer.createTransport({ jsonTransport: true })
+  : nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
 
 const FROM = `"Synkros" <${process.env.SMTP_FROM}>`;
 const APP_URL = process.env.FRONTEND_URL ?? '';
@@ -47,11 +61,82 @@ const LOGO_ATTACHMENT = {
   cid: 'logo@synkros',
 };
 
+// ── Cola de salida ────────────────────────────────────────────────────────────
+
+/**
+ * TODO el correo del sistema sale por aquí: de uno en uno y con una separación
+ * mínima entre envíos.
+ *
+ * Antes cada función espaciaba sus propios correos con una pausa local, pero eso
+ * solo ordena los de UNA llamada: no ve lo que están mandando otros flujos a la
+ * vez. El 2026-09-13 un recordatorio y el aviso de una cita salieron en el mismo
+ * instante; el proveedor rechazó uno con "Too many emails per second", así que
+ * llegó solo uno de los dos correos del recordatorio y la operación entera contó
+ * como fallida.
+ *
+ * Esto no es solo para planes gratuitos: aunque el proveedor admita ráfagas,
+ * dispararlas todas de golpe es la forma más rápida de que nos limiten o nos
+ * marquen como remitente sospechoso.
+ */
+const MIN_INTERVAL_MS = Number(process.env.EMAIL_MIN_INTERVAL_MS ?? 1100);
+const MAX_SEND_RETRIES = Number(process.env.EMAIL_MAX_RETRIES ?? 3);
+
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+type MailOptions = Parameters<typeof transporter.sendMail>[0];
+
+/** Cadena de promesas: cada envío espera a que termine el anterior. */
+let mailQueue: Promise<unknown> = Promise.resolve();
+let lastSentAt = 0;
+
+/**
+ * ¿El proveedor está pidiendo que bajemos el ritmo?
+ *
+ * Mailtrap contesta 550 con ese texto; otros usan los 4xx de "inténtalo más
+ * tarde". En ambos casos el correo no se rechazó por inválido, así que
+ * reintentarlo más despacio tiene sentido. Un destinatario mal escrito o unas
+ * credenciales erróneas no mejoran esperando: esos se propagan tal cual.
+ */
+function isRateLimited(err: unknown): boolean {
+  const e = err as { responseCode?: number; response?: string };
+  if (typeof e?.responseCode === 'number' && e.responseCode >= 420 && e.responseCode < 500) return true;
+  return /too many|rate limit|try again later|slow down/i.test(e?.response ?? '');
+}
+
+async function sendNow(options: MailOptions): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    const since = Date.now() - lastSentAt;
+    if (since < MIN_INTERVAL_MS) await delay(MIN_INTERVAL_MS - since);
+    try {
+      await transporter.sendMail(options);
+      lastSentAt = Date.now();
+      return;
+    } catch (err) {
+      lastSentAt = Date.now();
+      if (attempt > MAX_SEND_RETRIES || !isRateLimited(err)) throw err;
+      console.warn(`[email] el proveedor pidió bajar el ritmo; reintento ${attempt}/${MAX_SEND_RETRIES}`);
+      await delay(MIN_INTERVAL_MS * 2 ** attempt); // se espera cada vez más
+    }
+  }
+}
+
+/**
+ * Encola un correo y devuelve una promesa que se resuelve cuando SALIÓ de veras.
+ * Quien la espera —el planificador de recordatorios— sigue sabiendo si se envió.
+ */
+function sendQueued(options: MailOptions): Promise<void> {
+  const result = mailQueue.then(() => sendNow(options));
+  // La cola sigue avanzando aunque este envío falle: un error no debe atascar
+  // todos los correos que vienen detrás.
+  mailQueue = result.catch(() => undefined);
+  return result;
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 export async function sendVerificationEmail(name: string, email: string, token: string) {
   const verifyUrl = `${process.env.BACKEND_URL}/api/auth/verify/${token}`;
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: email,
     subject: 'Verifica tu correo — Synkros',
@@ -62,7 +147,7 @@ export async function sendVerificationEmail(name: string, email: string, token: 
 
 export async function sendPasswordResetEmail(name: string, email: string, token: string) {
   const resetUrl = `${APP_URL}?reset_token=${token}`;
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: email,
     subject: 'Recupera tu contraseña — Synkros',
@@ -73,7 +158,7 @@ export async function sendPasswordResetEmail(name: string, email: string, token:
 
 export async function sendWelcomeEmail(name: string, email: string, password: string, role: string) {
   const roleLabel = role === 'admin' ? 'Administrador' : 'Especialista';
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: email,
     subject: `Bienvenido/a a Synkros — ${roleLabel}`,
@@ -85,7 +170,7 @@ export async function sendWelcomeEmail(name: string, email: string, password: st
 export async function sendAccountInvitation(
   name: string, email: string, orgName: string, role: string, activationUrl: string
 ) {
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: email,
     subject: `Activa tu cuenta en Synkros — ${orgName}`,
@@ -108,7 +193,6 @@ export interface AppointmentEmailData {
   location?: string;
 }
 
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /** Nueva solicitud: avisa al alumno (recibida) y al especialista (pendiente) */
 export async function sendAppointmentNewEmails(
@@ -116,15 +200,14 @@ export async function sendAppointmentNewEmails(
   specialistEmail: string,
   data: AppointmentEmailData
 ) {
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: studentEmail,
     subject: 'Solicitud de cita recibida — Synkros',
     html: appointmentNewStudentTemplate(data.studentName, { ...data, appUrl: APP_URL }),
     attachments: [LOGO_ATTACHMENT],
   });
-  await delay(1100);
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: specialistEmail,
     subject: `Nueva solicitud de cita de ${data.studentName} — Synkros`,
@@ -138,7 +221,7 @@ export async function sendAppointmentConfirmedEmail(
   studentEmail: string,
   data: AppointmentEmailData
 ) {
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: studentEmail,
     subject: '¡Tu cita está confirmada! — Synkros',
@@ -152,7 +235,7 @@ export async function sendRescheduledBySpecialistEmail(
   studentEmail: string,
   data: AppointmentEmailData & { previousDate: string; previousTime: string; newDate: string; newTime: string }
 ) {
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: studentEmail,
     subject: 'Tu cita fue reagendada — Synkros',
@@ -173,7 +256,7 @@ export async function sendRescheduledByStudentEmail(
   specialistEmail: string,
   data: AppointmentEmailData & { previousDate: string; previousTime: string; newDate: string; newTime: string }
 ) {
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: specialistEmail,
     subject: `${data.studentName} reagendó su cita — Synkros`,
@@ -194,7 +277,7 @@ export async function sendCancelledBySpecialistEmail(
   studentEmail: string,
   data: AppointmentEmailData & { reason?: string }
 ) {
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: studentEmail,
     subject: 'Tu cita fue cancelada — Synkros',
@@ -214,7 +297,7 @@ export async function sendCancelledByStudentEmail(
   specialistEmail: string,
   data: AppointmentEmailData & { reason?: string }
 ) {
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: specialistEmail,
     subject: `${data.studentName} canceló su cita — Synkros`,
@@ -235,7 +318,7 @@ export async function sendAppointmentReminderEmails(
   specialistEmail: string,
   data: AppointmentEmailData
 ) {
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: studentEmail,
     subject: 'Recordatorio: tienes una cita mañana — Synkros',
@@ -249,8 +332,7 @@ export async function sendAppointmentReminderEmails(
     }),
     attachments: [LOGO_ATTACHMENT],
   });
-  await delay(1100);
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: specialistEmail,
     subject: `Recordatorio: cita con ${data.studentName} mañana — Synkros`,
@@ -276,7 +358,7 @@ export async function sendDepartmentDisabledUserEmail(
     pending?: { date: string; time: string; specialistName: string };
   },
 ) {
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: email,
     subject: `${data.department} deja de estar disponible — Synkros`,
@@ -291,7 +373,7 @@ export async function sendDepartmentDisabledSpecialistEmail(
   specialistName: string,
   data: { department: string; orgName: string; openAppointments: number },
 ) {
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: email,
     subject: `${data.department} deja de estar disponible — Synkros`,
@@ -305,7 +387,7 @@ export async function sendAppointmentMissedEmail(
   studentEmail: string,
   data: AppointmentEmailData,
 ) {
-  await transporter.sendMail({
+  await sendQueued({
     from: FROM,
     to: studentEmail,
     subject: 'Sobre tu cita — Synkros',

@@ -73,9 +73,21 @@ interface AuditEntry {
     targetId: string;
     organizationId: string | null;
     ipAddress: string | null;
+    userAgent: string | null;
     createdAt: string;
     metadata: Record<string, any> | null;
 }
+
+/** Filtros de la bitácora. Vacío = sin filtrar por ese campo. */
+interface AuditFilters {
+    action: string;
+    ip: string;
+    email: string;
+    from: string;
+    to: string;
+}
+
+const SIN_FILTROS: AuditFilters = { action: "", ip: "", email: "", from: "", to: "" };
 
 interface UserRow {
     id: string;
@@ -104,8 +116,12 @@ const ORG_TYPE_ICON: Record<string, typeof GraduationCap> = {
 
 const PLAN_COLOR: Record<string, string> = {
     free:       "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
-    basic:      "bg-blue-100 text-blue-700 dark:bg-blue-100 dark:text-blue-700",
-    enterprise: "bg-amber-100 text-amber-700 dark:bg-amber-100 dark:text-amber-700",
+    // Sin variantes `dark:`: theme.css ya adapta `bg-*-100` y `text-*-700` en
+    // oscuro para todas las insignias. Las que habia aqui repetian el valor claro
+    // y no surtian efecto — el override global gana igual — pero hacian creer que
+    // estas insignias estaban exentas del sistema de temas.
+    basic:      "bg-blue-100 text-blue-700",
+    enterprise: "bg-amber-100 text-amber-700",
 };
 
 const ROLE_COLOR: Record<string, string> = {
@@ -158,6 +174,11 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
     const [auditTotal, setAuditTotal] = useState(0);
     const [auditPage, setAuditPage] = useState(1);
     const [auditLoading, setAuditLoading] = useState(false);
+    // Los del formulario y los realmente aplicados van por separado: así teclear
+    // no dispara una petición por cada letra.
+    const [auditForm, setAuditForm] = useState<AuditFilters>(SIN_FILTROS);
+    const [auditFilters, setAuditFilters] = useState<AuditFilters>(SIN_FILTROS);
+    const [auditActions, setAuditActions] = useState<{ action: string; count: number }[]>([]);
 
     // ── Designar admin modal ──
     const [designOrg, setDesignOrg] = useState<Org | null>(null);
@@ -262,30 +283,58 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
         }
     }, []);
 
-    const fetchAudit = useCallback(async (page = 1, force = false) => {
-        const key = `audit-${page}`;
+    const fetchAudit = useCallback(async (page = 1, filters: AuditFilters = SIN_FILTROS, force = false) => {
+        const qs = new URLSearchParams({ page: String(page) });
+        for (const [campo, valor] of Object.entries(filters)) {
+            if (valor) qs.set(campo, valor);
+        }
+        // La clave incluye los filtros: si no, cambiar de filtro devolvería el
+        // resultado en caché del filtro anterior.
+        const key = `audit-${qs.toString()}`;
         if (!force && isFresh(key)) return;
         setAuditLoading(true);
         try {
-            const res = await fetch(`${API}/superadmin/audit?page=${page}`, { headers: superAdminHeaders() });
-            if (!res.ok) throw new Error();
+            const res = await fetch(`${API}/superadmin/audit?${qs}`, { headers: superAdminHeaders() });
+            if (!res.ok) {
+                // El servidor explica qué parámetro está mal (una fecha con otro
+                // formato, un rango invertido); mostrarlo evita el genérico.
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.error || "Error al cargar auditoría");
+            }
             const data = await res.json();
             setAudit(data.entries);
             setAuditTotal(data.total);
             markFresh(key);
-        } catch {
-            toast.error("Error al cargar auditoría");
+        } catch (err) {
+            toast.error(err instanceof Error && err.message ? err.message : "Error al cargar auditoría");
         } finally {
             setAuditLoading(false);
         }
     }, []);
+
+    // Las acciones que EXISTEN en la bitácora, para el selector. Se consultan en
+    // vez de escribirlas aquí: una lista fija se desfasa en cuanto el servidor
+    // registra un evento nuevo, y ofrecer un filtro que no devuelve nada confunde.
+    const fetchAuditActions = useCallback(async () => {
+        try {
+            const res = await fetch(`${API}/superadmin/audit/actions`, { headers: superAdminHeaders() });
+            if (res.ok) setAuditActions(await res.json());
+        } catch { /* el selector se queda vacío; los demás filtros siguen sirviendo */ }
+    }, []);
+
+    /** Aplica los filtros del formulario y vuelve a la primera página. */
+    const aplicarFiltros = useCallback((filtros: AuditFilters) => {
+        setAuditFilters(filtros);
+        setAuditPage(1);
+        fetchAudit(1, filtros, true);
+    }, [fetchAudit]);
 
     // Load on tab switch — respeta caché de 30s para evitar 429
     useEffect(() => {
         if (tab === "overview") fetchStats();
         if (tab === "orgs")     fetchOrgs();
         if (tab === "users")    fetchUsers(usersPage, userOrgFilter);
-        if (tab === "audit")    fetchAudit(auditPage);
+        if (tab === "audit")  { fetchAudit(auditPage, auditFilters); fetchAuditActions(); }
     }, [tab]);
 
     // ── Actions ───────────────────────────────────────────────────────────────
@@ -729,7 +778,10 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
             <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
 
                 {/* Tab nav */}
-                <nav className="flex gap-1 bg-card p-1 rounded-xl w-fit">
+                {/* El contenedor va en `muted` y la pestaña activa en `card`: antes las
+                    dos usaban el MISMO token, asi que la activa solo se distinguia por
+                    una sombra minima — blanco sobre blanco en claro. */}
+                <nav className="flex gap-1 bg-muted p-1 rounded-xl w-fit">
                     {TABS.map(({ key, label, icon: Icon }) => (
                         <button
                             key={key}
@@ -737,7 +789,7 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                                 tab === key
                                     ? "bg-card text-foreground shadow-sm"
-                                    : "text-muted-foreground hover:text-foreground"
+                                    : "text-muted-foreground hover:text-foreground hover:bg-card/50"
                             }`}
                         >
                             <Icon className="w-4 h-4" />
@@ -985,24 +1037,108 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                     <div className="space-y-4">
                         <div className="flex items-center justify-between">
                             <h2 className="text-xl font-bold text-foreground">Registro de auditoría <span className="text-muted-foreground text-base font-normal">({auditTotal})</span></h2>
-                            <button onClick={() => fetchAudit(auditPage, true)} className="text-muted-foreground hover:text-foreground transition-colors">
+                            <button onClick={() => fetchAudit(auditPage, auditFilters, true)} className="text-muted-foreground hover:text-foreground transition-colors">
                                 <RefreshCw className={`w-4 h-4 ${auditLoading ? "animate-spin" : ""}`} />
                             </button>
                         </div>
+
+                        {/* Filtros. Se aplican al enviar, no al teclear. */}
+                        <form
+                            onSubmit={e => { e.preventDefault(); aplicarFiltros(auditForm); }}
+                            className="bg-card rounded-xl p-4 flex flex-wrap items-end gap-3"
+                        >
+                            <label className="flex flex-col gap-1 min-w-[190px] flex-1">
+                                <span className="text-xs text-muted-foreground">Acción</span>
+                                <select
+                                    value={auditForm.action}
+                                    onChange={e => setAuditForm(f => ({ ...f, action: e.target.value }))}
+                                    className="px-3 py-2 rounded-lg bg-muted text-foreground text-sm border border-border"
+                                >
+                                    <option value="">Todas</option>
+                                    {auditActions.map(a => (
+                                        <option key={a.action} value={a.action}>
+                                            {etiquetaAccion(a.action)} ({a.count})
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+
+                            <label className="flex flex-col gap-1 min-w-[150px]">
+                                <span className="text-xs text-muted-foreground">IP</span>
+                                <input
+                                    value={auditForm.ip}
+                                    onChange={e => setAuditForm(f => ({ ...f, ip: e.target.value.trim() }))}
+                                    placeholder="203.0.113.7"
+                                    className="px-3 py-2 rounded-lg bg-muted text-foreground text-sm border border-border font-mono"
+                                />
+                            </label>
+
+                            <label className="flex flex-col gap-1 min-w-[190px] flex-1">
+                                <span className="text-xs text-muted-foreground">Correo tanteado</span>
+                                <input
+                                    value={auditForm.email}
+                                    onChange={e => setAuditForm(f => ({ ...f, email: e.target.value.trim() }))}
+                                    placeholder="cuenta@dominio.com"
+                                    className="px-3 py-2 rounded-lg bg-muted text-foreground text-sm border border-border"
+                                />
+                            </label>
+
+                            <label className="flex flex-col gap-1">
+                                <span className="text-xs text-muted-foreground">Desde</span>
+                                <input
+                                    type="date"
+                                    value={auditForm.from}
+                                    onChange={e => setAuditForm(f => ({ ...f, from: e.target.value }))}
+                                    className="px-3 py-2 rounded-lg bg-muted text-foreground text-sm border border-border"
+                                />
+                            </label>
+
+                            <label className="flex flex-col gap-1">
+                                <span className="text-xs text-muted-foreground">Hasta</span>
+                                <input
+                                    type="date"
+                                    value={auditForm.to}
+                                    onChange={e => setAuditForm(f => ({ ...f, to: e.target.value }))}
+                                    className="px-3 py-2 rounded-lg bg-muted text-foreground text-sm border border-border"
+                                />
+                            </label>
+
+                            <button type="submit" className="px-4 py-2 rounded-lg bg-rose-700 hover:bg-rose-600 text-white text-sm font-medium transition-colors">
+                                Filtrar
+                            </button>
+                            {hayFiltros(auditFilters) && (
+                                <button
+                                    type="button"
+                                    onClick={() => { setAuditForm(SIN_FILTROS); aplicarFiltros(SIN_FILTROS); }}
+                                    className="px-4 py-2 rounded-lg bg-muted text-foreground text-sm font-medium hover:bg-muted/70 transition-colors"
+                                >
+                                    Limpiar
+                                </button>
+                            )}
+                        </form>
+
                         <div className="bg-card rounded-xl overflow-hidden">
                             {auditLoading ? (
                                 <p className="text-center py-8 text-muted-foreground">Cargando...</p>
                             ) : audit.length === 0 ? (
-                                <p className="text-center py-8 text-muted-foreground">Sin entradas de auditoría</p>
+                                <p className="text-center py-8 text-muted-foreground">
+                                    {hayFiltros(auditFilters) ? "Ningún registro coincide con el filtro" : "Sin entradas de auditoría"}
+                                </p>
                             ) : audit.map(entry => (
                                 <AuditRow key={entry.id} entry={entry} verbose />
                             ))}
-                            {auditTotal > 100 && (
+                            {/* El rango se muestra SIEMPRE, no solo al pasar de 100: sin
+                                esto la pantalla no daba ninguna pista de que hubiera un
+                                limite, y con menos de 100 entradas parecia una lista
+                                infinita por la que solo se hace scroll. */}
+                            {audit.length > 0 && (
                                 <div className="flex items-center justify-between px-4 py-3 border-t border-border text-xs text-muted-foreground">
-                                    <span>Página {auditPage}</span>
-                                    <div className="flex gap-2">
-                                        <button disabled={auditPage <= 1} onClick={() => { setAuditPage(p => p - 1); fetchAudit(auditPage - 1); }} className="px-2 py-1 rounded bg-muted disabled:opacity-40">Anterior</button>
-                                        <button disabled={auditPage * 100 >= auditTotal} onClick={() => { setAuditPage(p => p + 1); fetchAudit(auditPage + 1); }} className="px-2 py-1 rounded bg-muted disabled:opacity-40">Siguiente</button>
+                                    <span>
+                                        Mostrando {(auditPage - 1) * 100 + 1}–{(auditPage - 1) * 100 + audit.length} de {auditTotal}
+                                    </span>
+                                    <div className={`flex gap-2 ${auditTotal > 100 ? "" : "hidden"}`}>
+                                        <button disabled={auditPage <= 1} onClick={() => { setAuditPage(p => p - 1); fetchAudit(auditPage - 1, auditFilters); }} className="px-2 py-1 rounded bg-muted disabled:opacity-40">Anterior</button>
+                                        <button disabled={auditPage * 100 >= auditTotal} onClick={() => { setAuditPage(p => p + 1); fetchAudit(auditPage + 1, auditFilters); }} className="px-2 py-1 rounded bg-muted disabled:opacity-40">Siguiente</button>
                                     </div>
                                 </div>
                             )}
@@ -1480,30 +1616,150 @@ function StatTile({ icon: Icon, label, value, sub, color }: {
     );
 }
 
-const ACTION_COLOR: Record<string, string> = {
-    CREATE_ORGANIZATION:  "text-teal-700 dark:text-teal-400",
-    UPDATE_ORGANIZATION:  "text-blue-700",
-    DEACTIVATE_ORGANIZATION: "text-amber-700",
-    DELETE_ORGANIZATION:  "text-rose-700",
-    CREATE_ORG_ADMIN:     "text-indigo-700",
+/** ¿Hay algún filtro puesto? */
+function hayFiltros(f: AuditFilters): boolean {
+    return Object.values(f).some(Boolean);
+}
+
+/**
+ * Nombre legible de cada acción.
+ *
+ * El panel pintaba el identificador crudo (`SUPERADMIN_LOGIN_FAILED`), que se
+ * entiende leyendo el código pero no de un vistazo. Una acción sin traducir cae
+ * a su identificador: es preferible a ocultarla.
+ */
+const ACTION_LABEL: Record<string, string> = {
+    LOGIN_SUCCESS:             "Inicio de sesión",
+    LOGIN_FAILED:              "Intento de acceso fallido",
+    REGISTER_SUCCESS:          "Registro de cuenta",
+    EMAIL_VERIFIED:            "Correo verificado",
+    PASSWORD_RESET_REQUESTED:  "Solicitó restablecer contraseña",
+    PASSWORD_RESET_COMPLETED:  "Contraseña restablecida",
+    PASSWORD_RESET_FAILED:     "Restablecimiento fallido",
+    SUPERADMIN_LOGIN_SUCCESS:  "Acceso de superadmin",
+    SUPERADMIN_LOGIN_FAILED:   "Acceso de superadmin fallido",
+    SUPERADMIN_USERS_VIEWED:   "Consultó el listado de usuarios",
+    SUPERADMIN_ORGS_VIEWED:    "Consultó las organizaciones",
+    CREATE_ORGANIZATION:       "Creó una organización",
+    DELETE_ORGANIZATION:       "Eliminó una organización",
+    UPDATE_ORG_LOGO:           "Cambió el logo",
+    CREATE_ORG_ADMIN:          "Designó administrador",
+    CREATE_USER:               "Creó un usuario",
+    UPDATE_USER:               "Editó un usuario",
+    USER_DEACTIVATED:          "Dio de baja a un usuario",
+    USER_REACTIVATED:          "Reactivó a un usuario",
+    SPECIALIST_DEACTIVATED:    "Dio de baja a un especialista",
+    SPECIALIST_REACTIVATED:    "Reactivó a un especialista",
+    CREATE_DEPARTMENT:         "Creó un departamento",
+    UPDATE_DEPARTMENT:         "Editó un departamento",
+    DELETE_DEPARTMENT:         "Eliminó un departamento",
+    CREATE_REGISTRATION_FIELD: "Creó un campo de registro",
+    DELETE_REGISTRATION_FIELD: "Eliminó un campo de registro",
+    CLINICAL_NOTE_CREATED:     "Escribió una nota clínica",
+    CLINICAL_NOTE_EDITED:      "Editó una nota clínica",
+    CLINICAL_RECORD_VIEWED:    "Consultó un expediente",
 };
 
+function etiquetaAccion(action: string): string {
+    return ACTION_LABEL[action] ?? action;
+}
+
+/** Por qué se rechazó un acceso. El servidor guarda la causa real. */
+const REASON_LABEL: Record<string, string> = {
+    user_not_found:            "el correo no está registrado",
+    wrong_password:            "contraseña incorrecta",
+    superadmin_via_user_login: "superadmin entrando por el acceso normal",
+    account_deactivated:       "cuenta dada de baja",
+    org_suspended:             "organización suspendida",
+    email_not_verified:        "correo sin verificar",
+    invalid_token:             "enlace no válido",
+    expired_token:             "enlace caducado",
+};
+
+/** Rojo para lo que salió mal, ámbar para las consultas, teal para las altas. */
+const ACTION_COLOR: Record<string, string> = {
+    LOGIN_FAILED:              "text-rose-700 dark:text-rose-400",
+    SUPERADMIN_LOGIN_FAILED:   "text-rose-700 dark:text-rose-400",
+    PASSWORD_RESET_FAILED:     "text-rose-700 dark:text-rose-400",
+    DELETE_ORGANIZATION:       "text-rose-700 dark:text-rose-400",
+    DELETE_DEPARTMENT:         "text-rose-700 dark:text-rose-400",
+    DELETE_REGISTRATION_FIELD: "text-rose-700 dark:text-rose-400",
+    USER_DEACTIVATED:          "text-amber-700 dark:text-amber-400",
+    SPECIALIST_DEACTIVATED:    "text-amber-700 dark:text-amber-400",
+    SUPERADMIN_USERS_VIEWED:   "text-amber-700 dark:text-amber-400",
+    SUPERADMIN_ORGS_VIEWED:    "text-amber-700 dark:text-amber-400",
+    CLINICAL_RECORD_VIEWED:    "text-amber-700 dark:text-amber-400",
+    CREATE_ORGANIZATION:       "text-teal-700 dark:text-teal-400",
+    CREATE_USER:               "text-teal-700 dark:text-teal-400",
+    CREATE_ORG_ADMIN:          "text-indigo-700 dark:text-indigo-400",
+    SUPERADMIN_LOGIN_SUCCESS:  "text-indigo-700 dark:text-indigo-400",
+};
+
+/**
+ * El detalle de una entrada, en pares legibles.
+ *
+ * Antes se pintaba `JSON.stringify(metadata)` truncado en una línea, que para
+ * quien no conoce el código es una cadena de llaves. Un valor que sea objeto
+ * (el filtro de una consulta) sí se serializa: no hay forma corta mejor.
+ */
+function detalles(metadata: Record<string, unknown> | null): { clave: string; valor: string }[] {
+    if (!metadata) return [];
+    return Object.entries(metadata)
+        .filter(([, v]) => v !== null && v !== undefined && v !== "")
+        .map(([clave, valor]) => ({
+            clave,
+            valor: clave === "reason" && typeof valor === "string"
+                ? (REASON_LABEL[valor] ?? valor)
+                : typeof valor === "object" ? JSON.stringify(valor) : String(valor),
+        }));
+}
+
+/** "Mozilla/5.0 (Windows NT 10.0..." -> "Windows . Chrome". Lo justo para distinguir. */
+function navegador(ua: string | null): string | null {
+    if (!ua) return null;
+    const so = /Android/i.test(ua) ? "Android"
+        : /iPhone|iPad|iPod/i.test(ua) ? "iOS"
+        : /Windows/i.test(ua) ? "Windows"
+        : /Mac OS X/i.test(ua) ? "macOS"
+        : /Linux/i.test(ua) ? "Linux" : null;
+    const app = /Edg\//i.test(ua) ? "Edge"
+        : /OPR\//i.test(ua) ? "Opera"
+        : /Chrome\//i.test(ua) ? "Chrome"
+        : /Firefox\//i.test(ua) ? "Firefox"
+        : /Safari\//i.test(ua) ? "Safari"
+        : /curl|wget|python|node|postman/i.test(ua) ? "herramienta o script" : null;
+    return [so, app].filter(Boolean).join(" · ") || null;
+}
+
 function AuditRow({ entry, verbose = false }: { entry: AuditEntry; verbose?: boolean }) {
+    const pares = verbose ? detalles(entry.metadata) : [];
+    const cliente = verbose ? navegador(entry.userAgent) : null;
+
     return (
         <div className="flex items-start gap-3 px-4 py-3 border-b border-border/50 hover:bg-muted/20 transition-colors">
             <Clock className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`text-xs font-mono font-semibold ${ACTION_COLOR[entry.action] ?? "text-foreground"}`}>{entry.action}</span>
+                    <span className={`text-sm font-medium ${ACTION_COLOR[entry.action] ?? "text-foreground"}`}>
+                        {etiquetaAccion(entry.action)}
+                    </span>
                     <span className="text-xs text-muted-foreground">{entry.targetEntity} · {entry.targetId.slice(0, 8)}…</span>
                 </div>
-                {verbose && entry.metadata && (
-                    <p className="text-xs text-muted-foreground mt-0.5 truncate">{JSON.stringify(entry.metadata)}</p>
+                {pares.length > 0 && (
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
+                        {pares.map(({ clave, valor }) => (
+                            <span key={clave} className="text-xs text-muted-foreground">
+                                <span className="opacity-70">{clave}:</span>{" "}
+                                <span className="text-foreground">{valor}</span>
+                            </span>
+                        ))}
+                    </div>
                 )}
             </div>
             <div className="text-right shrink-0">
                 <p className="text-xs text-muted-foreground">{fmtDateTime(entry.createdAt)}</p>
                 {verbose && entry.ipAddress && <p className="text-xs text-foreground font-mono">{entry.ipAddress}</p>}
+                {cliente && <p className="text-xs text-muted-foreground">{cliente}</p>}
             </div>
         </div>
     );
