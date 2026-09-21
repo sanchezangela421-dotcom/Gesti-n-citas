@@ -162,7 +162,7 @@ export function ContentTab({ dept, endUserTabLabel }: { dept: string; endUserTab
                                         {r.description && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{r.description}</p>}
                                         <span className="text-[0.65rem] uppercase tracking-wider font-bold text-slate-400">{r.type}</span>
                                     </div>
-                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 shrink-0 transition-all">
+                                    <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 shrink-0 transition-all">
                                         <button onClick={() => openEditResource(r)} title="Editar"
                                             className="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all cursor-pointer">
                                             <Pencil className="w-4 h-4" />

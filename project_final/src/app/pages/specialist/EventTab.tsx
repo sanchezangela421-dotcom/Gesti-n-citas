@@ -173,7 +173,7 @@ export function EventTab({ dept, endUserTabLabel }: { dept: string; endUserTabLa
                                             <span className={`absolute bottom-2 left-2 z-20 px-2 py-0.5 rounded-md font-bold text-[0.6rem] uppercase ${ev.type === "conferencia" ? "bg-violet-500 text-white" : "bg-blue-500 text-white"}`}>
                                                 {ev.type === "conferencia" ? "Conferencia" : "Taller"}
                                             </span>
-                                            <div className="absolute top-2 right-2 z-20 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                            <div className="absolute top-2 right-2 z-20 flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all">
                                                 <button onClick={() => openEditEvent(ev)} title="Editar"
                                                     className="p-1.5 bg-white/90 hover:bg-white text-blue-600 rounded-lg cursor-pointer shadow">
                                                     <Pencil className="w-3.5 h-3.5" />
@@ -201,7 +201,7 @@ export function EventTab({ dept, endUserTabLabel }: { dept: string; endUserTabLa
                                             )}
                                         </div>
                                         {!ev.imageUrl && (
-                                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 shrink-0 transition-all">
+                                            <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 shrink-0 transition-all">
                                                 <button onClick={() => openEditEvent(ev)} title="Editar"
                                                     className="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all cursor-pointer">
                                                     <Pencil className="w-4 h-4" />

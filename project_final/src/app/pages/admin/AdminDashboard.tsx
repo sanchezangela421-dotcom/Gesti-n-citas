@@ -540,6 +540,126 @@ async function generatePDFReport(
     toast.success("Reporte generado con éxito.");
 }
 
+/**
+ * Marcas que el panel resalta en una cita: quedó sin cerrar, o se cerró tarde.
+ *
+ * Vive fuera de la tabla porque la misma cita se pinta de DOS formas —tabla en
+ * pantallas anchas, tarjeta en el teléfono— y dos copias de esta lógica
+ * acabarían discrepando.
+ */
+function citaFlags(cita: Appointment, todayMidnight: Date) {
+    const citaDate = new Date(cita.date + "T12:00:00");
+    return {
+        citaDate,
+        isSinCerrar: (cita.status === "Pendiente" || cita.status === "Confirmada") && citaDate < todayMidnight,
+        isSesionTardia: cita.status === "Completada" && !!cita.updatedAt && cita.updatedAt.split("T")[0] > cita.date,
+    };
+}
+
+/**
+ * Una cita como tarjeta, para el teléfono.
+ *
+ * La tabla tiene SIETE columnas y necesita unos 640px. En un celular de 393px
+ * quedaban cuatro escondidas tras un scroll horizontal que no se anuncia, y el
+ * corte caía a media palabra ("14 se…"). Aquí no se oculta nada: cada dato lleva
+ * su etiqueta y la tarjeta crece hacia abajo, que es hacia donde el teléfono
+ * tiene sitio.
+ *
+ * El admin usa esta pantalla desde el móvil para CONSULTAR de paso, no para
+ * comparar columnas; por eso la tabla se reserva a tablet y escritorio.
+ */
+function CitaCard({ cita, todayMidnight }: { cita: Appointment; todayMidnight: Date }) {
+    const { citaDate, isSinCerrar, isSesionTardia } = citaFlags(cita, todayMidnight);
+    const dato = "text-slate-700 dark:text-slate-300 font-medium break-words";
+
+    return (
+        <div className={`rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3 ${isSinCerrar ? "bg-amber-50/60 dark:bg-amber-900/20" : "bg-white dark:bg-slate-800"}`}>
+            <div className="flex items-start justify-between gap-3">
+                <p className="font-bold text-slate-900 dark:text-white text-sm break-words flex-1 min-w-0">{cita.studentName}</p>
+                <div className="text-right shrink-0">
+                    <p className="font-bold text-slate-900 dark:text-white text-sm">
+                        {citaDate.toLocaleDateString("es-MX", { day: "numeric", month: "short" })}
+                    </p>
+                    <p className="text-slate-500 text-xs font-medium">{cita.time}</p>
+                </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+                <StatusBadge status={cita.status} />
+                {isSinCerrar && <StatusBadge status="Sin cerrar" />}
+                {isSesionTardia && <StatusBadge status="Sesión tardía" />}
+            </div>
+
+            <dl className="space-y-1 text-xs">
+                <div className="flex gap-2">
+                    <dt className="text-slate-400 w-24 shrink-0">Departamento</dt>
+                    <dd className={dato}>{cita.department}</dd>
+                </div>
+                <div className="flex gap-2">
+                    <dt className="text-slate-400 w-24 shrink-0">Especialista</dt>
+                    <dd className={dato}>{cita.specialistName}</dd>
+                </div>
+                <div className="flex gap-2">
+                    <dt className="text-slate-400 w-24 shrink-0">Modalidad</dt>
+                    <dd className={`${dato} capitalize`}>{cita.modality}</dd>
+                </div>
+            </dl>
+        </div>
+    );
+}
+
+/**
+ * Un usuario final como tarjeta, para el teléfono.
+ *
+ * Su tabla llega a SEIS columnas y arranca con `min-w-[640px]`, así que en el
+ * celular quedaban ocultas la matrícula y el correo — y en el iPad también, por
+ * el ancho que se lleva la barra lateral. Aquí cada dato lleva su etiqueta.
+ *
+ * Los campos cambian según el tipo de organización: una escuela tiene carrera,
+ * semestre y matrícula; las demás guardan lo suyo en `metadata`, que cada
+ * organización define a su gusto (ver RegistrationField).
+ */
+function AlumnoCard({ u, isSchool, onDeactivate }: { u: User; isSchool: boolean; onDeactivate: () => void }) {
+    const datos: { etiqueta: string; valor: string }[] = isSchool
+        ? [
+            { etiqueta: "Carrera", valor: u.carrera || "—" },
+            { etiqueta: "Semestre", valor: u.semestre ? String(u.semestre) : "—" },
+            { etiqueta: "Matrícula", valor: u.matricula || "—" },
+        ]
+        : Object.entries(u.metadata ?? {}).map(([k, v]) => ({
+            etiqueta: k.replace(/_/g, " "),
+            valor: String(v),
+        }));
+
+    return (
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 space-y-3">
+            <div className="flex items-start gap-3">
+                <Avatar name={u.name} avatarUrl={u.avatarUrl} size="sm" />
+                <div className="flex-1 min-w-0">
+                    <p className="font-bold text-slate-900 dark:text-white text-sm break-words">{u.name}</p>
+                    {/* `break-all`: un correo largo no tiene espacios donde partirse. */}
+                    <p className="text-slate-500 text-xs break-all">{u.email}</p>
+                </div>
+                <button onClick={onDeactivate} title="Dar de baja"
+                    className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0">
+                    <XCircle className="w-4 h-4" />
+                </button>
+            </div>
+
+            {datos.length > 0 && (
+                <dl className="space-y-1 text-xs">
+                    {datos.map(({ etiqueta, valor }) => (
+                        <div key={etiqueta} className="flex gap-2">
+                            <dt className="text-slate-400 w-24 shrink-0 capitalize">{etiqueta}</dt>
+                            <dd className="text-slate-700 dark:text-slate-300 font-medium break-words">{valor}</dd>
+                        </div>
+                    ))}
+                </dl>
+            )}
+        </div>
+    );
+}
+
 // ─── Component ───────────────────────────────────────────
 export function AdminDashboard() {
     const { dark } = useTheme();
@@ -1125,7 +1245,18 @@ export function AdminDashboard() {
                                 </div>
                             </div>
 
-                            <div className="overflow-x-auto min-h-[300px]">
+                            {/* Teléfono: una tarjeta por cita, sin nada oculto. */}
+                            <div className="md:hidden p-4 space-y-3 min-h-[300px]">
+                                {pagedAppts.map(cita => (
+                                    <CitaCard key={cita.id} cita={cita} todayMidnight={todayMidnightAdmin} />
+                                ))}
+                                {filteredAppts.length === 0 && (
+                                    <EmptyState icon={CalendarCheck} title="Sin resultados" subtitle="No hay citas que coincidan con los filtros seleccionados." />
+                                )}
+                            </div>
+
+                            {/* Tablet y escritorio: la tabla, donde comparar columnas sí tiene sentido. */}
+                            <div className="hidden md:block overflow-x-auto min-h-[300px]">
                                 <table className="w-full text-left border-collapse">
                                     <thead>
                                         <tr className="border-b border-slate-200 bg-slate-50/50 dark:bg-slate-800/50 dark:border-slate-700">
@@ -1136,9 +1267,8 @@ export function AdminDashboard() {
                                     </thead>
                                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700 bg-white dark:bg-slate-900">
                                         {pagedAppts.map(cita => {
-                                            const citaDate = new Date(cita.date + "T12:00:00");
-                                            const isSinCerrar = (cita.status === "Pendiente" || cita.status === "Confirmada") && citaDate < todayMidnightAdmin;
-                                            const isSesionTardia = cita.status === "Completada" && cita.updatedAt && cita.updatedAt.split("T")[0] > cita.date;
+                                            // Mismo cálculo que usa la tarjeta del teléfono.
+                                            const { citaDate, isSinCerrar, isSesionTardia } = citaFlags(cita, todayMidnightAdmin);
                                             return (
                                             <tr key={cita.id} className={`hover:bg-slate-50/80 dark:hover:bg-slate-700/40 transition-colors ${isSinCerrar ? "bg-amber-50/40 dark:bg-amber-900/20" : ""}`}>
                                                 <td className="px-6 py-4"><p className="text-slate-900 font-bold text-sm">{cita.studentName}</p></td>
@@ -1166,11 +1296,11 @@ export function AdminDashboard() {
                                 )}
                             </div>
                             {apptTotalPages > 1 && (
-                                <div className="px-6 py-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 flex items-center justify-between">
+                                <div className="px-4 sm:px-6 py-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 flex items-center justify-between gap-3 flex-wrap">
                                     <span className="text-xs text-slate-500 font-medium">
                                         {apptPage * APPT_PAGE_SIZE + 1}–{Math.min((apptPage + 1) * APPT_PAGE_SIZE, filteredAppts.length)} de {filteredAppts.length}
                                     </span>
-                                    <div className="flex items-center gap-1">
+                                    <div className="flex items-center gap-1 flex-wrap">
                                         <button onClick={() => setApptPage(p => Math.max(0, p - 1))} disabled={apptPage === 0}
                                             className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                                             ← Anterior
@@ -1217,30 +1347,46 @@ export function AdminDashboard() {
                                     {specialists.map((esp: Specialist) => {
                                         const conf = resolveDeptStyle(esp.department, deptCatalog);
                                         return (
-                                            <div key={esp.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow flex items-center gap-4 group">
-                                                <Avatar name={esp.name} avatarUrl={esp.avatarUrl} />
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-slate-900 font-bold truncate tracking-tight">{esp.name}</p>
-                                                    <div className="flex flex-wrap items-center gap-2 mt-1">
-                                                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-50 border border-slate-100 text-slate-500 text-xs font-bold">
-                                                            {conf && <conf.icon className="w-3 h-3" style={{ color: conf.color }} />} {esp.department}
-                                                        </span>
-                                                        <span className="text-slate-400 text-xs">•</span>
-                                                        <span className="text-slate-500 text-xs font-medium truncate">{esp.email}</span>
+                                            // En móvil la fila se APILA: identidad arriba, estado y acciones
+                                            // abajo. En una sola fila, entre el avatar, la insignia y los
+                                            // botones al nombre le quedaban ~150px y se recortaba a "Dr. J...",
+                                            // que es justo el dato que identifica a la persona.
+                                            <div key={esp.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 group">
+                                                <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
+                                                    <Avatar name={esp.name} avatarUrl={esp.avatarUrl} />
+                                                    <div className="flex-1 min-w-0">
+                                                        {/* Sin `truncate`: el nombre se parte en dos líneas antes que
+                                                            quedar ilegible. */}
+                                                        <p className="text-slate-900 font-bold tracking-tight break-words">{esp.name}</p>
+                                                        <div className="flex flex-wrap items-center gap-2 mt-1">
+                                                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-50 border border-slate-100 text-slate-500 text-xs font-bold">
+                                                                {conf && <conf.icon className="w-3 h-3" style={{ color: conf.color }} />} {esp.department}
+                                                            </span>
+                                                            <span className="text-slate-400 text-xs hidden sm:inline">•</span>
+                                                            {/* `break-all` porque un correo largo no tiene espacios
+                                                                donde partirse y desbordaría la tarjeta. */}
+                                                            <span className="text-slate-500 text-xs font-medium break-all">{esp.email}</span>
+                                                        </div>
+                                                        {esp.shift && (
+                                                            <span className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-600 text-[10px] font-black uppercase tracking-widest border border-blue-100">
+                                                                <Clock3 className="w-2.5 h-2.5" /> {esp.shift}
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                    {esp.shift && (
-                                                        <span className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-600 text-[10px] font-black uppercase tracking-widest border border-blue-100">
-                                                            <Clock3 className="w-2.5 h-2.5" /> {esp.shift}
-                                                        </span>
-                                                    )}
                                                 </div>
-                                                <span className={`px-2.5 py-1 rounded-full font-bold text-[0.65rem] uppercase tracking-wider shrink-0 border ${esp.active ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-slate-100 text-slate-400 border-slate-200"}`}>
-                                                    {esp.active ? "Activo" : "Inactivo"}
-                                                </span>
-                                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <button onClick={() => setEditingSpec(esp)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors"><Pencil className="w-4 h-4" /></button>
-                                                    <button onClick={() => setDeactivatingSpec(esp)} title="Dar de baja"
-                                                        className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"><XCircle className="w-4 h-4" /></button>
+                                                <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+                                                    <span className={`px-2.5 py-1 rounded-full font-bold text-[0.65rem] uppercase tracking-wider shrink-0 border ${esp.active ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-slate-100 text-slate-400 border-slate-200"}`}>
+                                                        {esp.active ? "Activo" : "Inactivo"}
+                                                    </span>
+                                                    {/* Visibles siempre en táctil: en un celular no existe "pasar el
+                                                        ratón", así que estos botones eran invisibles e imposibles de
+                                                        descubrir. El efecto de aparecer al pasar por encima se
+                                                        conserva solo donde hay ratón. */}
+                                                    <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                                        <button onClick={() => setEditingSpec(esp)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors"><Pencil className="w-4 h-4" /></button>
+                                                        <button onClick={() => setDeactivatingSpec(esp)} title="Dar de baja"
+                                                            className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"><XCircle className="w-4 h-4" /></button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         );
@@ -1352,30 +1498,47 @@ export function AdminDashboard() {
                                     {showDeletedUsers ? "Ocultar dados de baja" : "Ver dados de baja"}
                                 </button>
                             </div>
-                            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden overflow-x-auto">
+                            {/* Teléfono: una tarjeta por persona, con todos sus datos. */}
+                            <div className="md:hidden space-y-3">
+                                {pagedAlumnos.map((u: User) => (
+                                    <AlumnoCard key={u.id} u={u} isSchool={isSchool} onDeactivate={() => setDeactivatingUser(u)} />
+                                ))}
+                                {alumnosAll.length === 0 && (
+                                    <EmptyState icon={Users} title={`Sin ${endUserLabel.toLowerCase()}s registrados`} />
+                                )}
+                            </div>
+
+                            {/* Tablet y escritorio: la tabla. */}
+                            <div className="hidden md:block bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden overflow-x-auto">
                                 <table className="w-full min-w-[640px]">
                                     <thead>
                                         <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-700/30">
+                                            {/* En tablet la columna "Correo" se oculta y el correo pasa
+                                                debajo del nombre: con ella puesta, la de "Acción" no
+                                                cabía y el icono quedaba cortado contra el borde. */}
                                             {tableHeaders.map(h => (
-                                                <th key={h} className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">{h}</th>
+                                                <th key={h} className={`px-4 lg:px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider ${h === "Correo" ? "hidden lg:table-cell" : ""}`}>{h}</th>
                                             ))}
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-50 dark:divide-slate-700">
                                         {pagedAlumnos.map((u: any) => (
                                             <tr key={u.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/40 transition-colors">
-                                                <td className="px-6 py-4">
+                                                <td className="px-4 lg:px-6 py-4">
                                                     <div className="flex items-center gap-3">
                                                         <Avatar name={u.name} size="sm" />
-                                                        <p className="font-bold text-slate-900 dark:text-white text-sm">{u.name}</p>
+                                                        <div className="min-w-0">
+                                                            <p className="font-bold text-slate-900 dark:text-white text-sm">{u.name}</p>
+                                                            <p className="text-slate-500 text-xs lg:hidden break-all">{u.email}</p>
+                                                        </div>
                                                     </div>
                                                 </td>
                                                 {isSchool ? (<>
-                                                    <td className="px-6 py-4 text-slate-700 dark:text-slate-300 text-sm">{u.carrera || "—"}</td>
-                                                    <td className="px-6 py-4 text-slate-700 dark:text-slate-300 text-sm">{u.semestre || "—"}</td>
-                                                    <td className="px-6 py-4 text-slate-700 dark:text-slate-300 text-sm font-mono">{u.matricula || "—"}</td>
+                                                    <td className="px-4 lg:px-6 py-4 text-slate-700 dark:text-slate-300 text-sm">{u.carrera || "—"}</td>
+                                                    <td className="px-4 lg:px-6 py-4 text-slate-700 dark:text-slate-300 text-sm">{u.semestre || "—"}</td>
+                                                    <td className="px-4 lg:px-6 py-4 text-slate-700 dark:text-slate-300 text-sm font-mono">{u.matricula || "—"}</td>
                                                 </>) : (
-                                                    <td className="px-6 py-4 text-slate-700 dark:text-slate-300 text-sm">
+                                                    <td className="px-4 lg:px-6 py-4 text-slate-700 dark:text-slate-300 text-sm">
                                                         {u.metadata && Object.keys(u.metadata).length > 0
                                                             ? Object.entries(u.metadata as Record<string, string>).slice(0, 3).map(([k, v]) => (
                                                                 <span key={k} className="inline-block mr-3">
@@ -1387,8 +1550,10 @@ export function AdminDashboard() {
                                                         }
                                                     </td>
                                                 )}
-                                                <td className="px-6 py-4 text-slate-500 text-sm">{u.email}</td>
-                                                <td className="px-6 py-4">
+                                                <td className="px-4 lg:px-6 py-4 text-slate-500 text-sm hidden lg:table-cell break-all">{u.email}</td>
+                                                {/* `w-px` fija la columna al ancho del botón: sin esto la
+                                                    tabla se la reparte y el icono se empuja contra el borde. */}
+                                                <td className="px-4 lg:px-6 py-4 w-px">
                                                     <button onClick={() => setDeactivatingUser(u)} title="Dar de baja"
                                                         className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer">
                                                         <XCircle className="w-4 h-4" />
@@ -1398,30 +1563,35 @@ export function AdminDashboard() {
                                         ))}
                                     </tbody>
                                 </table>
-                                {alumnosTotalPages > 1 && (
-                                    <div className="px-6 py-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 flex items-center justify-between">
-                                        <span className="text-xs text-slate-500 font-medium">
-                                            {studentsPage * STUDENTS_PAGE_SIZE + 1}–{Math.min((studentsPage + 1) * STUDENTS_PAGE_SIZE, alumnosAll.length)} de {alumnosAll.length}
-                                        </span>
-                                        <div className="flex items-center gap-1">
-                                            <button onClick={() => setStudentsPage(p => Math.max(0, p - 1))} disabled={studentsPage === 0}
-                                                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                                                ← Anterior
-                                            </button>
-                                            {Array.from({ length: alumnosTotalPages }, (_, i) => (
-                                                <button key={i} onClick={() => setStudentsPage(i)}
-                                                    className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors ${i === studentsPage ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"}`}>
-                                                    {i + 1}
-                                                </button>
-                                            ))}
-                                            <button onClick={() => setStudentsPage(p => Math.min(alumnosTotalPages - 1, p + 1))} disabled={studentsPage === alumnosTotalPages - 1}
-                                                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                                                Siguiente →
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
                             </div>
+
+                            {/* La paginación va FUERA del contenedor de la tabla: dentro,
+                                se ocultaba en el teléfono junto con ella y no había forma
+                                de pasar de página. `flex-wrap` porque con muchas páginas
+                                los números no caben en una línea de 393px. */}
+                            {alumnosTotalPages > 1 && (
+                                <div className="mt-3 px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex items-center justify-between gap-3 flex-wrap">
+                                    <span className="text-xs text-slate-500 font-medium">
+                                        {studentsPage * STUDENTS_PAGE_SIZE + 1}–{Math.min((studentsPage + 1) * STUDENTS_PAGE_SIZE, alumnosAll.length)} de {alumnosAll.length}
+                                    </span>
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                        <button onClick={() => setStudentsPage(p => Math.max(0, p - 1))} disabled={studentsPage === 0}
+                                            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                            ← Anterior
+                                        </button>
+                                        {Array.from({ length: alumnosTotalPages }, (_, i) => (
+                                            <button key={i} onClick={() => setStudentsPage(i)}
+                                                className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors ${i === studentsPage ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"}`}>
+                                                {i + 1}
+                                            </button>
+                                        ))}
+                                        <button onClick={() => setStudentsPage(p => Math.min(alumnosTotalPages - 1, p + 1))} disabled={studentsPage === alumnosTotalPages - 1}
+                                            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                            Siguiente →
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Cuentas dadas de baja — la fila nunca se borra porque el
                                 expediente clínico la referencia (NOM-004). Reactivar

@@ -990,7 +990,15 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                         <tr key={u.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                                             <td className="px-4 py-3">
                                                 <p className="font-medium text-foreground">{u.name}</p>
-                                                <p className="text-xs text-muted-foreground">{u.email}</p>
+                                                {/* `break-all`: un correo largo no tiene espacios donde
+                                                    partirse y desbordaría la celda en un teléfono. */}
+                                                <p className="text-xs text-muted-foreground break-all">{u.email}</p>
+                                                {/* En pantallas estrechas la columna "Organización" se oculta,
+                                                    y para un superadmin ese es justo el contexto que más
+                                                    importa: se recupera aquí en vez de perderse. */}
+                                                <p className="text-xs text-muted-foreground md:hidden mt-0.5">
+                                                    {u.organization?.name ?? <span className="italic">Sin organización</span>}
+                                                </p>
                                             </td>
                                             <td className="px-4 py-3">
                                                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ROLE_COLOR[u.role] ?? "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>{u.role}</span>

@@ -220,7 +220,16 @@ export function AppShell({ children, sidebar }: AppShellProps) {
 
             {/* ── Sidebar desktop ── */}
             {sidebar && (
-                <aside className="hidden md:flex w-64 bg-slate-900 dark:bg-slate-950 flex-col shrink-0 sticky top-0 h-screen">
+                /* La barra fija aparece en `lg:` (1024px), no en `md:` (768px).
+                   Ocupa 256px, y en una tablet de 820px eso dejaba 564px de
+                   contenido —menos que un teléfono— con un diseño que ya se creía
+                   de escritorio: las tablas se cortaban ahí ("MATRÍCUL…"). Por
+                   debajo de 1024px se usa el cajón lateral y el contenido se queda
+                   con el ancho completo. Los cuatro puntos de quiebre de este
+                   archivo (barra, fondo, cajón y botón de menú) deben moverse
+                   SIEMPRE juntos: si se desincronizan, queda una franja de anchos
+                   sin ninguna forma de navegar. */
+                <aside className="hidden lg:flex w-64 bg-slate-900 dark:bg-slate-950 flex-col shrink-0 sticky top-0 h-screen">
                     <div className="h-24 border-b border-white/10 flex items-center justify-center ">
                         <img
                             src="/logo-dark.png"
@@ -256,8 +265,8 @@ export function AppShell({ children, sidebar }: AppShellProps) {
             {/* ── Sidebar mobile overlay ── */}
             {sidebar && sidebarOpen && (
                 <>
-                    <div className="fixed inset-0 bg-slate-900/50 z-40 md:hidden" onClick={() => setSidebarOpen(false)} />
-                    <aside className="fixed left-0 top-0 bottom-0 w-72 bg-slate-900 z-50 flex flex-col md:hidden">
+                    <div className="fixed inset-0 bg-slate-900/50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
+                    <aside className="fixed left-0 top-0 bottom-0 w-72 bg-slate-900 z-50 flex flex-col lg:hidden">
                         <div className="h-26 relative overflow-hidden border-b border-white/10 flex items-center justify-end px-5">
                             <img src="/logo-dark.png" alt="" style={{ width: '68%', marginLeft: '-11px', marginTop: '-7px', maxWidth: 'none' }} />
                             <button onClick={() => setSidebarOpen(false)} className="text-slate-400 hover:text-white p-2 cursor-pointer">
@@ -301,7 +310,7 @@ export function AppShell({ children, sidebar }: AppShellProps) {
                     <div className="flex items-center gap-2 sm:gap-3">
                         {sidebar ? (
                             <button onClick={() => setSidebarOpen(true)}
-                                className="md:hidden p-2 -ml-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-xl cursor-pointer transition-colors shrink-0">
+                                className="lg:hidden p-2 -ml-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-xl cursor-pointer transition-colors shrink-0">
                                 <Menu className="w-6 h-6" />
                             </button>
                         ) : (

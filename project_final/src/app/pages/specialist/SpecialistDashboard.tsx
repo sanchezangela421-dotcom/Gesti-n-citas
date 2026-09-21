@@ -781,7 +781,7 @@ export function SpecialistDashboard() {
                                                                 <div key={s.id} className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-2 py-1.5 sm:px-3 sm:py-2 shadow-sm group">
                                                                     <span className="text-slate-700 font-bold text-[0.7rem] sm:text-sm tracking-tighter">{s.startTime}–{s.endTime}</span>
                                                                     {!isPast && (
-                                                                        <div className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                        <div className="flex items-center gap-1 opacity-100 sm:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                                                                             <button
                                                                                 onClick={e => { e.stopPropagation(); slots.openEditSlot(s); }}
                                                                                 className="text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg p-1 transition-colors cursor-pointer"

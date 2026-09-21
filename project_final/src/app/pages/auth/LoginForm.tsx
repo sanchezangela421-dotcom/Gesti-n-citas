@@ -177,7 +177,7 @@ export function LoginForm({ onSwitchToRegister }: { onSwitchToRegister: () => vo
                 </div>
 
                 {/* Right panel */}
-                <div className="flex-1 flex flex-col justify-center items-center p-6 sm:p-12">
+                <div className="flex-1 min-w-0 flex flex-col justify-center items-center p-6 sm:p-12">
                     <div className="w-full max-w-md">
                         <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-slate-900/60 border border-slate-100 dark:border-slate-700 p-8 sm:p-10">
                             <button
@@ -252,7 +252,7 @@ export function LoginForm({ onSwitchToRegister }: { onSwitchToRegister: () => vo
                     </div>
                 </div>
 
-                <div className="flex-1 flex flex-col justify-center items-center p-6 sm:p-12">
+                <div className="flex-1 min-w-0 flex flex-col justify-center items-center p-6 sm:p-12">
                     <div className="w-full max-w-md">
                         <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-slate-900/60 border border-slate-100 dark:border-slate-700 p-8 sm:p-10">
                             <div className="text-center mb-8">
@@ -356,7 +356,13 @@ export function LoginForm({ onSwitchToRegister }: { onSwitchToRegister: () => vo
             </div>
 
             {/* ── Right panel ── */}
-            <div className="flex-1 flex flex-col justify-center items-center p-6 sm:p-12 relative">
+            {/* `min-w-0` es imprescindible: un elemento flex trae `min-width: auto`,
+                que le impide encogerse por debajo del ancho de su contenido. Sin
+                esto, en un celular de 393px el panel se quedaba en 425px y la
+                tarjeta terminaba 8px fuera de la pantalla — con 24px de margen a la
+                izquierda y ninguno a la derecha, que es lo que se veía como
+                "descentrado hacia la derecha". Medido, no supuesto. */}
+            <div className="flex-1 min-w-0 flex flex-col justify-center items-center p-6 sm:p-12 relative">
                 <div className="w-full max-w-md">
                     <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-slate-900/60 border border-slate-100 dark:border-slate-700 p-8 sm:p-10">
                         <div className="text-center mb-6 sm:mb-10">
