@@ -52,9 +52,21 @@ export function createApp() {
   // En pruebas se desactiva: una suite dispara cientos de peticiones desde la misma
   // IP y agotaría la ventana, haciendo fallar tests por motivos ajenos a su objeto.
   if (process.env.NODE_ENV !== 'test') {
+    // Los topes son configurables por entorno, con los valores de producción como
+    // valor por defecto: definir la variable NO relaja nada salvo que se quiera.
+    //
+    // Hace falta porque el límite es POR IP, y hay escenarios legítimos donde
+    // mucha gente comparte una: un emulador que muestra cinco tamaños de pantalla
+    // a la vez multiplica por cinco cada carga, y una sala entera probando desde
+    // el mismo wifi sale con la IP pública del router. En ambos casos la cuota se
+    // agota sin que nadie esté abusando, y el 429 resultante aparece como un fallo
+    // de la aplicación.
+    const apiMax = Number(process.env.RATE_LIMIT_MAX ?? 500);
+    const authMax = Number(process.env.AUTH_RATE_LIMIT_MAX ?? 15);
+
     const apiLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
-      max: 500,
+      max: apiMax,
       message: { error: 'Demasiadas peticiones. Intenta de nuevo en 15 minutos.' },
       standardHeaders: true,
       legacyHeaders: false,
@@ -63,7 +75,7 @@ export function createApp() {
 
     const authLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,  // 15 minutos
-      max: 15,                    // 15 intentos por ventana por IP
+      max: authMax,              // intentos por ventana por IP
       message: { error: 'Demasiados intentos. Intenta de nuevo en 15 minutos.' },
       standardHeaders: true,
       legacyHeaders: false,

@@ -17,8 +17,14 @@ export function useSpecialistsStore(setUsers: Dispatch<SetStateAction<User[]>>) 
 
   const refreshUsers = useCallback(() => {
     fetch(`${API}/users`, { headers: authHeaders() })
-      .then(r => r.json())
-      .then(setUsers)
+      .then(r => {
+        // Misma trampa que en el registro: sin comprobar el estado, el cuerpo de
+        // un error acababa en `users`, y cualquier `users.filter(...)` del panel
+        // del admin reventaba la pantalla entera.
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(data => { if (Array.isArray(data)) setUsers(data); })
       .catch(() => { });
   }, [setUsers]);
 

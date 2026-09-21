@@ -146,8 +146,19 @@ export function RegisterForm({ onSwitchToLogin }: { onSwitchToLogin: () => void 
     // ── Load active orgs on mount ──────────────────────────────────────────────
     useEffect(() => {
         fetch(`${API_BASE}/api/public/organizations`)
-            .then(r => r.json())
-            .then(data => { setOrgs(data); setOrgsLoading(false); })
+            .then(r => {
+                // Sin esta comprobación, un 429 o un 500 pasaban de largo: su cuerpo
+                // es un objeto JSON válido ({ error: "..." }), así que `.json()` no
+                // fallaba y ese objeto acababa en `orgs`. El siguiente `orgs.filter`
+                // reventaba y el usuario veía la pantalla de "Algo salió mal" en
+                // lugar de un aviso.
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(data => {
+                setOrgs(Array.isArray(data) ? data : []);
+                setOrgsLoading(false);
+            })
             .catch(() => { toast.error("No se pudieron cargar las organizaciones"); setOrgsLoading(false); });
     }, []);
 
@@ -162,9 +173,12 @@ export function RegisterForm({ onSwitchToLogin }: { onSwitchToLogin: () => void 
         setFieldsLoading(true);
 
         fetch(`${API_BASE}/api/public/organizations/${org.slug}/fields`)
-            .then(r => r.json())
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
             .then(data => {
-                const f: RegField[] = data.registrationFields ?? [];
+                const f: RegField[] = Array.isArray(data?.registrationFields) ? data.registrationFields : [];
                 setFields(f);
                 // Inicializa metadata con vacío para cada campo
                 setMetadata(Object.fromEntries(f.map((field: RegField) => [field.key, ""])));

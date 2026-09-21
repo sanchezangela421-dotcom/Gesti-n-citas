@@ -195,8 +195,11 @@ export function StudentDashboard() {
         const slug = user?.organization?.slug;
         if (!slug || user?.organization?.type === 'school') return;
         fetch(`${API_BASE}/api/public/organizations/${slug}/fields`)
-            .then(r => r.json())
-            .then(data => setOrgFields((data.registrationFields ?? []).map((f: { key: string; label: string }) => ({ key: f.key, label: f.label }))))
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(data => setOrgFields((Array.isArray(data?.registrationFields) ? data.registrationFields : []).map((f: { key: string; label: string }) => ({ key: f.key, label: f.label }))))
             .catch(() => {});
     }, [user?.organization?.slug]);
 
