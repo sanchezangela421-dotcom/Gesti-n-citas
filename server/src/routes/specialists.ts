@@ -7,11 +7,13 @@ import { orgScope } from '../lib/orgScope';
 import { sanitizeOptionalHttpUrl } from '../lib/urls';
 import { contractedDepartmentNames, isDepartmentContracted } from '../lib/departments';
 import { localISODate } from '../lib/dates';
-import { sendAccountInvitation } from '../services/email';
+import { tryAccountInvitation } from '../services/email';
 import { cancelOpenAppointments, notifyCancelledByDeactivation } from '../services/deactivation';
 import { writeAudit, requestContext } from '../services/auditLogger';
 
 const EMAIL_REGEX = /^[^\s@,;]+@[^\s@,;.]+(\.[^\s@,;.]+)+$/;
+
+const INVITATION_EXPIRY_MS = 72 * 60 * 60 * 1000; // 72 horas
 
 const router = Router();
 
@@ -55,12 +57,20 @@ router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
 
     const specialists = await prisma.specialist.findMany({
       where,
-      include: { schedules: true, user: { select: { avatarUrl: true } } }
+      include: { schedules: true, user: { select: { avatarUrl: true, emailVerified: true } } }
     });
 
     res.json(specialists.map((s: any) => {
       const { user, ...rest } = s;
-      return { ...rest, avatarUrl: user?.avatarUrl ?? null };
+      return {
+        ...rest,
+        avatarUrl: user?.avatarUrl ?? null,
+        // Solo para quien puede actuar. Al alumno no le incumbe si su
+        // especialista ya activó la cuenta, y publicarlo sería exponer el
+        // estado interno de la cuenta de un tercero a quien no puede hacer
+        // nada con él.
+        ...(isManager ? { pendingActivation: user?.emailVerified === false } : {}),
+      };
     }));
   } catch (error) {
     console.error('Error fetching specialists:', error);
@@ -123,7 +133,11 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
         data: {
           email, password: tempPassword, name,
           role: 'especialista', department,
-          emailVerified: true,
+          // Nace sin activar, igual que una invitación del superadmin: es lo
+          // que permite distinguir en la lista a quien nunca recibió su correo.
+          // No le cierra el paso: el login solo exige verificación a alumno y
+          // usuario, y activar la cuenta la pone en true.
+          emailVerified: false,
           resetPasswordToken: activationToken,
           resetPasswordTokenExpiresAt: activationExpiry,
           organizationId: req.user?.organizationId ?? null,
@@ -138,11 +152,9 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
 
     // Enviar invitación con link de activación (no se envían credenciales planas)
     const activationUrl = `${process.env.FRONTEND_URL}/reset-password?token=${activationToken}`;
-    sendAccountInvitation(name, email, org?.name ?? 'la plataforma', 'especialista', activationUrl).catch(err => {
-      console.error('Error sending invitation email:', err);
-    });
+    const invitationSent = await tryAccountInvitation(name, email, org?.name ?? 'la plataforma', 'especialista', activationUrl);
 
-    res.status(201).json(result);
+    res.status(201).json({ ...result, invitationSent });
   } catch (error) {
     console.error('Error creating specialist:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
@@ -343,6 +355,70 @@ router.post('/:id/restore', verifyToken as any, async (req: AuthRequest, res) =>
     res.json(restored);
   } catch (error) {
     console.error('Error restoring specialist:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// POST /api/specialists/:id/resend-invitation ── admin only
+//
+// Sin esto, una invitación que no sale deja a un especialista que NADIE puede
+// activar: no sabe que su cuenta existe, así que tampoco va a pedir "olvidé mi
+// contraseña". La única salida aparente es darlo de alta otra vez, y su correo
+// ya está tomado.
+
+router.post('/:id/resend-invitation', verifyToken as any, async (req: AuthRequest, res) => {
+  try {
+    if (req.user?.role !== 'admin' && req.user?.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Sin permisos' });
+    }
+
+    const id = req.params.id as string;
+    const spec = await prisma.specialist.findFirst({
+      where: { id, deletedAt: null, ...orgScope(req.user) },
+      include: { user: { select: { id: true, emailVerified: true } } },
+    });
+    if (!spec || !spec.user) return res.status(404).json({ error: 'No encontrado' });
+    if (spec.user.emailVerified) {
+      return res.status(409).json({ error: 'La cuenta ya está activada; usa restablecer contraseña' });
+    }
+
+    // El enlace se renueva en cada reenvío: si el correo que falló acabara
+    // llegando, su enlace ya no sirve, y el plazo vuelve a contar desde ahora.
+    const activationToken = crypto.randomBytes(32).toString('hex');
+    await prisma.user.update({
+      where: { id: spec.user.id },
+      data: {
+        resetPasswordToken:          activationToken,
+        resetPasswordTokenExpiresAt: new Date(Date.now() + INVITATION_EXPIRY_MS),
+      },
+    });
+
+    const org = spec.organizationId
+      ? await prisma.organization.findUnique({ where: { id: spec.organizationId } })
+      : null;
+
+    const invitationSent = await tryAccountInvitation(
+      spec.name,
+      spec.email,
+      org?.name ?? 'la plataforma',
+      'especialista',
+      `${process.env.FRONTEND_URL}/reset-password?token=${activationToken}`,
+    );
+
+    writeAudit({
+      actorId:        req.user!.id,
+      actorRole:      req.user!.role,
+      action:         'SPECIALIST_INVITATION_RESENT',
+      targetEntity:   'Specialist',
+      targetId:       spec.id,
+      organizationId: spec.organizationId,
+      metadata:       { email: spec.email, invitationSent },
+      ...requestContext(req),
+    });
+
+    res.json({ invitationSent });
+  } catch (error) {
+    console.error('Error resending specialist invitation:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });

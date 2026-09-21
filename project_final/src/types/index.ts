@@ -91,6 +91,15 @@ export interface Specialist {
   avatarUrl?: string | null;
   /** Fecha de baja lógica. El perfil se conserva porque firma notas clínicas. */
   deletedAt?: string | null;
+  /**
+   * Invitado pero sin activar la cuenta todavía.
+   *
+   * Solo viene para admin y superadmin: al alumno no le incumbe, y el
+   * servidor ni lo incluye en su copia de la lista.
+   */
+  pendingActivation?: boolean;
+  /** Solo en la respuesta del alta: si la invitación llegó a salir. */
+  invitationSent?: boolean;
 }
 
 export interface OrgLocation {
@@ -244,7 +253,19 @@ export interface StoreContextType {
   specialists: Specialist[];
   getSpecialists: (dept?: string) => Specialist[];
   getSpecialistById: (id: string) => Specialist | null;
-  addSpecialist: (data: SpecialistInput) => Promise<void>;
+  /**
+   * Devuelve la ficha creada, o null si el servidor la rechazó.
+   *
+   * Antes devolvía void y manejaba su propio error, así que quien la
+   * llamaba anunciaba "Invitación enviada" incluso cuando el alta había
+   * fallado: dos avisos contradictorios a la vez.
+   */
+  addSpecialist: (data: SpecialistInput) => Promise<Specialist | null>;
+  /**
+   * Reenvía la invitación. true/false = si el correo salió; null = la
+   * petición misma falló y el store ya avisó (no avisar dos veces).
+   */
+  resendSpecialistInvitation: (id: string) => Promise<boolean | null>;
   updateSpecialist: (id: string, data: Partial<SpecialistInput>) => Promise<void>;
   /** Baja lógica: conserva notas clínicas e historial. Cancela citas abiertas. */
   removeSpecialist: (id: string, reason?: string) => Promise<void>;

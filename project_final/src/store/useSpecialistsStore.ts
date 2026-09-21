@@ -38,7 +38,15 @@ export function useSpecialistsStore(setUsers: Dispatch<SetStateAction<User[]>>) 
     [specialists]
   );
 
-  const addSpecialist = useCallback(async (data: SpecialistInput) => {
+  /**
+   * Da de alta al especialista y devuelve su ficha, o null si no se creó.
+   *
+   * Devolver algo no es un detalle: antes era void, y AdminDashboard
+   * anunciaba "Invitación enviada" justo después de que esta función
+   * hubiera mostrado su propio error. El admin veía las dos cosas a la vez
+   * y el formulario se vaciaba igual.
+   */
+  const addSpecialist = useCallback(async (data: SpecialistInput): Promise<Specialist | null> => {
     try {
       const res = await fetch(`${API}/specialists`, {
         method: "POST",
@@ -48,16 +56,51 @@ export function useSpecialistsStore(setUsers: Dispatch<SetStateAction<User[]>>) 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         toast.error(body.error || "No se pudo crear el especialista.");
-        return;
+        return null;
       }
       const newSpec = await res.json();
-      setSpecialists(p => [...p, { ...newSpec, schedule: newSpec.schedules ?? [] }]);
+      // `pendingActivation` lo calcula el GET de la lista, no el POST. Sin
+      // fijarlo aquí, la fila recién creada salía sin el distintivo ni el
+      // botón de reenviar hasta recargar — justo lo que el aviso le pide
+      // hacer cuando el correo no sale. Recién invitado siempre está
+      // pendiente: lo deja de estar al activar la cuenta.
+      setSpecialists(p => [...p, { ...newSpec, schedule: newSpec.schedules ?? [], pendingActivation: true }]);
       refreshUsers();
+      return newSpec;
     } catch (err) {
       console.error("Error adding specialist:", err);
       toast.error("No se pudo crear el especialista.");
+      return null;
     }
   }, [refreshUsers]);
+
+  /**
+   * Reenvía la invitación a quien nunca activó su cuenta.
+   *
+   * Es la salida que faltaba cuando el correo no sale: el especialista no
+   * sabe que su cuenta existe, así que no va a pedir "olvidé mi
+   * contraseña", y darlo de alta otra vez choca con su correo ya tomado.
+   */
+  const resendSpecialistInvitation = useCallback(async (id: string): Promise<boolean | null> => {
+    try {
+      const res = await fetch(`${API}/specialists/${id}/resend-invitation`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // null y no false: el fallo ya se avisó aquí. Devolver false haría
+        // que quien llama añadiera un segundo aviso encima del primero.
+        toast.error(body.error || "No se pudo reenviar la invitación.");
+        return null;
+      }
+      return body.invitationSent === true;
+    } catch (err) {
+      console.error("Error resending invitation:", err);
+      toast.error("No se pudo reenviar la invitación.");
+      return null;
+    }
+  }, []);
 
   const updateSpecialist = useCallback(async (id: string, data: Partial<SpecialistInput>) => {
     try {
@@ -247,6 +290,7 @@ export function useSpecialistsStore(setUsers: Dispatch<SetStateAction<User[]>>) 
     getSpecialists,
     getSpecialistById,
     addSpecialist,
+    resendSpecialistInvitation,
     updateSpecialist,
     removeSpecialist,
     restoreSpecialist,

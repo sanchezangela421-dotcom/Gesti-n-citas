@@ -173,6 +173,15 @@ export function StudentDashboard() {
     const resch = useReschedule("student");
     const cancel = useCancelAppointment();
 
+    // ── Modales abiertos ────────────────────────────────────────────
+    // Toda la app vive en z-50, así que entre un modal y el botón flotante decide
+    // el orden del árbol y el botón, por ir al final, queda POR ENCIMA. Esta lista
+    // es lo que lo mantiene fuera de la pantalla mientras haya algo abierto.
+    // Si se agrega un modal nuevo a esta pantalla, tiene que sumarse aquí.
+    const anyModalOpen =
+        wizard.show || resch.show || cancel.show ||
+        showConfModal || showResources || !!previewImg || !!videoModal;
+
     // ── Carousel slides (welcome always first; placeholder when no events) ──
     const slides: CarouselSlide[] = useMemo(
         () => [
@@ -1007,13 +1016,22 @@ export function StudentDashboard() {
             </Modal>
 
             {/* ── FAB: Solicitar Cita ── */}
-            <button
-                onClick={() => { wizard.setShow(true); wizard.reset(); }}
-                className="fixed bottom-8 right-8 z-50 flex items-center gap-3 px-6 py-4 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-2xl shadow-2xl shadow-blue-600/40 font-bold text-sm transition-all hover:-translate-y-0.5 group"
-            >
-                <CalendarCheck className="w-5 h-5 shrink-0" />
-                <span>Solicitar Cita</span>
-            </button>
+            {/*
+              No basta con esconderlo: mientras se pintaba encima del modal también
+              se podía pulsar. Sobre el asistente ya abierto, el reset() borraba lo
+              que el alumno llevaba elegido; sobre cualquier otro modal, abría un
+              segundo modal encima del primero. Al no renderizarlo desaparece de la
+              vista, del tabulador y de los gestos táctiles a la vez.
+            */}
+            {!anyModalOpen && (
+                <button
+                    onClick={() => { wizard.setShow(true); wizard.reset(); }}
+                    className="fixed bottom-6 right-6 sm:bottom-8 sm:right-8 z-50 flex items-center gap-3 px-6 py-4 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-2xl shadow-2xl shadow-blue-600/40 font-bold text-sm transition-all hover:-translate-y-0.5 group"
+                >
+                    <CalendarCheck className="w-5 h-5 shrink-0" />
+                    <span>Solicitar Cita</span>
+                </button>
+            )}
 
         </AppShell>
     );

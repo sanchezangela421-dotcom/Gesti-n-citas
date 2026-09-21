@@ -4,7 +4,7 @@ import {
     Building2, Users, CalendarCheck, ShieldCheck, Plus,
     Power, PowerOff, Search, RefreshCw, Pencil,
     Globe, Stethoscope, GraduationCap, Briefcase,
-    AlertTriangle, Clock, LogOut, Trash2, Sun, Moon,
+    AlertTriangle, Clock, LogOut, Trash2, Sun, Moon, Send,
 } from "lucide-react";
 import { API, superAdminHeaders, getUploadUrl } from "../../../lib/api";
 import { useTheme } from "../../hooks/useTheme";
@@ -224,6 +224,7 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
 
     const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
     const [userActionLoading, setUserActionLoading] = useState(false);
+    const [resendingId, setResendingId] = useState<string | null>(null);
 
     // ── Cache: evita re-fetch si el tab fue visitado hace < 30s ──
     const lastFetched = useRef<Record<string, number>>({});
@@ -643,7 +644,15 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
-            toast.success(`Usuario ${data.email} creado`);
+            // El aviso depende de si la invitación SALIÓ, no de que el
+            // usuario se haya guardado. Antes decia siempre que si, y al
+            // vencerse el plan de correo la tester creó la misma cuenta cinco
+            // veces porque nada le indicaba que faltaba reenviarla.
+            if (data.invitationSent) {
+                toast.success(`Usuario ${data.email} creado. Invitación enviada.`);
+            } else {
+                toast.warning(`Usuario ${data.email} creado, pero NO se pudo enviar la invitación. Reenvíala desde la lista.`, { duration: 8000 });
+            }
             setShowCreateUser(false);
             setCreateUserForm({ name: "", email: "", role: "alumno", organizationId: "" });
             lastFetched.current[`users-${usersPage}-${userOrgFilter}`] = 0;
@@ -703,6 +712,31 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
         }
     }
 
+    /**
+     * Reenvía la invitación de una cuenta que nunca se activó.
+     *
+     * Es la salida que faltaba: si el correo no sale, el invitado no sabe que su
+     * cuenta existe y por tanto tampoco va a pedir "olvidé mi contraseña". Sin
+     * esto, la unica opcion aparente es crear otra cuenta.
+     */
+    async function resendInvitation(u: UserRow) {
+        setResendingId(u.id);
+        try {
+            const res = await fetch(`${API}/superadmin/users/${u.id}/resend-invitation`, {
+                method: "POST",
+                headers: superAdminHeaders(),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+            if (data.invitationSent) toast.success(`Invitación reenviada a ${u.email}`);
+            else toast.error("Sigue sin poderse enviar. Revisa la cuenta de correo del servidor.", { duration: 8000 });
+        } catch (e: any) {
+            toast.error(e.message ?? "Error al reenviar la invitación");
+        } finally {
+            setResendingId(null);
+        }
+    }
+
     async function designateAdmin() {
         if (!designOrg) return;
         if (!adminForm.name.trim() || !adminForm.email) {
@@ -718,7 +752,11 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
-            toast.success(`Admin creado para ${designOrg.name}. Se envió correo con credenciales.`);
+            if (data.invitationSent) {
+                toast.success(`Admin creado para ${designOrg.name}. Invitación enviada.`);
+            } else {
+                toast.warning(`Admin creado para ${designOrg.name}, pero NO se pudo enviar la invitación. Reenvíala desde Usuarios.`, { duration: 8000 });
+            }
             setDesignOrg(null);
             setAdminForm({ name: "", email: "", password: "" });
         } catch (e: any) {
@@ -989,7 +1027,17 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                     ) : users.map(u => (
                                         <tr key={u.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                                             <td className="px-4 py-3">
-                                                <p className="font-medium text-foreground">{u.name}</p>
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <p className="font-medium text-foreground">{u.name}</p>
+                                                    {/* Una cuenta invitada que nunca se activó era
+                                                        indistinguible de una normal en esta lista: no
+                                                        había cómo notar que su invitación no llegó. */}
+                                                    {!u.emailVerified && (
+                                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                                                            Sin activar
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 {/* `break-all`: un correo largo no tiene espacios donde
                                                     partirse y desbordaría la celda en un teléfono. */}
                                                 <p className="text-xs text-muted-foreground break-all">{u.email}</p>
@@ -1014,6 +1062,14 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                                         className="p-1.5 rounded-lg text-muted-foreground hover:text-indigo-700 hover:bg-indigo-50 transition-colors"
                                                         title="Editar"
                                                     ><Pencil className="w-3.5 h-3.5" /></button>
+                                                    {!u.emailVerified && (
+                                                        <button
+                                                            onClick={() => resendInvitation(u)}
+                                                            disabled={resendingId === u.id}
+                                                            className="p-1.5 rounded-lg text-muted-foreground hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-colors disabled:opacity-40"
+                                                            title="Reenviar invitación"
+                                                        ><Send className={`w-3.5 h-3.5 ${resendingId === u.id ? "animate-pulse" : ""}`} /></button>
+                                                    )}
                                                     {u.role !== "superadmin" && (
                                                         <button
                                                             onClick={() => setDeleteUserId(u.id)}

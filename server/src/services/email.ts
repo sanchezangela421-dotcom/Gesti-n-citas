@@ -167,6 +167,33 @@ export async function sendWelcomeEmail(name: string, email: string, password: st
   });
 }
 
+/**
+ * Manda la invitación y dice si SALIÓ, en vez de dispararla y olvidarla.
+ *
+ * Guardar la cuenta y entregar el correo no pueden ser atómicos: el proveedor
+ * puede aceptar el mensaje y rebotarlo horas después. Por eso un fallo de correo
+ * NO deshace la cuenta ─si se borrara, con el proveedor caído no se podría
+ * dar de alta a nadie─, pero la respuesta sí tiene que decir la verdad: quien
+ * invita es el único que puede reenviar, y necesita saber que le toca.
+ *
+ * Esperar cuesta poco: la cola separa los envíos ~1s, y un rechazo duro (plan
+ * vencido, credenciales malas) no se reintenta, falla de inmediato.
+ */
+export async function tryAccountInvitation(
+  name: string, email: string, orgName: string, role: string, activationUrl: string,
+): Promise<boolean> {
+  try {
+    await sendAccountInvitation(name, email, orgName, role, activationUrl);
+    return true;
+  } catch (err) {
+    // Solo la identidad del error. El mensaje de nodemailer incluye el
+    // destinatario, y volcarlo dejaría correos de personas en el log.
+    const e = err as { responseCode?: number; code?: string; name?: string };
+    console.error('[email] No se pudo enviar la invitación:', e?.responseCode ?? e?.code ?? e?.name ?? 'error desconocido');
+    return false;
+  }
+}
+
 export async function sendAccountInvitation(
   name: string, email: string, orgName: string, role: string, activationUrl: string
 ) {

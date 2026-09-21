@@ -5,7 +5,7 @@ import { Prisma, UserRole } from '@prisma/client';
 import { prisma } from '../../db';
 import { SuperAdminRequest } from '../../middleware/verifySuperAdmin';
 import { writeAudit, requestContext, SUPERADMIN_ACTION } from '../../services/auditLogger';
-import { sendAccountInvitation } from '../../services/email';
+import { tryAccountInvitation } from '../../services/email';
 import { cancelOpenAppointments, notifyCancelledByDeactivation } from '../../services/deactivation';
 
 const FRONTEND_URL = process.env.FRONTEND_URL ?? 'http://localhost:5173';
@@ -124,9 +124,7 @@ router.post('/', async (req: SuperAdminRequest, res) => {
     });
 
     const activationUrl = `${FRONTEND_URL}?reset_token=${activationToken}`;
-    sendAccountInvitation(name.trim(), email, orgName, role, activationUrl).catch(err => {
-      console.error('[superadmin] Error sending invitation email:', err);
-    });
+    const invitationSent = await tryAccountInvitation(name.trim(), email, orgName, role, activationUrl);
 
     writeAudit({
       actorId:        req.actor!.id,
@@ -135,11 +133,11 @@ router.post('/', async (req: SuperAdminRequest, res) => {
       targetEntity:   'User',
       targetId:       user.id,
       organizationId: organizationId ?? null,
-      metadata:       { email, role, orgName },
+      metadata:       { email, role, orgName, invitationSent },
       ...requestContext(req),
     });
 
-    res.status(201).json(user);
+    res.status(201).json({ ...user, invitationSent });
   } catch (error) {
     console.error('[superadmin] Error creating user:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
@@ -332,6 +330,69 @@ router.post('/:id/restore', async (req: SuperAdminRequest, res) => {
   }
 });
 
+// ── POST /api/superadmin/users/:id/resend-invitation ────────────────────────
+//
+// Sin esto, una invitación que no sale deja una cuenta que NADIE puede activar:
+// el invitado no sabe que existe, así que tampoco va a pedir "olvidé mi
+// contraseña". La única salida aparente es crear otra cuenta — y eso fue lo que
+// pasó el 2026-09-20 al vencerse el plan de correo: cuatro administradores de
+// más para la misma organización, uno por cada reintento a ciegas.
+
+router.post('/:id/resend-invitation', async (req: SuperAdminRequest, res) => {
+  try {
+    const id = req.params.id as string;
+
+    const user = await prisma.user.findUnique({
+      where: { id },
+      include: { organization: { select: { name: true, active: true } } },
+    });
+    if (!user || user.deletedAt) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+    if (user.emailVerified) {
+      return res.status(409).json({ error: 'La cuenta ya está activada; usa restablecer contraseña' });
+    }
+    if (user.organization && !user.organization.active) {
+      return res.status(409).json({ error: 'La organización está inactiva' });
+    }
+
+    // El enlace se renueva en cada reenvío: si el correo que falló acabara
+    // llegando, su enlace ya no sirve, y el plazo vuelve a contar desde ahora.
+    const activationToken = crypto.randomBytes(32).toString('hex');
+    await prisma.user.update({
+      where: { id },
+      data: {
+        resetPasswordToken:          activationToken,
+        resetPasswordTokenExpiresAt: new Date(Date.now() + INVITATION_EXPIRY_MS),
+      },
+    });
+
+    const invitationSent = await tryAccountInvitation(
+      user.name,
+      user.email,
+      user.organization?.name ?? 'la plataforma',
+      user.role,
+      `${FRONTEND_URL}?reset_token=${activationToken}`,
+    );
+
+    writeAudit({
+      actorId:        req.actor!.id,
+      actorRole:      'superadmin',
+      action:         'RESEND_INVITATION',
+      targetEntity:   'User',
+      targetId:       user.id,
+      organizationId: user.organizationId,
+      metadata:       { email: user.email, invitationSent },
+      ...requestContext(req),
+    });
+
+    res.json({ invitationSent });
+  } catch (error) {
+    console.error('[superadmin] Error resending invitation:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
 // ── POST /api/superadmin/users/organizations/:orgId/admin ────────────────────
 
 router.post('/organizations/:orgId/admin', async (req: SuperAdminRequest, res) => {
@@ -375,9 +436,7 @@ router.post('/organizations/:orgId/admin', async (req: SuperAdminRequest, res) =
     });
 
     const activationUrl = `${FRONTEND_URL}?reset_token=${activationToken}`;
-    sendAccountInvitation(name.trim(), email, org.name, 'admin', activationUrl).catch(err => {
-      console.error('[superadmin] Error sending invitation email:', err);
-    });
+    const invitationSent = await tryAccountInvitation(name.trim(), email, org.name, 'admin', activationUrl);
 
     writeAudit({
       actorId:        req.actor!.id,
@@ -386,11 +445,11 @@ router.post('/organizations/:orgId/admin', async (req: SuperAdminRequest, res) =
       targetEntity:   'User',
       targetId:       admin.id,
       organizationId: orgId,
-      metadata:       { email, orgName: org.name },
+      metadata:       { email, orgName: org.name, invitationSent },
       ...requestContext(req),
     });
 
-    res.status(201).json(admin);
+    res.status(201).json({ ...admin, invitationSent });
   } catch (error) {
     console.error('[superadmin] Error creating org admin:', error);
     res.status(500).json({ error: 'Error interno del servidor' });

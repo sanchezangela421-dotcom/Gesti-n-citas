@@ -5,7 +5,7 @@ import {
     BarChart3, Plus, Pencil, XCircle, Search, Download,
     Clock3, FileText, Megaphone, Brain, GraduationCap, Apple,
     CalendarDays, Trash2,
-    Scissors, ChevronDown, MapPin, RotateCcw, Archive,
+    Scissors, ChevronDown, MapPin, RotateCcw, Archive, Send,
 } from "lucide-react";
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -677,6 +677,7 @@ export function AdminDashboard() {
     const {
         getAppointments, getStats, activePeriod: storeActivePeriod,
         specialists, addSpecialist, updateSpecialist, removeSpecialist, restoreSpecialist,
+        resendSpecialistInvitation,
         users, deleteUser, restoreUser,
     } = useStore();
 
@@ -1098,11 +1099,32 @@ export function AdminDashboard() {
     const apptTotalPages = Math.ceil(filteredAppts.length / APPT_PAGE_SIZE);
     const pagedAppts = filteredAppts.slice(apptPage * APPT_PAGE_SIZE, (apptPage + 1) * APPT_PAGE_SIZE);
 
+    const [resendingSpec, setResendingSpec] = useState<string | null>(null);
+
     const handleAddSpec = async () => {
         if (!newName || !newEmail) { toast.error("Nombre y correo son obligatorios"); return; }
-        await addSpecialist({ name: newName, department: newDept, email: newEmail, shift: newShift });
-        toast.success(`Invitación enviada a ${newEmail}`);
+        const creado = await addSpecialist({ name: newName, department: newDept, email: newEmail, shift: newShift });
+
+        // Si el alta falló, addSpecialist ya mostró el motivo. Antes se seguía
+        // de largo y se anunciaba "Invitación enviada" encima de ese error,
+        // y el formulario se vaciaba como si hubiera funcionado.
+        if (!creado) return;
+
+        if (creado.invitationSent) {
+            toast.success(`Invitación enviada a ${newEmail}`);
+        } else {
+            toast.warning(`Especialista dado de alta, pero NO se pudo enviar la invitación a ${newEmail}. Reenvíala desde la lista.`, { duration: 8000 });
+        }
         setNewName(""); setNewEmail(""); setNewSched("");
+    };
+
+    const handleResendSpec = async (esp: Specialist) => {
+        setResendingSpec(esp.id);
+        const salio = await resendSpecialistInvitation(esp.id);
+        setResendingSpec(null);
+        if (salio === null) return; // el store ya avisó del fallo de la petición
+        if (salio) toast.success(`Invitación reenviada a ${esp.email}`);
+        else toast.error("Sigue sin poderse enviar. Revisa la cuenta de correo del servidor.", { duration: 8000 });
     };
 
     const handleUpdateSpec = async () => {
@@ -1356,8 +1378,18 @@ export function AdminDashboard() {
                                                     <Avatar name={esp.name} avatarUrl={esp.avatarUrl} />
                                                     <div className="flex-1 min-w-0">
                                                         {/* Sin `truncate`: el nombre se parte en dos líneas antes que
-                                                            quedar ilegible. */}
-                                                        <p className="text-slate-900 font-bold tracking-tight break-words">{esp.name}</p>
+                                                            quedar ilegible. `min-w-0` para que pueda partirse:
+                                                            como hijo de un flex no baja de su contenido sin él. */}
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <p className="text-slate-900 font-bold tracking-tight break-words min-w-0">{esp.name}</p>
+                                                            {/* Un invitado que nunca activó era indistinguible del
+                                                                resto: nada delataba que su correo no llegó. */}
+                                                            {esp.pendingActivation && (
+                                                                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-800">
+                                                                    Sin activar
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                         <div className="flex flex-wrap items-center gap-2 mt-1">
                                                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-50 border border-slate-100 text-slate-500 text-xs font-bold">
                                                                 {conf && <conf.icon className="w-3 h-3" style={{ color: conf.color }} />} {esp.department}
@@ -1383,6 +1415,13 @@ export function AdminDashboard() {
                                                         descubrir. El efecto de aparecer al pasar por encima se
                                                         conserva solo donde hay ratón. */}
                                                     <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                                        {esp.pendingActivation && (
+                                                            <button onClick={() => handleResendSpec(esp)} disabled={resendingSpec === esp.id}
+                                                                title="Reenviar invitación"
+                                                                className="p-2 text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-lg cursor-pointer transition-colors disabled:opacity-40">
+                                                                <Send className={`w-4 h-4 ${resendingSpec === esp.id ? "animate-pulse" : ""}`} />
+                                                            </button>
+                                                        )}
                                                         <button onClick={() => setEditingSpec(esp)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors"><Pencil className="w-4 h-4" /></button>
                                                         <button onClick={() => setDeactivatingSpec(esp)} title="Dar de baja"
                                                             className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"><XCircle className="w-4 h-4" /></button>
