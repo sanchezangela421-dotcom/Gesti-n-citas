@@ -139,6 +139,28 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Falta el alumno de la cita' });
     }
 
+    // Un especialista solo agenda en SU propia agenda.
+    //
+    // Antes `data.specialistId` solo se validaba contra la organizacion, y eso
+    // abria dos cosas. La menor: poner el id de un colega, con lo que la cita
+    // aparecia en la agenda ajena, a su nombre, y al paciente le llegaba un
+    // correo de confirmacion con el enlace de videollamada de ese colega.
+    //
+    // La grave: nombrarse a si mismo junto a CUALQUIER paciente de la
+    // organizacion. Esa fila es exactamente lo que patients.ts acepta como
+    // relacion de atencion —busca una cita que una a especialista y paciente,
+    // sin mirar estado, fecha ni quien la creo—, asi que con una sola peticion
+    // se abria el expediente de alguien a quien nunca se atendio, incluidas las
+    // notas que firmaron otros especialistas del departamento.
+    let callerSpecialistId: string | null = null;
+    if (createdBySpecialist) {
+      const callerSpec = await getCallerSpecialist(req);
+      if (!callerSpec || callerSpec.id !== data.specialistId) {
+        return res.status(403).json({ error: 'Solo puedes agendar en tu propia agenda.' });
+      }
+      callerSpecialistId = callerSpec.id;
+    }
+
     // Cargar alumno y especialista validando que existan dentro del alcance del usuario.
     // Derivar nombre/departamento/organización de la BD impide que el cliente los falsifique.
     // `deletedAt: null` en ambos lados: no se puede agendar con una persona dada
@@ -164,6 +186,30 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
     }
     if (student.organizationId !== specialist.organizationId) {
       return res.status(403).json({ error: 'El alumno y el especialista pertenecen a organizaciones distintas' });
+    }
+
+    // ...y solo con un paciente que YA atiende.
+    //
+    // Atarse a la propia agenda no basta. Un especialista podia emparejarse a si
+    // mismo con CUALQUIER paciente de la organizacion, y esa fila es justo lo que
+    // patients.ts acepta como relacion de atencion: con una peticion se abria un
+    // expediente ajeno, incluidas las notas de otros especialistas del depto.
+    //
+    // Esta ruta existe para el SEGUIMIENTO, como dice el comentario de arriba: la
+    // primera cita la pide el paciente o la agenda el admin. Exigir que la
+    // relacion ya exista respeta ese flujo y deja de convertir la creacion de
+    // citas en una forma de autoconcederse acceso clinico.
+    if (callerSpecialistId) {
+      const yaLoAtiende = await prisma.appointment.findFirst({
+        where: { specialistId: callerSpecialistId, studentId: student.id, ...scope },
+        select: { id: true },
+      });
+      if (!yaLoAtiende) {
+        return res.status(403).json({
+          code: 'NO_PRIOR_RELATION',
+          error: 'Solo puedes agendar seguimiento con pacientes que ya atiendes.',
+        });
+      }
     }
 
     // Rechazar citas en fecha/hora pasada o con formato inválido (una fecha
@@ -196,9 +242,16 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
       if (conflict) throw new Error('SLOT_TAKEN');
 
       if (data.parentId) {
-        const parent = await tx.appointment.findUnique({ where: { id: data.parentId } });
-        // El seguimiento debe encadenarse a una cita del mismo alumno
-        if (!parent || parent.studentId !== student.id) throw new Error('INVALID_PARENT');
+        // Acotado por organizacion: antes se cargaba por id suelto, asi que con
+        // el id de una cita de otra organizacion se podia encadenar a ella.
+        const parent = await tx.appointment.findFirst({
+          where: { id: data.parentId, ...scope },
+        });
+        // El seguimiento se encadena a una cita de ESTA misma atencion: mismo
+        // alumno Y mismo especialista.
+        if (!parent || parent.studentId !== student.id || parent.specialistId !== specialist.id) {
+          throw new Error('INVALID_PARENT');
+        }
 
         // Solo se bloquea si ya hay un seguimiento ABIERTO (pendiente o confirmado).
         // Los seguimientos ya completados no impiden agendar la siguiente sesión.
@@ -236,6 +289,26 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
           organizationId: specialist.organizationId,
         },
       });
+    });
+
+    // La cita no es solo un evento de agenda: patients.ts la consume como PRUEBA
+    // de relacion de atencion para abrir un expediente. Un dato que autoriza algo
+    // tiene que dejar rastro de quien lo creo, igual que ya lo dejan las notas.
+    writeAudit({
+      actorId: caller.id,
+      actorRole: caller.role,
+      action: 'APPOINTMENT_CREATED',
+      targetEntity: 'Appointment',
+      targetId: appointment.id,
+      organizationId: appointment.organizationId,
+      metadata: {
+        studentId: appointment.studentId,
+        specialistId: appointment.specialistId,
+        department: appointment.department,
+        date: appointment.date,
+        time: appointment.time,
+      },
+      ...requestContext(req),
     });
 
     // Email según quién agenda:

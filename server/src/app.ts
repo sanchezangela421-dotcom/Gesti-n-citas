@@ -83,6 +83,9 @@ export function createApp() {
     app.use('/api/auth/login', authLimiter);
     app.use('/api/auth/register', authLimiter);
     app.use('/api/auth/forgot-password', authLimiter);
+    // Consumir el enlace también se limita: es el paso que cambia una contraseña
+    // sin sesión previa, y hasta ahora solo lo cubría el límite general.
+    app.use('/api/auth/reset-password', authLimiter);
     // También limita el reenvío de verificación: cada request dispara un correo
     app.use('/api/auth/resend-verification', authLimiter);
   }

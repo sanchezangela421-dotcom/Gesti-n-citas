@@ -13,6 +13,7 @@ import {
 import { notifyDepartmentDisabled } from '../../services/departmentNotices';
 import { upload } from '../../middleware/upload';
 import { defaultFieldsForOrgType, normalizeFieldKey } from '../../lib/registrationFields';
+import { defaultRegistrationMode, isRegistrationMode, normalizeDomains } from '../../lib/registration';
 
 const VALID_FIELD_TYPES = ['text', 'number', 'select', 'date', 'radio'];
 
@@ -74,7 +75,18 @@ router.post('/', async (req: SuperAdminRequest, res) => {
     // configurar, que es justo el estado que produjo el problema.
     const org = await prisma.$transaction(async (tx) => {
       const created = await tx.organization.create({
-        data: { name: name.trim(), slug: slugClean, type, plan: plan ?? 'free', active: true, userRoleLabel: userRoleLabel?.trim() || 'Usuario' },
+        data: {
+          name: name.trim(),
+          slug: slugClean,
+          type,
+          plan: plan ?? 'free',
+          active: true,
+          userRoleLabel: userRoleLabel?.trim() || 'Usuario',
+          // Se deduce del giro para que el caso típico no pida configuración y,
+          // sobre todo, para que una organización nueva no nazca abierta por
+          // omisión. Se puede cambiar desde el PATCH cuando haga falta.
+          userRegistrationMode: defaultRegistrationMode(type),
+        },
       });
 
       // Catálogo de departamentos propio de la organización. Nace con los tres
@@ -127,7 +139,7 @@ router.post('/', async (req: SuperAdminRequest, res) => {
 router.patch('/:id', async (req: SuperAdminRequest, res) => {
   try {
     const id = req.params.id as string;
-    const { name, type, plan, active, userRoleLabel, departments } = req.body;
+    const { name, type, plan, active, userRoleLabel, departments, userRegistrationMode, allowedEmailDomains } = req.body;
 
     const org = await prisma.organization.findUnique({ where: { id } });
     if (!org) return res.status(404).json({ error: 'Organización no encontrada' });
@@ -138,6 +150,33 @@ router.patch('/:id', async (req: SuperAdminRequest, res) => {
     if (plan !== undefined)          data.plan          = plan;
     if (active !== undefined)        data.active        = active;
     if (userRoleLabel !== undefined) data.userRoleLabel = userRoleLabel.trim() || 'Usuario';
+
+    // Quién puede autorregistrarse en esta organización. Ver lib/registration.ts.
+    if (userRegistrationMode !== undefined) {
+      if (!isRegistrationMode(userRegistrationMode)) {
+        return res.status(400).json({
+          error: 'Modo de registro inválido. Valores válidos: open, domain, invitation.',
+        });
+      }
+      data.userRegistrationMode = userRegistrationMode;
+    }
+
+    if (allowedEmailDomains !== undefined) {
+      const dominios = normalizeDomains(allowedEmailDomains);
+      if (dominios === null) {
+        return res.status(400).json({
+          error: 'La lista de dominios no es válida. Se espera algo como ["nuevoleon.tecnm.mx"].',
+        });
+      }
+      data.allowedEmailDomains = dominios;
+    }
+
+    // Aviso, no error: el modo `domain` sin dominios deja el registro cerrado.
+    // Es un estado legítimo mientras se configura, pero conviene que quien lo
+    // deja así lo sepa, porque por fuera se ve igual que "no funciona".
+    const modoFinal = data.userRegistrationMode ?? org.userRegistrationMode;
+    const dominiosFinal = data.allowedEmailDomains ?? org.allowedEmailDomains;
+    const registroCerradoPorFaltaDeDominios = modoFinal === 'domain' && dominiosFinal.length === 0;
 
     // Departamentos contratados. Ahora la lista de nombres no reemplaza una
     // columna: activa o desactiva filas del catálogo de la organización. Solo se
@@ -192,7 +231,7 @@ router.patch('/:id', async (req: SuperAdminRequest, res) => {
       ...requestContext(req),
     });
 
-    res.json(updated);
+    res.json({ ...updated, registroCerradoPorFaltaDeDominios });
   } catch (error) {
     const msg = error instanceof Error ? error.message : '';
     if (msg === 'INVALID_DEPARTMENTS') {

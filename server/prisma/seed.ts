@@ -4,7 +4,34 @@ import { SEED_DEPARTMENTS } from '../src/lib/departments';
 
 const prisma = new PrismaClient();
 const HASH_ROUNDS = 10;
-const DEFAULT_PASS = 'Admin1234';
+
+/**
+ * Este script crea cuentas con una contraseña conocida, incluida una de
+ * superadmin que no pertenece a ninguna organización y por tanto alcanza los
+ * datos de TODOS los inquilinos. Por eso lleva los mismos dos seguros que
+ * `src/scripts/cleanup.ts`: se niega a correr en producción y no trae ninguna
+ * contraseña por defecto.
+ *
+ * El segundo seguro importa tanto como el primero, porque este script puede
+ * apuntarse a cualquier base con solo cambiar DATABASE_URL.
+ *
+ * Ojo con el hook: `package.json` registra este archivo como `prisma.seed`, pero
+ * `prisma.config.ts` sobrescribe esa propiedad y NO declara seed, así que hoy
+ * `prisma migrate dev` no lo dispara solo. Si alguna vez se añade la entrada de
+ * seed a `prisma.config.ts`, ese disparo automático vuelve — y estos dos seguros
+ * son lo único que lo separaría de una base real.
+ */
+if (process.env.NODE_ENV === 'production') {
+  console.error('⛔ Este script NO puede ejecutarse en producción: siembra cuentas con contraseña conocida.');
+  process.exit(1);
+}
+
+const DEFAULT_PASS = process.env.SEED_PASSWORD;
+if (!DEFAULT_PASS) {
+  console.error('⛔ Falta SEED_PASSWORD. Defínela antes de sembrar, p. ej.:');
+  console.error('   Genera una con:  node -e "console.log(require(`crypto`).randomBytes(12).toString(`base64url`))"');
+  process.exit(1);
+}
 
 async function main() {
   console.log('🌱 Seeding database...');
@@ -14,7 +41,7 @@ async function main() {
   // ── 1. Organization ──────────────────────────────────────────────────────────
   const org = await prisma.organization.upsert({
     where: { slug: 'tecnl' },
-    update: { userRoleLabel: 'Alumno' },
+    update: { userRoleLabel: 'Alumno', userRegistrationMode: 'domain', allowedEmailDomains: ['mail.com'] },
     create: {
       id: 'org-tecnl-001',
       name: 'TECNL',
@@ -23,6 +50,11 @@ async function main() {
       plan: 'free',
       active: true,
       userRoleLabel: 'Alumno',
+      // Es una escuela, así que el correo institucional identifica al alumnado.
+      // En desarrollo el "dominio institucional" es el de las cuentas sembradas,
+      // para que el registro se pueda probar sin configurar nada más.
+      userRegistrationMode: 'domain',
+      allowedEmailDomains: ['mail.com'],
     },
   });
 
@@ -157,12 +189,15 @@ async function main() {
   });
   console.log(`✔ Alumno: ${student.email}`);
 
-  console.log('\n✅ Seed completado. Credenciales de prueba:');
+  // Se listan las cuentas pero NO la contraseña: ya la eligió quien corre el
+  // script, y repetirla aquí la deja en el historial de la terminal y en los
+  // registros de CI.
+  console.log('\n✅ Seed completado. Cuentas sembradas (contraseña: la de SEED_PASSWORD):');
   console.log('──────────────────────────────────────────────');
-  console.log(`  superadmin@gestioncitas.app  /  ${DEFAULT_PASS}`);
-  console.log(`  admin@mail.com               /  ${DEFAULT_PASS}`);
-  console.log(`  especialista@mail.com        /  ${DEFAULT_PASS}`);
-  console.log(`  alumno@mail.com              /  ${DEFAULT_PASS}`);
+  console.log('  superadmin@gestioncitas.app');
+  console.log('  admin@mail.com');
+  console.log('  especialista@mail.com');
+  console.log('  alumno@mail.com');
   console.log('──────────────────────────────────────────────');
 }
 

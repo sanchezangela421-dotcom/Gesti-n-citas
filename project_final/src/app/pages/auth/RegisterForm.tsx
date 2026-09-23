@@ -13,6 +13,11 @@ interface OrgOption {
     type: string;
     userRoleLabel: string;
     logoUrl?: string | null;
+    // Quién puede registrarse aquí: "open" | "domain" | "invitation".
+    // Viene del endpoint público para poder decirlo ANTES de que la persona
+    // llene el formulario entero y se lleve el rechazo al final.
+    userRegistrationMode?: string;
+    allowedEmailDomains?: string[];
 }
 
 interface RegField {
@@ -221,6 +226,11 @@ export function RegisterForm({ onSwitchToLogin }: { onSwitchToLogin: () => void 
     };
 
     const roleLabel = selectedOrg?.userRoleLabel ?? "usuario";
+    const soloPorInvitacion = selectedOrg?.userRegistrationMode === "invitation";
+    const dominiosAceptados =
+        selectedOrg?.userRegistrationMode === "domain" && selectedOrg.allowedEmailDomains?.length
+            ? selectedOrg.allowedEmailDomains.map(d => `@${d}`).join(" o ")
+            : null;
 
     return (
         <div className="min-h-screen flex bg-slate-50 dark:bg-slate-950 relative overflow-hidden font-sans">
@@ -322,11 +332,25 @@ export function RegisterForm({ onSwitchToLogin }: { onSwitchToLogin: () => void 
                             </div>
 
                             {/* En desktop: org selector refleja la elección del panel izquierdo */}
-                            {selectedOrg && (
+                            {selectedOrg && !soloPorInvitacion && (
                                 <div className="hidden lg:flex items-center gap-2 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
                                     <Building2 className="w-4 h-4 text-emerald-600 shrink-0" />
                                     <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
                                         {selectedOrg.name} — registrándote como <strong>{roleLabel}</strong>
+                                        {dominiosAceptados && <> · usa tu correo <strong>{dominiosAceptados}</strong></>}
+                                    </span>
+                                </div>
+                            )}
+
+                            {/* Se dice ANTES, no al enviar: llenar el formulario entero
+                                para descubrir que esta organización no admite altas es
+                                la peor forma de enterarse. */}
+                            {soloPorInvitacion && (
+                                <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
+                                    <Building2 className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                                    <span className="text-sm text-amber-800 dark:text-amber-200">
+                                        <strong>{selectedOrg?.name}</strong> no acepta registro público.
+                                        Pide una invitación a su administrador.
                                     </span>
                                 </div>
                             )}
@@ -404,7 +428,7 @@ export function RegisterForm({ onSwitchToLogin }: { onSwitchToLogin: () => void 
                                 </div>
                             </div>
 
-                            <button type="submit" disabled={loading || !selectedOrgId}
+                            <button type="submit" disabled={loading || !selectedOrgId || soloPorInvitacion}
                                 className="w-full py-4 mt-6 bg-gradient-to-r from-emerald-600 to-teal-500 text-white rounded-xl font-semibold shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 hover:-translate-y-0.5 transition-all text-base cursor-pointer flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0">
                                 {loading ? <><RefreshCw className="w-5 h-5 animate-spin" /> Registrando...</> : "Registrarse"}
                             </button>

@@ -9,7 +9,14 @@ router.get('/organizations', async (_req, res) => {
   try {
     const orgs = await prisma.organization.findMany({
       where: { active: true },
-      select: { id: true, name: true, slug: true, type: true, userRoleLabel: true, logoUrl: true },
+      select: {
+        id: true, name: true, slug: true, type: true, userRoleLabel: true, logoUrl: true,
+        // El formulario de registro necesita saber si esta organización acepta
+        // altas y con qué correo, para decirlo antes de que la persona llene
+        // todo y se lleve un rechazo al final. Ninguno de los dos es secreto:
+        // el modo es una política y los dominios son públicos por naturaleza.
+        userRegistrationMode: true, allowedEmailDomains: true,
+      },
       orderBy: { name: 'asc' },
     });
     res.json(orgs);

@@ -53,8 +53,8 @@ export default defineConfig({
       DATABASE_URL,
       // Secreto fijo y propio de las pruebas: no depende del .env del desarrollador
       JWT_SECRET: 'test-jwt-secret-not-used-anywhere-else',
-      // Sin restricción de dominio ni de IP, para no acoplar los tests al entorno
-      ALLOWED_EMAIL_DOMAIN: '',
+      // Sin restricción de IP, para no acoplar los tests al entorno. El dominio
+      // de correo ya no es una variable: lo decide cada organización.
       SUPERADMIN_ALLOWED_IPS: '',
       FRONTEND_URL: 'http://localhost:5173',
       BACKEND_URL: 'http://localhost:3000',

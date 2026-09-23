@@ -20,21 +20,29 @@ enum UserRole {
 // ── Platform models ────────────────────────────────────────────────────────────
 
 model Organization {
-  id            String   @id @default(uuid())
-  name          String
-  slug          String   @unique
-  type          String // "school" | "hospital" | "company"
-  plan          String   @default("free")
-  active        Boolean  @default(true)
-  userRoleLabel String   @default("Usuario") // "Alumno" | "Paciente" | "Empleado"
+  id                   String   @id @default(uuid())
+  name                 String
+  slug                 String   @unique
+  type                 String // "school" | "hospital" | "company"
+  plan                 String   @default("free")
+  active               Boolean  @default(true)
+  userRoleLabel        String   @default("Usuario") // "Alumno" | "Paciente" | "Empleado"
+  // Cómo entran los usuarios finales: "open" | "domain" | "invitation".
+  // Ver src/lib/registration.ts. El default 'open' conserva el comportamiento
+  // previo a la migración 20260923000000; las orgs nuevas lo reciben explícito
+  // según su giro desde la ruta de creación, no por este default.
+  userRegistrationMode String   @default("open")
+  // Dominios aceptados en modo "domain", y comprobación opcional al alta de
+  // personal. Vacío en modo "domain" = nadie pasa hasta configurarlos.
+  allowedEmailDomains  String[] @default([])
   // Departamentos contratados. El catálogo es FIJO a nivel de plataforma (ver
   // lib/departments.ts); aquí solo se guarda cuáles tiene activos cada
   // organización. Por eso es una lista de nombres y no una tabla con relaciones:
   // no hay departamentos propios que modelar.
-  departments   String[] @default(["Psicología", "Tutorías", "Nutrición"])
-  logoUrl       String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  departments          String[] @default(["Psicología", "Tutorías", "Nutrición"])
+  logoUrl              String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   users              User[]
   specialists        Specialist[]

@@ -19,6 +19,9 @@ interface Org {
     plan: string;
     active: boolean;
     userRoleLabel: string;
+    // Cómo entran los usuarios finales: "open" | "domain" | "invitation"
+    userRegistrationMode: string;
+    allowedEmailDomains: string[];
     departments: string[];
     logoUrl?: string | null;
     createdAt: string;
@@ -187,7 +190,10 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
 
     // ── Editar org modal ──
     const [editOrg, setEditOrg]     = useState<Org | null>(null);
-    const [editForm, setEditForm]   = useState({ name: "", type: "school", plan: "free", userRoleLabel: "Usuario" });
+    const [editForm, setEditForm]   = useState({
+        name: "", type: "school", plan: "free", userRoleLabel: "Usuario",
+        userRegistrationMode: "open", allowedEmailDomains: "",
+    });
     const [logoFile, setLogoFile]   = useState<File | null>(null);
     const [logoUploading, setLogoUploading] = useState(false);
     const logoInputRef = useRef<HTMLInputElement>(null);
@@ -366,7 +372,17 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                 headers: superAdminHeaders(),
                 // Sin `departments`: contratar y retirar se hace en el gestor del
                 // catálogo, que además valida que el nombre exista en él.
-                body: JSON.stringify({ name: editForm.name.trim(), type: editForm.type, plan: editForm.plan, userRoleLabel: editForm.userRoleLabel }),
+                body: JSON.stringify({
+                    name: editForm.name.trim(),
+                    type: editForm.type,
+                    plan: editForm.plan,
+                    userRoleLabel: editForm.userRoleLabel,
+                    userRegistrationMode: editForm.userRegistrationMode,
+                    // Se escriben separados por coma y el servidor los normaliza
+                    // (minúsculas, sin arroba, sin repetidos).
+                    allowedEmailDomains: editForm.allowedEmailDomains
+                        .split(",").map(d => d.trim()).filter(Boolean),
+                }),
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
@@ -785,14 +801,19 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
 
             {/* Top bar */}
             <header className="border-b border-border bg-card/80 backdrop-blur sticky top-0 z-30">
-                <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <ShieldCheck className="w-5 h-5 text-rose-700" />
-                        <span className="font-bold text-foreground tracking-tight">Super Admin</span>
-                        <span className="text-muted-foreground">|</span>
-                        <span className="text-xs text-muted-foreground font-mono">{user?.email}</span>
+                {/* En un teléfono el correo del propio superadmin ocupaba 178 de los
+                    393px de ancho y comprimía el título hasta partirlo en dos líneas
+                    dentro de una barra de 56px, dejando "Salir" pegado al borde. Es el
+                    dato menos útil de la pantalla para quien ya inició sesión con él,
+                    así que por debajo de `sm` no se muestra. */}
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                        <ShieldCheck className="w-5 h-5 text-rose-700 shrink-0" />
+                        <span className="font-bold text-foreground tracking-tight whitespace-nowrap">Super Admin</span>
+                        <span className="text-muted-foreground hidden sm:inline">|</span>
+                        <span className="text-xs text-muted-foreground font-mono truncate hidden sm:inline">{user?.email}</span>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0">
                         <button
                             onClick={toggleTheme}
                             title={dark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
@@ -819,12 +840,17 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                 {/* El contenedor va en `muted` y la pestaña activa en `card`: antes las
                     dos usaban el MISMO token, asi que la activa solo se distinguia por
                     una sombra minima — blanco sobre blanco en claro. */}
-                <nav className="flex gap-1 bg-muted p-1 rounded-xl w-fit">
+                {/* `w-fit` la dejaba de 524px fijos: a 393px la página entera arrastraba
+                    155px de scroll horizontal y "Auditoría" quedaba fuera de la pantalla,
+                    inalcanzable sin deslizar de lado. Ahora las pestañas se reparten en dos
+                    filas cuando no caben, en vez de salirse: deslizar de lado para llegar a
+                    una sección no se descubre solo. */}
+                <nav className="flex flex-wrap gap-1 bg-muted p-1 rounded-xl sm:w-fit">
                     {TABS.map(({ key, label, icon: Icon }) => (
                         <button
                             key={key}
                             onClick={() => setTab(key)}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                            className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
                                 tab === key
                                     ? "bg-card text-foreground shadow-sm"
                                     : "text-muted-foreground hover:text-foreground hover:bg-card/50"
@@ -916,13 +942,15 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                     return (
                                         <div key={org.id} className={`bg-card rounded-xl p-4 border ${org.active ? "border-border" : "border-border opacity-60"}`}>
                                             <div className="flex items-center justify-between gap-4 flex-wrap">
-                                                <div className="flex items-center gap-3">
-                                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${org.active ? "bg-indigo-100" : "bg-muted"}`}>
+                                                <div className="flex items-center gap-3 min-w-0">
+                                                    <div className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center ${org.active ? "bg-indigo-100" : "bg-muted"}`}>
                                                         <Icon className={`w-5 h-5 ${org.active ? "text-indigo-700" : "text-muted-foreground"}`} />
                                                     </div>
-                                                    <div>
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="font-semibold text-foreground">{org.name}</span>
+                                                    <div className="min-w-0">
+                                                        {/* `flex-wrap`: el nombre, el slug y la insignia del
+                                                            plan en una sola línea desbordaban la tarjeta. */}
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <span className="font-semibold text-foreground break-words min-w-0">{org.name}</span>
                                                             <span className="text-xs text-muted-foreground font-mono">/{org.slug}</span>
                                                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PLAN_COLOR[org.plan] ?? PLAN_COLOR.free}`}>{org.plan}</span>
                                                             {!org.active && <span className="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 font-medium">Inactiva</span>}
@@ -930,13 +958,16 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                                         <p className="text-xs text-muted-foreground mt-0.5">{ORG_TYPE_LABEL[org.type] ?? org.type} · Creada {fmtDate(org.createdAt)}</p>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-4">
+                                                {/* Este bloque medía 540px y NO se envolvía: era el
+                                                    segundo desbordamiento de la pantalla, aparte de
+                                                    la barra de pestañas. */}
+                                                <div className="flex items-center gap-4 flex-wrap">
                                                     <div className="flex gap-4 text-center">
                                                         <div><p className="text-lg font-bold text-foreground">{org._count.users}</p><p className="text-xs text-muted-foreground">usuarios</p></div>
                                                         <div><p className="text-lg font-bold text-foreground">{org._count.specialists}</p><p className="text-xs text-muted-foreground">especialistas</p></div>
                                                         <div><p className="text-lg font-bold text-foreground">{org._count.appointments}</p><p className="text-xs text-muted-foreground">citas</p></div>
                                                     </div>
-                                                    <div className="flex gap-2">
+                                                    <div className="flex gap-2 flex-wrap">
                                                         <button
                                                             onClick={() => { setDesignOrg(org); setAdminForm({ name: "", email: "", password: "" }); }}
                                                             className="text-xs px-3 py-1.5 rounded-lg bg-teal-100 text-teal-700 dark:text-teal-400 hover:bg-teal-200 dark:hover:bg-teal-900/70 transition-colors font-medium"
@@ -957,20 +988,25 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                                         >
                                                             Campos
                                                         </button>
-                                                        <button
-                                                            onClick={() => { setEditOrg(org); setEditForm({ name: org.name, type: org.type, plan: org.plan, userRoleLabel: org.userRoleLabel ?? "Usuario" }); setLogoFile(null); }}
-                                                            className="p-1.5 rounded-lg text-muted-foreground hover:text-indigo-700 hover:bg-indigo-50 transition-colors"
-                                                            title="Editar"
-                                                        >
-                                                            <Pencil className="w-4 h-4" />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => toggleOrgActive(org)}
-                                                            className={`p-1.5 rounded-lg transition-colors ${org.active ? "text-muted-foreground hover:text-rose-700 hover:bg-rose-50" : "text-green-700 dark:text-green-400 hover:bg-green-50"}`}
-                                                            title={org.active ? "Desactivar" : "Activar"}
-                                                        >
-                                                            {org.active ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
-                                                        </button>
+                                                        {/* Los dos iconos se envuelven JUNTOS: sueltos, cuando la
+                                                            fila no alcanzaba quedaba uno huérfano en su propio
+                                                            renglón, separado del grupo al que pertenece. */}
+                                                        <div className="flex gap-2">
+                                                            <button
+                                                                onClick={() => { setEditOrg(org); setEditForm({ name: org.name, type: org.type, plan: org.plan, userRoleLabel: org.userRoleLabel ?? "Usuario", userRegistrationMode: org.userRegistrationMode ?? "open", allowedEmailDomains: (org.allowedEmailDomains ?? []).join(", ") }); setLogoFile(null); }}
+                                                                className="p-1.5 rounded-lg text-muted-foreground hover:text-indigo-700 hover:bg-indigo-50 transition-colors"
+                                                                title="Editar"
+                                                            >
+                                                                <Pencil className="w-4 h-4" />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => toggleOrgActive(org)}
+                                                                className={`p-1.5 rounded-lg transition-colors ${org.active ? "text-muted-foreground hover:text-rose-700 hover:bg-rose-50" : "text-green-700 dark:text-green-400 hover:bg-green-50"}`}
+                                                                title={org.active ? "Desactivar" : "Activar"}
+                                                            >
+                                                                {org.active ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1008,7 +1044,12 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                             </div>
                         </div>
 
-                        <div className="bg-card rounded-xl overflow-hidden">
+                        {/* La tabla solo a partir de `sm`. Por debajo, su ancho mínimo de
+                            contenido (345px) no cabía en la tarjeta y `overflow-hidden` lo
+                            RECORTABA en silencio: 15px a 393px y 48px a 360px, justo la
+                            columna de acciones — con el botón de reenviar invitación dentro.
+                            No había scroll con el que llegar a ellos. */}
+                        <div className="bg-card rounded-xl overflow-hidden hidden sm:block">
                             <table className="w-full text-sm">
                                 <thead>
                                     <tr className="border-b border-border">
@@ -1083,16 +1124,75 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                                     ))}
                                 </tbody>
                             </table>
-                            {usersTotal > 50 && (
-                                <div className="flex items-center justify-between px-4 py-3 border-t border-border text-xs text-muted-foreground">
-                                    <span>{(usersPage - 1) * 50 + 1}–{Math.min(usersPage * 50, usersTotal)} de {usersTotal}</span>
-                                    <div className="flex gap-2">
-                                        <button disabled={usersPage <= 1} onClick={() => { setUsersPage(p => p - 1); fetchUsers(usersPage - 1, userOrgFilter); }} className="px-2 py-1 rounded bg-muted disabled:opacity-40">Anterior</button>
-                                        <button disabled={usersPage * 50 >= usersTotal} onClick={() => { setUsersPage(p => p + 1); fetchUsers(usersPage + 1, userOrgFilter); }} className="px-2 py-1 rounded bg-muted disabled:opacity-40">Siguiente</button>
+                        </div>
+
+                        {/* Tarjetas en teléfono, mismo criterio que el panel del admin:
+                            nada que deslizar de lado y las acciones siempre alcanzables. */}
+                        <div className="sm:hidden space-y-3">
+                            {usersLoading ? (
+                                <p className="text-center py-8 text-muted-foreground">Cargando...</p>
+                            ) : users.length === 0 ? (
+                                <p className="text-center py-8 text-muted-foreground">Sin usuarios</p>
+                            ) : users.map(u => (
+                                <div key={u.id} className="bg-card rounded-xl border border-border p-4">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <p className="font-medium text-foreground break-words min-w-0">{u.name}</p>
+                                                {!u.emailVerified && (
+                                                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                                                        Sin activar
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {/* `break-all`: un correo largo no tiene espacios donde partirse. */}
+                                            <p className="text-xs text-muted-foreground break-all mt-0.5">{u.email}</p>
+                                        </div>
+                                        <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-medium ${ROLE_COLOR[u.role] ?? "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>{u.role}</span>
+                                    </div>
+                                    <div className="flex items-end justify-between gap-2 mt-3 pt-3 border-t border-border/50">
+                                        <div className="text-xs text-muted-foreground min-w-0">
+                                            <p className="break-words">{u.organization?.name ?? <span className="italic">Sin organización</span>}</p>
+                                            <p className="mt-0.5">{fmtDate(u.createdAt)}</p>
+                                        </div>
+                                        <div className="flex items-center gap-1 shrink-0">
+                                            <button
+                                                onClick={() => { setEditUser(u); setEditUserForm({ name: u.name, email: u.email, role: u.role, organizationId: u.organizationId ?? "", password: "" }); }}
+                                                className="p-2 rounded-lg text-muted-foreground hover:text-indigo-700 hover:bg-indigo-50 transition-colors"
+                                                title="Editar"
+                                            ><Pencil className="w-4 h-4" /></button>
+                                            {!u.emailVerified && (
+                                                <button
+                                                    onClick={() => resendInvitation(u)}
+                                                    disabled={resendingId === u.id}
+                                                    className="p-2 rounded-lg text-muted-foreground hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-colors disabled:opacity-40"
+                                                    title="Reenviar invitación"
+                                                ><Send className={`w-4 h-4 ${resendingId === u.id ? "animate-pulse" : ""}`} /></button>
+                                            )}
+                                            {u.role !== "superadmin" && (
+                                                <button
+                                                    onClick={() => setDeleteUserId(u.id)}
+                                                    className="p-2 rounded-lg text-muted-foreground hover:text-rose-700 hover:bg-rose-50 transition-colors"
+                                                    title="Dar de baja"
+                                                ><PowerOff className="w-4 h-4" /></button>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
-                            )}
+                            ))}
                         </div>
+
+                        {/* Fuera de la tabla a propósito: dentro, desaparecía junto con
+                            ella en teléfono y no había forma de pasar de página. */}
+                        {usersTotal > 50 && (
+                            <div className="flex items-center justify-between gap-2 flex-wrap px-4 py-3 bg-card rounded-xl border border-border text-xs text-muted-foreground">
+                                <span>{(usersPage - 1) * 50 + 1}–{Math.min(usersPage * 50, usersTotal)} de {usersTotal}</span>
+                                <div className="flex gap-2">
+                                    <button disabled={usersPage <= 1} onClick={() => { setUsersPage(p => p - 1); fetchUsers(usersPage - 1, userOrgFilter); }} className="px-2 py-1 rounded bg-muted disabled:opacity-40">Anterior</button>
+                                    <button disabled={usersPage * 50 >= usersTotal} onClick={() => { setUsersPage(p => p + 1); fetchUsers(usersPage + 1, userOrgFilter); }} className="px-2 py-1 rounded bg-muted disabled:opacity-40">Siguiente</button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -1565,6 +1665,38 @@ export function SuperAdminDashboard({ user, onLogout }: Props) {
                     <div className="space-y-4">
                         <Field label="Nombre" value={editForm.name} onChange={v => setEditForm(f => ({ ...f, name: v }))} placeholder="TECNL" />
                         <Field label="Cómo se llaman los usuarios" value={editForm.userRoleLabel} onChange={v => setEditForm(f => ({ ...f, userRoleLabel: v }))} placeholder="Alumno / Paciente / Empleado" />
+
+                        {/* Quién puede autorregistrarse. No es lo mismo una escuela,
+                            donde el correo institucional identifica al alumnado, que un
+                            hospital, donde el paciente llega con el correo que tenga. */}
+                        <div>
+                            <label className="block mb-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Quién puede registrarse</label>
+                            <select
+                                value={editForm.userRegistrationMode}
+                                onChange={e => setEditForm(f => ({ ...f, userRegistrationMode: e.target.value }))}
+                                className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-indigo-500"
+                            >
+                                <option value="open">Cualquiera — con el correo que tenga</option>
+                                <option value="domain">Solo con un correo de los dominios de abajo</option>
+                                <option value="invitation">Nadie — solo el admin da de alta</option>
+                            </select>
+                        </div>
+
+                        {editForm.userRegistrationMode === "domain" && (
+                            <div>
+                                <Field
+                                    label="Dominios de correo aceptados"
+                                    value={editForm.allowedEmailDomains}
+                                    onChange={v => setEditForm(f => ({ ...f, allowedEmailDomains: v }))}
+                                    placeholder="nuevoleon.tecnm.mx, alumnos.tecnm.mx"
+                                />
+                                <p className={`mt-1.5 text-xs ${editForm.allowedEmailDomains.trim() ? "text-muted-foreground" : "text-amber-600 dark:text-amber-400"}`}>
+                                    {editForm.allowedEmailDomains.trim()
+                                        ? "Separados por coma. Se guardan en minúsculas y sin la arroba."
+                                        : "Sin dominios, nadie podrá registrarse en esta organización."}
+                                </p>
+                            </div>
+                        )}
 
                         {/* Los departamentos dejaron de ser tres casillas fijas: cada
                             organización tiene su catálogo, y se gestiona en su propia

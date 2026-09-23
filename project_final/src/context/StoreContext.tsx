@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, createContext, useContext } from "react";
+import { useAuth } from "./AuthContext";
 import { localISODate } from "../utils/date";
 import { API, API_BASE, authHeaders, getImageUrl } from "../lib/api";
 import type { StoreContextType, ReportPeriod } from "../types";
@@ -16,6 +17,11 @@ export { API_BASE, getImageUrl };
 export const StoreContext = createContext<StoreContextType | null>(null);
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
+  // El rol decide que se le pide al servidor. `AuthProvider` envuelve a este
+  // provider en main.tsx, asi que aqui ya esta disponible.
+  const { user } = useAuth();
+  const role = user?.role;
+
   // ── Domain slices ───────────────────────────────────────
   const usersStore         = useUsersStore();
   const specialistsStore   = useSpecialistsStore(usersStore.setUsers);
@@ -43,11 +49,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const fetchStats = useCallback(async () => {
     if (!localStorage.getItem("token")) return;
+    // Solo lo consume el panel de gestion, y ahora el servidor tambien lo exige:
+    // /stats agrega citas de terceros, incluido el motivo que cada paciente
+    // escribio. Sin este filtro, el panel de alumno se ganaria un 403 en cada
+    // carga y en cada vuelta del sondeo de cinco minutos.
+    if (role !== "admin" && role !== "superadmin") return;
     try {
       const res = await fetch(`${API}/stats`, { headers: authHeaders() });
       if (res.ok) setRealStats(await res.json());
     } catch { /* use local fallback */ }
-  }, []);
+  }, [role]);
 
   const getStats = useCallback(() => {
     if (realStats) return realStats;

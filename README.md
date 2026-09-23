@@ -177,7 +177,8 @@ JWT_SECRET=cambia-esto-por-una-clave-segura
 PORT=3000
 
 # Opcional: dominio permitido para correos institucionales
-ALLOWED_EMAIL_DOMAIN=tuinstitucion.edu.mx
+# (el dominio de correo ya no es una variable: lo configura cada
+#  organización desde el panel del superadmin)
 
 # Opcional: URL del frontend (para CORS)
 FRONTEND_URL=http://localhost:5173

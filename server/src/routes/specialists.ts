@@ -7,6 +7,7 @@ import { orgScope } from '../lib/orgScope';
 import { sanitizeOptionalHttpUrl } from '../lib/urls';
 import { contractedDepartmentNames, isDepartmentContracted } from '../lib/departments';
 import { localISODate } from '../lib/dates';
+import { emailDomain } from '../lib/registration';
 import { tryAccountInvitation } from '../services/email';
 import { cancelOpenAppointments, notifyCancelledByDeactivation } from '../services/deactivation';
 import { writeAudit, requestContext } from '../services/auditLogger';
@@ -99,11 +100,25 @@ router.post('/', verifyToken as any, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'El formato del correo no es válido' });
     }
 
-    const allowedDomain = process.env.ALLOWED_EMAIL_DOMAIN;
-    if (allowedDomain) {
-      const emailDomain = email.split('@')[1];
-      if (emailDomain !== allowedDomain) {
-        return res.status(400).json({ error: `Solo se permiten correos institucionales (@${allowedDomain})` });
+    // El alta de personal no pasa por el modo de registro: aquí hay un admin
+    // autenticado que ya decidió a quién está contratando, y su criterio es la
+    // respuesta a quién pertenece a la organización. Los dominios sí se
+    // comprueban, pero solo si la organización los declaró.
+    if (req.user?.organizationId) {
+      const org = await prisma.organization.findUnique({
+        where: { id: req.user.organizationId },
+        select: { allowedEmailDomains: true },
+      });
+      const dominios = org?.allowedEmailDomains ?? [];
+      if (dominios.length > 0) {
+        const dominio = emailDomain(email);
+        if (!dominio || !dominios.includes(dominio)) {
+          const lista = dominios.map(d => `@${d}`).join(', ');
+          return res.status(400).json({
+            code: 'DOMAIN_NOT_ALLOWED',
+            error: `El correo del personal debe ser ${lista}.`,
+          });
+        }
       }
     }
 

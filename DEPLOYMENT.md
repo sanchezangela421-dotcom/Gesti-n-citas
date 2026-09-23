@@ -69,7 +69,9 @@ DATABASE_URL="file:/var/www/citas-tecnl/data/prod.db"
 JWT_SECRET="<el valor generado con node -e crypto>"
 
 # Dominio institucional permitido para registro de alumnos
-ALLOWED_EMAIL_DOMAIN="nuevoleon.tecnm.mx"
+# ALLOWED_EMAIL_DOMAIN se retiró en favor del modo de registro por
+# organización. TECNL se configura desde el panel del superadmin:
+# modo "domain" + dominio nuevoleon.tecnm.mx
 
 # URLs públicas del VPS
 BACKEND_URL="https://api.tudominio.mx"
@@ -403,8 +405,13 @@ cd /var/www/citas-tecnl/server
 # Borrar migraciones viejas de SQLite
 rm -rf prisma/migrations
 
-# Crear nueva migración para PostgreSQL
-npx prisma migrate dev --name initial
+# Aplicar las migraciones.
+#
+# NUNCA `prisma migrate dev` en un servidor: ese comando ejecuta el hook
+# `prisma.seed` de server/package.json, que siembra cuentas de prueba —incluida
+# una de superadmin con alcance a todas las organizaciones— sin avisar.
+# `migrate deploy` aplica las mismas migraciones y no dispara el hook.
+npx prisma migrate deploy
 
 # Regenerar cliente Prisma
 npx prisma generate
@@ -441,7 +448,7 @@ chmod +x /usr/local/bin/backup-citas.sh
 
 ### Backend `.env`
 - [ ] `DATABASE_URL` apunta a `/var/www/citas-tecnl/data/prod.db` (SQLite) o PostgreSQL
-- [ ] `ALLOWED_EMAIL_DOMAIN` = `nuevoleon.tecnm.mx`
+- [ ] TECNL configurada en el panel del superadmin: modo de registro `domain` y dominio `nuevoleon.tecnm.mx`
 - [ ] `BACKEND_URL` = URL pública real (https)
 - [ ] `FRONTEND_URL` = URL pública real (https)
 - [ ] `UPLOADS_PATH` = `/var/www/citas-tecnl/uploads`

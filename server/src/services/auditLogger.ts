@@ -158,6 +158,10 @@ export const LOGIN_FAILURE = {
   ACCOUNT_DEACTIVATED: 'account_deactivated',
   ORG_SUSPENDED: 'org_suspended',
   EMAIL_NOT_VERIFIED: 'email_not_verified',
+  // El cuerpo no traía credenciales utilizables (p. ej. un objeto en vez de una
+  // cadena). Se registra aparte porque no es alguien equivocándose de
+  // contraseña: es un cliente que no es el formulario.
+  MALFORMED_CREDENTIALS: 'malformed_credentials',
 } as const;
 
 /**

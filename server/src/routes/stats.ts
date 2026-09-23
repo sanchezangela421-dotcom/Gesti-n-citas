@@ -169,6 +169,17 @@ function buildBlock(
 // GET /api/stats?periodId=<id>
 // Sin periodId devuelve todos los períodos; "unassigned" devuelve las citas sin período.
 router.get('/', verifyToken as any, async (req: AuthRequest, res) => {
+  // Esto agrega citas de TERCEROS: totales de toda la organizacion, la
+  // demografia de quienes asistieron y `charts.motivos`, que es el texto libre
+  // que cada paciente escribio al agendar, separado por departamento.
+  //
+  // `orgScope` acota a la organizacion, no al llamante, asi que sin esta guarda
+  // cualquier alumno autenticado recibia lo mismo que el administrador. Mismo
+  // criterio que el otro router de reportes (periods.ts).
+  if (req.user?.role !== 'admin' && req.user?.role !== 'superadmin') {
+    return res.status(403).json({ error: 'Sin permisos' });
+  }
+
   try {
     const { periodId } = req.query;
     const scope = orgScope(req.user);
